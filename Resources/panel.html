@@ -37,7 +37,7 @@ body {
 .y { background: var(--yellow); color: var(--bg); } .gr { background: var(--green); color: var(--bg); }
 /* Upper elbow joins the orange masthead to the segmented port-side rail. */
 #header { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 100px; grid-template-rows: 28px 28px; gap: 6px; padding-left: 64px; margin-bottom: 8px; height: 62px; }
-#header::before { content: ""; position: absolute; top: 0; left: 0; width: 64px; height: 62px; border-left: 42px solid var(--orange); border-top: 28px solid var(--orange); border-top-left-radius: 58px 48px; pointer-events: none; }
+#header::before { content: ""; position: absolute; top: 0; left: 0; width: 64px; height: 62px; border-left: 42px solid #4455ff; border-top: 28px solid #4455ff; border-top-left-radius: 58px 48px; pointer-events: none; }
 #header .title { background: var(--orange); color: var(--bg); display: flex; align-items: center; padding: 0 10px; font-family: var(--display); font-size: 25px; font-weight: 700; letter-spacing: .12em; }
 #header .header-label { background: var(--lavender); color: var(--bg); border-radius: 0 14px 14px 0; display: flex; align-items: center; justify-content: center; font-family: var(--display); font-size: 12px; letter-spacing: .06em; }
 #header .model { background: var(--peach); color: var(--bg); display: flex; align-items: center; padding: 0 8px; font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
@@ -76,7 +76,7 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 .btn:hover { filter: brightness(1.13); }
 .btn:active { filter: brightness(.88); }
 .btn:focus-visible { outline: 2px solid var(--white); outline-offset: 3px; }
-#footer { position: relative; display: grid; grid-template-columns: repeat(3, max-content) 1fr; gap: 5px; align-items: center; margin-top: 2px; padding: 0 0 23px 64px; }
+#footer { position: relative; display: grid; grid-template-columns: repeat(3, max-content) 1fr; gap: 5px; align-items: center; margin-top: 6px; padding: 0 0 23px 64px; }
 #footer::before { content: ""; position: absolute; left: 0; bottom: 0; width: 64px; height: 58px; border-left: 42px solid #4455ff; border-bottom: 12px solid #4455ff; border-bottom-left-radius: 58px 38px; pointer-events: none; }
 #footer::after { content: ""; position: absolute; left: 64px; right: 0; bottom: 0; height: 12px; background: #4455ff; border-radius: 0 6px 6px 0; }
 #footNote { color: var(--gray); font-size: 9px; letter-spacing: .08em; }
