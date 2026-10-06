@@ -66,10 +66,13 @@ Point any OpenAI-compatible client at `http://127.0.0.1:8123/v1` with the key ab
   the real elapsed time between samples. DFlash-2 draft tokens that fail verification do
   not count, so it matches the per-request tok/s in the completion log.
 - The Prefill cell measures work, not prompt size: progress = tokens actually prefilled
-  ÷ the estimated uncached tail (from the recent requests' cache hit rates, shown as a
-  `~NN% cached` chip), so a 98%-cached prompt fills quickly and a fully cached one reads
-  0% *with the reason visible*. Mostly-uncached prompts fall back to the classic
-  whole-input sweep.
+  ÷ the request's uncached tail. The tail is *measured* from the engine's own prefix
+  lookup for that request (`cache.kv_hit_tokens`), so a 98%-cached prompt sweeps 0→100%
+  across its small tail instead of sitting flat at ~2%; until the lookup resolves (and
+  for fully cold prompts) it falls back to the recent requests' cache hit rates (shown
+  as a `~NN% cached` chip), and work beyond the estimate falls back to the classic
+  whole-input sweep. The last sample is kept for up to 15 s after prefill ends, so the
+  readout survives the short prefill phase of a cached turn.
 - The engine port is the ground truth: the app only *launches* a server when the port is
   not actually serving, and only treats it as *gone* when the port stops answering.
 - No launchd persistence: quit the app and supervision goes with it (the server keeps

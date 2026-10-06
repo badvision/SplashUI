@@ -216,6 +216,7 @@ final class LogTail {
         var input: Int
         var start: Date
         var prefillBase: Double?
+        var kvHitBase: Double?
     }
     struct DoneReq {
         var id: Int; var input: Int; var cached: Int; var output: Int
@@ -273,7 +274,7 @@ final class LogTail {
             guard let id = Int(parts.last ?? ""), id > 0 else { return }
             var input = 0
             for p in parts { if let v = labeled(p, "input") { input = num(v) } }
-            active[id] = ActiveReq(id: id, input: input, start: Date(), prefillBase: nil)
+            active[id] = ActiveReq(id: id, input: input, start: Date(), prefillBase: nil, kvHitBase: nil)
         } else if first.hasSuffix("Done") || first.hasSuffix("Cancelled") {
             var d = DoneReq(id: 0, input: 0, cached: 0, output: 0, ttft: 0, tps: nil)
             var id: Int?
@@ -577,8 +578,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         // target_prefill_rows counter is a draft-context snapshot that does not move
         // per request, which is why the old readout sat at 0%.)
         let prefilledTotal = metrics["splash_prefill_input_tokens_total"]
+        let kvHitTokensNow = (statusJSON?["cache"] as? [String: Any])?["kv_hit_tokens"] as? Double
         for (id, var req) in tail.active {
             if req.prefillBase == nil { req.prefillBase = prefilledTotal ?? 0 }
+            if req.kvHitBase == nil { req.kvHitBase = kvHitTokensNow ?? 0 }
             tail.active[id] = req
         }
         // Prefix-cache hit rate: token-weighted over the last 8 completions, falling
@@ -594,18 +597,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             let workDone = max(0, (prefilledTotal ?? 0) - (req.prefillBase ?? 0))
             var r: [String: Any] = ["id": req.id, "input": Double(req.input), "age_s": Date().timeIntervalSince(req.start)]
             if req.input > 0 {
-                if let hr = hitRate {
-                    // Progress against the *uncached* tail, clamped so it can neither
-                    // overshoot the observed work nor under-claim the whole input.
-                    let est = Double(req.input) * (1 - hr)
-                    // Work within the estimate → progress against the uncached tail;
-                    // work beyond it (a mostly-uncached prompt) → classic whole-input sweep.
-                    let denom = (est >= workDone) ? est : Double(req.input)
-                    if denom > 0 { r["pct"] = min(100, max(0, workDone * 100.0 / denom)) }
-                    else { r["pct"] = 0.0 }
-                    if est >= workDone { r["cached_pct"] = hr * 100 }
-                } else {
-                    r["pct"] = min(100, max(0, workDone * 100.0 / Double(req.input)))
+                // The engine credits this request's prefix match to kv_hit_tokens when
+                // its lookup resolves, so the uncached tail is a measurement, not a
+                // guess from other requests' hit rates (which sits flat when the
+                // recent mix varies). A cold request reads 0 hits and falls back to
+                // the window estimate / whole-input sweep.
+                let kvHitTokens = (statusJSON?["cache"] as? [String: Any])?["kv_hit_tokens"] as? Double
+                let cachedNow = min(Double(req.input), max(0, (kvHitTokens ?? 0) - (req.kvHitBase ?? 0)))
+                var est: Double?
+                if cachedNow > 0 {
+                    est = max(1, Double(req.input) - cachedNow)
+                } else if let hr = hitRate {
+                    est = Double(req.input) * (1 - hr)
+                }
+                let denom: Double
+                if let est = est, est >= workDone { denom = est } else { denom = Double(req.input) }
+                r["pct"] = min(100, max(0, workDone * 100.0 / max(1, denom)))
+                if cachedNow > 0 {
+                    r["cached_pct"] = cachedNow * 100.0 / Double(req.input)
+                } else if let hr = hitRate, (est == nil || est! >= workDone) {
+                    r["cached_pct"] = hr * 100
                 }
             } else { r["pct"] = 0.0 }
             return r
