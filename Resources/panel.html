@@ -4,69 +4,102 @@
 <meta charset="utf-8">
 <style>
 :root {
-  --bg: #141414; --bg2: #1d1d1d; --track: #2a2a2a;
-  --orange: #fa8a3c; --orange-dim: #8a4d20;
-  --teal: #3fc1c9; --teal-dim: #256b70;
-  --gray: #8d9099; --gray-dim: #3c3f45;
-  --white: #e8e8e8; --red: #e05545; --yellow: #e8c840; --green: #67c96a;
+  color-scheme: dark;
+  --bg: #07080b; --bg2: #0e1016; --track: #1b1e28;
+  --orange: #f4b078; --orange-dim: #916443;
+  --teal: #91c6df; --teal-dim: #486879;
+  --lavender: #bea1d4; --peach: #efc69c;
+  --gray: #a9a5bd; --gray-dim: #586076;
+  --white: #f7ead7; --red: #e78c91; --yellow: #efd28b; --green: #a3c99c;
+  --display: "DIN Condensed", "Avenir Next Condensed", "Arial Narrow", sans-serif;
 }
-* { box-sizing: border-box; margin: 0; padding: 0; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
   background: var(--bg); color: var(--white);
-  font-family: "Futura", "Avenir Next Condensed", "Helvetica Neue", sans-serif;
-  font-weight: 600; letter-spacing: .05em; font-size: 11px;
-  width: 100%; padding: 8px; text-transform: uppercase; overflow: hidden;
+  font-family: "Avenir Next Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+  font-weight: 600; letter-spacing: .035em; font-size: 11px;
+  font-variant-numeric: tabular-nums lining-nums;
+  width: 100%; padding: 10px; text-transform: uppercase; overflow-x: hidden;
   -webkit-user-select: none; user-select: none;
 }
-/* ---- LCARS primitives ---- */
-.track { background: var(--track); border-radius: 10px; height: 20px; position: relative; overflow: hidden; flex: 1; }
-.track > i { position: absolute; top: 0; bottom: 0; left: 0; width: 0%; transition: width .45s; }
-.bar { position: relative; background: var(--track); border-radius: 10px; height: 16px; overflow: hidden; }
-.bar > i { position: absolute; top: 0; bottom: 0; left: 0; width: 0%; transition: width .45s; }
-.seg { display: flex; height: 16px; border-radius: 10px; overflow: hidden; background: var(--track); }
-.seg > div { height: 100%; transition: width .45s; }
-.row { display: flex; gap: 6px; margin-bottom: 6px; align-items: stretch; }
-.col { display: flex; flex-direction: column; gap: 5px; }
-.label { color: var(--gray); font-size: 9px; letter-spacing: .12em; margin: 8px 0 3px; display: flex; justify-content: space-between; }
-.label b { color: var(--white); font-weight: 600; }
-.pill { border-radius: 10px; padding: 4px 10px; font-size: 10px; display: inline-block; text-align: center; white-space: nowrap; }
-.o { background: var(--orange); color: #161616; } .t { background: var(--teal); color: #161616; }
-.g { background: var(--gray-dim); color: var(--gray); } .r { background: var(--red); color: #161616; }
-.y { background: var(--yellow); color: #161616; } .gr { background: var(--green); color: #161616; }
-.big { font-size: 21px; font-weight: 700; letter-spacing: .02em; }
-.mid { font-size: 13px; font-weight: 700; }
-/* ---- sections ---- */
-#header { display: flex; gap: 6px; margin-bottom: 8px; height: 34px; }
-#header .title { background: var(--orange); color: #161616; border-radius: 17px 0 0 17px; display: flex; align-items: center; padding: 0 14px; font-size: 16px; font-weight: 700; letter-spacing: .14em; }
-#header .model { background: var(--teal); color: #161616; display: flex; align-items: center; padding: 0 12px; font-size: 11px; flex: 1; overflow: hidden; white-space: nowrap; }
-#statusPill { border-radius: 17px; display: flex; align-items: center; padding: 0 14px; font-size: 12px; }
-section { background: var(--bg2); border-radius: 12px; padding: 8px 10px 10px; margin-bottom: 6px; }
+/* Flat instrument fields, separated by the LCARS rail rather than cards. */
+.row { display: flex; gap: 8px; margin-bottom: 4px; align-items: stretch; }
+.col { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.label { color: var(--gray); font-family: var(--display); font-size: 12px; letter-spacing: .09em; margin: 8px 0 4px; display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+.label b { color: var(--white); font-weight: 600; white-space: nowrap; }
+.k { color: var(--gray); font-family: var(--display); font-size: 11px; letter-spacing: .09em; line-height: 1.2; }
+.big, .mid { font-family: var(--display); font-weight: 700; letter-spacing: .025em; line-height: 1.15; white-space: nowrap; }
+.big { font-size: 25px; }
+.mid { font-size: 16px; }
+.pill { padding: 4px 10px; font-family: var(--display); font-size: 14px; display: inline-block; text-align: center; white-space: nowrap; }
+.o { background: var(--orange); color: var(--bg); } .t { background: var(--teal); color: var(--bg); }
+.g { background: var(--lavender); color: var(--bg); } .r { background: var(--red); color: var(--bg); }
+.y { background: var(--yellow); color: var(--bg); } .gr { background: var(--green); color: var(--bg); }
+/* Upper elbow joins the orange masthead to the segmented port-side rail. */
+#header { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 100px; grid-template-rows: 28px 28px; gap: 6px; padding-left: 64px; margin-bottom: 8px; height: 62px; }
+#header::before { content: ""; position: absolute; top: 0; left: 0; width: 64px; height: 62px; border-left: 42px solid var(--orange); border-top: 28px solid var(--orange); border-top-left-radius: 58px 48px; pointer-events: none; }
+#header .title { background: var(--orange); color: var(--bg); display: flex; align-items: center; padding: 0 10px; font-family: var(--display); font-size: 25px; font-weight: 700; letter-spacing: .12em; }
+#header .header-label { background: var(--lavender); color: var(--bg); border-radius: 0 14px 14px 0; display: flex; align-items: center; justify-content: center; font-family: var(--display); font-size: 12px; letter-spacing: .06em; }
+#header .model { background: var(--peach); color: var(--bg); display: flex; align-items: center; padding: 0 8px; font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+#statusPill { border-radius: 0 14px 14px 0; display: flex; justify-content: center; align-items: center; padding: 0 6px; }
+section { --accent: var(--lavender); position: relative; padding: 0 0 8px 64px; margin-bottom: 6px; }
+section::before { content: attr(data-channel); position: absolute; left: 0; top: 0; bottom: 0; width: 42px; background: var(--accent); color: var(--bg); display: flex; align-items: flex-end; justify-content: flex-end; padding: 8px 6px; font-family: var(--display); font-size: 23px; font-weight: 700; }
+section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 0; height: 4px; border-radius: 0 2px 2px 0; background: linear-gradient(to right, var(--accent) 0 58%, var(--bg) 58% 60%, var(--accent) 60% 82%, var(--bg) 82% 84%, var(--accent) 84% 100%); }
+.performance { --accent: var(--orange); }
+.engine-panel { --accent: var(--lavender); }
+.cache-panel { --accent: var(--teal); }
+.memory-panel { --accent: var(--peach); }
+.requests-panel { --accent: var(--lavender); }
+.section-heading, section > .label:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; margin: 0 0 5px; color: var(--accent); font-family: var(--display); font-size: 14px; letter-spacing: .12em; }
+.section-heading h2 { font: inherit; }
+.section-heading span { color: var(--gray); font-size: 11px; letter-spacing: .08em; }
 .stat { display: flex; justify-content: space-between; align-items: baseline; }
-.k { color: var(--gray); font-size: 9px; letter-spacing: .1em; }
-#spark { background: var(--track); border-radius: 8px; }
-table { width: 100%; border-collapse: collapse; font-size: 9.5px; }
-th { color: var(--gray); text-align: right; padding: 1px 4px; font-weight: 600; }
+/* Black breaks turn the meters into LCARS segments without changing their scale. */
+.track, .bar, .seg { position: relative; background: var(--track); border-radius: 0 7px 7px 0; height: 14px; overflow: hidden; }
+.track { flex: 1; }
+.track > i, .bar > i { position: absolute; top: 0; bottom: 0; left: 0; width: 0%; transition: width .45s; }
+.seg { display: flex; }
+.seg > div { height: 100%; transition: width .45s; }
+.track::after, .bar::after, .seg::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 34px, var(--bg) 34px 37px); pointer-events: none; }
+#spark { background: var(--bg2); border-radius: 0; border-bottom: 1px solid var(--teal-dim); }
+table { width: 100%; border-collapse: separate; border-spacing: 0 3px; font-size: 11px; line-height: 1.2; }
+th { background: var(--teal); color: var(--bg); font-family: var(--display); font-size: 12px; text-align: right; padding: 3px 4px; font-weight: 600; letter-spacing: .08em; }
 th:first-child, td:first-child { text-align: left; }
-td { text-align: right; padding: 1.5px 4px; border-top: 1px solid var(--gray-dim); }
-button { font-family: inherit; text-transform: uppercase; letter-spacing: .08em; border: none; cursor: pointer; }
-.btn { border-radius: 10px; padding: 5px 14px; font-size: 10px; }
-#footer { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
-#footNote { color: var(--gray-dim); font-size: 8.5px; flex: 1; letter-spacing: .08em; }
+td { text-align: right; padding: 2px 4px; border-bottom: 1px solid var(--track); }
+td:first-child { background: var(--lavender); color: var(--bg); border-bottom: 0; font-weight: 700; }
+button { font-family: var(--display); text-transform: uppercase; letter-spacing: .08em; border: none; cursor: pointer; }
+.btn { min-height: 28px; padding: 4px 16px; font-size: 15px; border-radius: 0; }
+.btn.gr { background: var(--lavender); }
+.btn.y { background: var(--orange); }
+.btn:first-child { border-radius: 14px 0 0 14px; }
+.btn:last-of-type { border-radius: 0 14px 14px 0; }
+.btn:hover { filter: brightness(1.13); }
+.btn:active { filter: brightness(.88); }
+.btn:focus-visible { outline: 2px solid var(--white); outline-offset: 3px; }
+#footer { position: relative; display: grid; grid-template-columns: repeat(3, max-content) 1fr; gap: 5px; align-items: center; margin-top: 2px; padding: 0 0 23px 64px; }
+#footer::before { content: ""; position: absolute; left: 0; bottom: 0; width: 64px; height: 58px; border-left: 42px solid var(--orange); border-bottom: 12px solid var(--orange); border-bottom-left-radius: 58px 38px; pointer-events: none; }
+#footer::after { content: ""; position: absolute; left: 64px; right: 0; bottom: 0; height: 12px; background: var(--orange); border-radius: 0 6px 6px 0; }
+#footNote { grid-column: 1 / -1; color: var(--gray); font-size: 9px; letter-spacing: .08em; }
 #tip { position: fixed; display: none; z-index: 10; pointer-events: none;
-  background: #0c0c0c; border: 1px solid var(--gray-dim); border-radius: 6px;
-  color: var(--white); font-size: 10px; font-weight: 400; text-transform: none;
-  letter-spacing: 0; line-height: 1.5; padding: 6px 9px; max-width: 250px;
+  background: var(--bg); border: 1px solid var(--gray-dim); border-left: 4px solid var(--lavender); border-radius: 0;
+  color: var(--white); font-family: "Avenir Next", "Helvetica Neue", sans-serif; font-size: 10px; font-weight: 400; text-transform: none;
+  letter-spacing: 0; line-height: 1.5; padding: 7px 10px; max-width: 250px;
   box-shadow: 0 3px 12px rgba(0,0,0,.7); white-space: normal; }
+@media (prefers-reduced-motion: reduce) {
+  .track > i, .bar > i, .seg > div { transition: none; }
+}
 </style>
 </head>
 <body>
 <div id="header">
   <div class="title" id="hName">SPLASH</div>
+  <div class="header-label">Inference control</div>
   <div class="model" id="hModel">—</div>
   <div class="pill g" id="statusPill" data-tip="Engine state — DOWN: no server · LOADING: model loading · PREFILL: prompt being processed · DECODE: generating output · QUEUED: waiting for resources · IDLE: no work · RESTART: app is restarting the server">WAITING</div>
 </div>
 
-<section>
+<section class="performance" data-channel="01" aria-label="Performance">
+  <div class="section-heading"><h2>Performance</h2><span>Live telemetry</span></div>
   <div class="row">
     <div class="col" style="flex:1.2" data-tip="Committed output tokens per second — only tokens that survived the target model's verification. The DFlash-2 draft proposes extra tokens each step; rejected ones don't count, so this matches the tok/s in the completion log. The last real sample is kept for up to 15 s."><div class="k">Decode</div><div class="big" style="color:var(--teal)" id="toks">—</div><div class="k" id="toksSub">tok/s</div></div>
     <div class="col" style="flex:1" data-tip="Median time-to-first-token per request. For reasoning models this includes the entire thinking phase — the first output token arrives after thinking completes."><div class="k">TTFT p50</div><div class="mid" id="ttft50">—</div></div>
@@ -76,11 +109,11 @@ button { font-family: inherit; text-transform: uppercase; letter-spacing: .08em;
   </div>
   <div class="row" style="margin-top:6px">
     <div class="col" style="flex:1" data-tip="Prefill throughput — input tokens per second of prefill wall-time, one sample per second while a request is prefilling. The last real sample is kept for up to 15 s."><div class="k">Rate</div><div class="big" style="color:var(--orange)" id="prefillRate">—</div></div>
-    <div class="col" style="flex:2.2" data-tip="Decode tok/s samples, last 90 s."><div class="k">Tok/s — last 90 s</div><canvas id="spark" width="470" height="34" style="width:100%;height:34px"></canvas></div>
+    <div class="col" style="flex:2.2" data-tip="Decode tok/s samples, last 90 s."><div class="k">Tok/s — last 90 s</div><canvas id="spark" width="470" height="28" style="width:100%;height:28px"></canvas></div>
   </div>
 </section>
 
-<section>
+<section class="engine-panel" data-channel="02" aria-label="Engine">
   <div class="label" data-tip="Engine readiness and server uptime."><span>Engine</span><b id="engState">—</b></div>
   <div class="row">
     <div class="col" style="flex:1" data-tip="GPU backend health — whether the Metal device reports healthy."><div class="k">Metal</div><div class="mid" id="metal">—</div></div>
@@ -91,30 +124,30 @@ button { font-family: inherit; text-transform: uppercase; letter-spacing: .08em;
   </div>
 </section>
 
-<section>
+<section class="cache-panel" data-channel="03" aria-label="Cache and state">
   <div class="label" data-tip="KV cache usage vs planned capacity — per-request attention state in GPU memory."><span>KV cache — engine</span><b id="kvPct">—</b></div>
   <div class="bar"><i id="kvBar" style="background:var(--teal)"></i></div>
-  <div class="row" style="margin-top:7px">
+  <div class="row" style="margin-top:4px">
     <div class="col" style="flex:1" data-tip="KV cache bytes in use."><div class="k">KV alloc</div><div class="mid" id="kvAlloc">—</div></div>
     <div class="col" style="flex:1" data-tip="Active KV pages / parked cache pages (32 tokens per page). Parked pages hold context that can resume without re-prefill."><div class="k">Pages act/cache</div><div class="mid" id="kvPages">—</div></div>
     <div class="col" style="flex:1" data-tip="Scheduler state bytes — per-request runtime state (not model weights)."><div class="k">State mem</div><div class="mid" id="stateMem">—</div></div>
   </div>
-  <div class="row" style="margin-top:7px">
+  <div class="row" style="margin-top:4px">
     <div class="col" style="flex:1" data-tip="Engine process physical footprint right now (weights + KV + state)."><div class="k">Eng mem</div><div class="mid" id="engMem">—</div></div>
     <div class="col" style="flex:1" data-tip="Engine peak footprint since model load."><div class="k">Peak</div><div class="mid" id="engPeak">—</div></div>
     <div class="col" style="flex:1" data-tip="Memory-governor headroom — how much more the engine may use before it starts shedding cache."><div class="k">Gov headroom</div><div class="mid" id="govHeadroom">—</div></div>
     <div class="col" style="flex:1.4" data-tip="OS-reported available host memory."><div class="k">Host avail</div><div class="mid" id="hostAvail">—</div></div>
   </div>
-  <div class="label" style="margin-top:8px" data-tip="SSD prefix cache — KV state persisted to disk and reused across requests (survives restarts with --persistent-cache)."><span>SSD cache (prefix) <span id="ssdNote"></span></span><b id="ssdSize">—</b></div>
+  <div class="label" style="margin-top:6px" data-tip="SSD prefix cache — KV state persisted to disk and reused across requests (survives restarts with --persistent-cache)."><span>SSD cache (prefix) <span id="ssdNote"></span></span><b id="ssdSize">—</b></div>
   <div class="bar"><i id="ssdBar" style="background:var(--orange)"></i></div>
-  <div class="row" style="margin-top:7px">
+  <div class="row" style="margin-top:4px">
     <div class="col" style="flex:1" data-tip="Cache lookups that found a stored prefix."><div class="k">Hits</div><div class="mid" id="hits">—</div></div>
     <div class="col" style="flex:1" data-tip="Cache lookups that found nothing — a full prefill was required."><div class="k">Cold misses</div><div class="mid" id="misses">—</div></div>
     <div class="col" style="flex:1" data-tip="Input tokens served from cached KV — these skip prefill."><div class="k">Reused tok</div><div class="mid" id="reused">—</div></div>
   </div>
 </section>
 
-<section>
+<section class="memory-panel" data-channel="04" aria-label="System memory">
   <div class="label" data-tip="Physical RAM by class: wired / compressed / active / inactive / free."><span>System memory</span><b id="ramUsed">—</b></div>
   <div class="seg" id="ramSeg">
     <div id="ramWired" style="background:var(--orange)"></div>
@@ -133,7 +166,7 @@ button { font-family: inherit; text-transform: uppercase; letter-spacing: .08em;
   <div class="bar"><i id="swapBar" style="background:var(--yellow)"></i></div>
 </section>
 
-<section>
+<section class="requests-panel" data-channel="05" aria-label="Requests">
   <div class="label" data-tip="Live requests. The counters are session totals; the table shows the last 8 completions."><span>Requests <span id="reqTotals"></span></span><b id="reqActive">—</b></div>
   <div id="activeList" style="margin-bottom:6px"></div>
   <table id="recentTable">
@@ -279,7 +312,7 @@ function drawSpark(){
   const c = $("spark"), x = c.getContext("2d");
   x.clearRect(0,0,c.width,c.height);
   const max = Math.max(30, ...hist);
-  x.strokeStyle = "#3fc1c9"; x.lineWidth = 1.5; x.beginPath();
+  x.strokeStyle = "#91c6df"; x.lineWidth = 1.5; x.beginPath();
   hist.forEach((v,i)=>{ const px = i/(89)*c.width, py = c.height - v/max*(c.height-4) - 2; i?x.lineTo(px,py):x.moveTo(px,py); });
   x.stroke();
 }

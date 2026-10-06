@@ -10,6 +10,8 @@ You get:
 - A menu-bar app (SplashUI) that owns the engine's lifecycle and shows a live telemetry
   panel: decode rate, TTFT, ITL, KV cache, SSD prefix cache, system memory/swap, and a
   per-request log — every counter has hover help
+- LCARS-style console: elbow framing, numbered pastel rails, condensed readouts, and
+  segmented meters — using local macOS fonts, without web font downloads
 
 ## Requirements
 
