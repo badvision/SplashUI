@@ -39,10 +39,9 @@ body {
 /* Upper elbow joins the orange masthead to the segmented port-side rail. */
 #header { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 100px; grid-template-rows: 28px 28px; gap: 6px; padding-left: 64px; margin-bottom: 8px; height: 62px; }
 #header::before { content: ""; position: absolute; top: 0; left: 0; width: 64px; height: 62px; border-left: 42px solid #4455ff; border-top: 28px solid #4455ff; border-top-left-radius: 58px 48px; pointer-events: none; }
-#header .title { background: #4455ff; color: var(--bg); display: flex; align-items: center; padding: 0 10px; font-family: var(--display); font-size: 25px; font-weight: 700; letter-spacing: .12em; line-height: 1; }
-#header .header-label { background: var(--lavender); color: var(--bg); border-radius: 0 14px 14px 0; display: flex; align-items: center; justify-content: center; font-family: var(--display); font-size: 12px; letter-spacing: .06em; line-height: 1; }
-#header .model { background: var(--peach); color: var(--bg); display: flex; align-items: center; padding: 0 8px; font-size: 11px; line-height: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
-#statusPill { border-radius: 0 14px 14px 0; display: flex; justify-content: center; align-items: center; padding: 0 6px; }
+#header .title { grid-column: 1 / -1; background: #4455ff; color: var(--bg); display: flex; align-items: center; padding: 4px 14px 0; font-family: var(--display); font-size: 25px; font-weight: 700; letter-spacing: .12em; line-height: 1; border-radius: 0 14px 14px 0; }
+#header .model { background: var(--peach); color: var(--bg); display: flex; align-items: center; padding: 3px 8px 0; font-size: 11px; line-height: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+#statusPill { border-radius: 0 14px 14px 0; display: flex; justify-content: center; align-items: center; padding: 3px 6px 0; line-height: 1; }
 section { --accent: var(--lavender); position: relative; padding: 0 0 8px 64px; margin-bottom: 6px; }
 section::before { content: attr(data-channel); position: absolute; left: 0; top: 0; bottom: 0; width: 42px; background: var(--accent); color: var(--bg); display: flex; align-items: flex-end; justify-content: flex-end; padding: 8px 6px; font-family: var(--display); font-size: 23px; font-weight: 700; }
 section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 0; height: 4px; border-radius: 0 2px 2px 0; background: linear-gradient(to right, var(--accent) 0 58%, var(--bg) 58% 60%, var(--accent) 60% 82%, var(--bg) 82% 84%, var(--accent) 84% 100%); }
@@ -93,8 +92,7 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 </head>
 <body>
 <div id="header">
-  <div class="title" id="hName">SPLASH</div>
-  <div class="header-label">Inference control</div>
+  <div class="title" id="hName">Splash interface control</div>
   <div class="model" id="hModel">—</div>
   <div class="pill g" id="statusPill" data-tip="Engine state — DOWN: no server · LOADING: model loading · PREFILL: prompt being processed · DECODE: generating output · QUEUED: waiting for resources · IDLE: no work · RESTART: app is restarting the server">WAITING</div>
 </div>
