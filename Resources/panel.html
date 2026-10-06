@@ -39,8 +39,8 @@ body {
 /* Upper elbow joins the orange masthead to the segmented port-side rail. */
 #header { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 100px; grid-template-rows: 28px 28px; gap: 6px; padding-left: 64px; margin-bottom: 8px; height: 62px; }
 #header::before { content: ""; position: absolute; top: 0; left: 0; width: 64px; height: 62px; border-left: 42px solid #4455ff; border-top: 28px solid #4455ff; border-top-left-radius: 58px 48px; pointer-events: none; }
-#header .title { grid-column: 1 / -1; background: #4455ff; color: var(--bg); display: flex; align-items: center; padding: 4px 14px 0; font-family: var(--display); font-size: 25px; font-weight: 700; letter-spacing: .12em; line-height: 1; border-radius: 0 14px 14px 0; }
-#header .model { background: var(--peach); color: var(--bg); display: flex; align-items: center; padding: 3px 8px 0; font-size: 11px; line-height: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+#header .title { grid-column: 1 / -1; background: #4455ff; color: var(--bg); display: flex; align-items: center; padding: 5px 14px 0; font-family: var(--display); font-size: 25px; font-weight: 700; letter-spacing: .12em; line-height: 1; border-radius: 0 14px 14px 0; }
+#header .model { background: var(--peach); color: var(--bg); display: flex; align-items: center; padding: 2px 8px 0; font-size: 11px; line-height: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
 #statusPill { border-radius: 0 14px 14px 0; display: flex; justify-content: center; align-items: center; padding: 3px 6px 0; line-height: 1; }
 section { --accent: var(--lavender); position: relative; padding: 0 0 8px 64px; margin-bottom: 6px; }
 section::before { content: attr(data-channel); position: absolute; left: 0; top: 0; bottom: 0; width: 42px; background: var(--accent); color: var(--bg); display: flex; align-items: flex-end; justify-content: flex-end; padding: 8px 6px; font-family: var(--display); font-size: 23px; font-weight: 700; }
@@ -63,7 +63,7 @@ section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 
 .track::after, .bar::after, .seg::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 34px, var(--bg) 34px 37px); pointer-events: none; }
 #spark { background: var(--bg2); border-radius: 0; border-bottom: 1px solid var(--teal-dim); }
 table { width: 100%; border-collapse: separate; border-spacing: 0 3px; font-size: 11px; line-height: 1.2; }
-th { background: var(--lavender); color: var(--bg); font-family: var(--display); font-size: 12px; text-align: right; padding: 3px 4px; font-weight: 600; letter-spacing: .08em; line-height: 1; }
+th { background: var(--lavender); color: var(--bg); font-family: var(--display); font-size: 12px; text-align: right; padding: 4px 4px 2px; font-weight: 600; letter-spacing: .08em; line-height: 1; }
 th:first-child, td:first-child { text-align: left; }
 td { text-align: right; padding: 2px 4px; border-bottom: 1px solid var(--track); line-height: 1; }
 td:first-child { background: var(--lavender); color: var(--bg); border-bottom: 0; font-weight: 700; }
