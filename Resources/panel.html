@@ -5,12 +5,12 @@
 <style>
 :root {
   color-scheme: dark;
-  --bg: #07080b; --bg2: #0e1016; --track: #1b1e28;
-  --orange: #f4b078; --orange-dim: #916443;
-  --teal: #91c6df; --teal-dim: #486879;
-  --lavender: #bea1d4; --peach: #efc69c;
-  --gray: #a9a5bd; --gray-dim: #586076;
-  --white: #f7ead7; --red: #e78c91; --yellow: #efd28b; --green: #a3c99c;
+  --bg: #050508; --bg2: #0b0b12; --track: #191d33;
+  --orange: #ff7700; --orange-dim: #7a3b00;
+  --teal: #88ccff; --teal-dim: #33518a;
+  --lavender: #cc88ff; --peach: #ffcc99;
+  --gray: #ccaa88; --gray-dim: #666688;
+  --white: #ffebde; --red: #dd4444; --yellow: #ffcc33; --green: #33cc99;
   --display: "DIN Condensed", "Avenir Next Condensed", "Arial Narrow", sans-serif;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -77,9 +77,9 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 .btn:active { filter: brightness(.88); }
 .btn:focus-visible { outline: 2px solid var(--white); outline-offset: 3px; }
 #footer { position: relative; display: grid; grid-template-columns: repeat(3, max-content) 1fr; gap: 5px; align-items: center; margin-top: 2px; padding: 0 0 23px 64px; }
-#footer::before { content: ""; position: absolute; left: 0; bottom: 0; width: 64px; height: 58px; border-left: 42px solid var(--orange); border-bottom: 12px solid var(--orange); border-bottom-left-radius: 58px 38px; pointer-events: none; }
-#footer::after { content: ""; position: absolute; left: 64px; right: 0; bottom: 0; height: 12px; background: var(--orange); border-radius: 0 6px 6px 0; }
-#footNote { grid-column: 1 / -1; color: var(--gray); font-size: 9px; letter-spacing: .08em; }
+#footer::before { content: ""; position: absolute; left: 0; bottom: 0; width: 64px; height: 58px; border-left: 42px solid #4455ff; border-bottom: 12px solid #4455ff; border-bottom-left-radius: 58px 38px; pointer-events: none; }
+#footer::after { content: ""; position: absolute; left: 64px; right: 0; bottom: 0; height: 12px; background: #4455ff; border-radius: 0 6px 6px 0; }
+#footNote { color: var(--gray); font-size: 9px; letter-spacing: .08em; }
 #tip { position: fixed; display: none; z-index: 10; pointer-events: none;
   background: var(--bg); border: 1px solid var(--gray-dim); border-left: 4px solid var(--lavender); border-radius: 0;
   color: var(--white); font-family: "Avenir Next", "Helvetica Neue", sans-serif; font-size: 10px; font-weight: 400; text-transform: none;
