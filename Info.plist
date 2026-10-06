@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>SplashUI</string>
+	<string>SplashKit</string>
 	<key>CFBundleDisplayName</key>
-	<string>SplashUI</string>
+	<string>SplashKit</string>
 	<key>CFBundleIdentifier</key>
-	<string>local.splashui</string>
+	<string>local.splash.kit</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>CFBundleShortVersionString</key>
@@ -15,7 +15,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleExecutable</key>
-	<string>splash-ui</string>
+	<string>splash-launcher</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>LSUIElement</key>
@@ -23,11 +23,11 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSAppTransportSecurity</key>
-		<dict>
+	<dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
 	<key>NSHumanReadableCopyright</key>
-	<string>MIT — menu-bar UI + lifecycle for the standalone Splash inference engine.</string>
+	<string>Local menu-bar launcher for the Splash inference engine.</string>
 </dict>
 </plist>

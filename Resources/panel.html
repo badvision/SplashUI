@@ -71,11 +71,11 @@ button { font-family: inherit; text-transform: uppercase; letter-spacing: .08em;
     <div class="col" style="flex:1.2" data-tip="Committed output tokens per second — only tokens that survived the target model's verification. The DFlash-2 draft proposes extra tokens each step; rejected ones don't count, so this matches the tok/s in the completion log. The last real sample is kept for up to 15 s."><div class="k">Decode</div><div class="big" style="color:var(--teal)" id="toks">—</div><div class="k" id="toksSub">tok/s</div></div>
     <div class="col" style="flex:1" data-tip="Median time-to-first-token per request. For reasoning models this includes the entire thinking phase — the first output token arrives after thinking completes."><div class="k">TTFT p50</div><div class="mid" id="ttft50">—</div></div>
     <div class="col" style="flex:1" data-tip="Median inter-token latency during decode (lower = faster); 1 / ITL ≈ decode speed."><div class="k">ITL p50</div><div class="mid" id="itl50">—</div></div>
-    <div class="col" style="flex:1.2" data-tip="Progress of the prefill work: rows prefilled ÷ the estimated uncached tail. The estimate comes from the last completed requests' cache hit rates (exact once this request finishes); for a fully uncached prompt it reads 100% from the start."><div class="k">Prefill</div><div class="mid" style="color:var(--orange)" id="prefill">—</div><div class="k" id="prefillSub" style="color:var(--teal)"></div></div>
+    <div class="col" style="flex:1.2" data-tip="Progress of the prefill work: tokens prefilled ÷ the estimated uncached tail. The estimate comes from the last completed requests' cache hit rates (exact once this request finishes); for a fully uncached prompt it reads 100% from the start. The last sample is kept for up to 15 s after prefill ends."><div class="k">Prefill</div><div class="mid" style="color:var(--orange)" id="prefill">—</div><div class="k" id="prefillSub" style="color:var(--teal)"></div></div>
     <div class="col" style="flex:1.2" data-tip="The engine's own memory-pressure verdict (normal / warning / critical) — KV cache and state against the memory plan."><div class="k">Pressure</div><div class="mid" id="pressure">—</div></div>
   </div>
   <div class="row" style="margin-top:6px">
-    <div class="col" style="flex:1" data-tip="Prefill throughput — input tokens per second of prefill wall-time. Only meaningful while a request is prefilling; big uncached prompts spike it."><div class="k">Rate</div><div class="big" style="color:var(--orange)" id="prefillRate">—</div></div>
+    <div class="col" style="flex:1" data-tip="Prefill throughput — input tokens per second of prefill wall-time, one sample per second while a request is prefilling. The last real sample is kept for up to 15 s."><div class="k">Rate</div><div class="big" style="color:var(--orange)" id="prefillRate">—</div></div>
     <div class="col" style="flex:2.2" data-tip="Decode tok/s samples, last 90 s."><div class="k">Tok/s — last 90 s</div><canvas id="spark" width="470" height="34" style="width:100%;height:34px"></canvas></div>
   </div>
 </section>
@@ -205,8 +205,8 @@ function render(){
   const pr = S.engine && S.engine.pressure;
   setT("pressure", pr || "—");
   $("pressure").style.color = pr==="normal" ? "var(--green)" : pr==="warning" ? "var(--yellow)" : "var(--red)";
-  setT("prefill", st==="prefill" && S.prefill ? S.prefill.pct.toFixed(0)+"%" : (st==="prefill" ? "…" : "—"));
-  $("prefillSub").textContent = (st==="prefill" && S.prefill && S.prefill.cached_pct != null) ? "~"+S.prefill.cached_pct.toFixed(0)+"% cached" : "";
+  setT("prefill", S.prefill ? S.prefill.pct.toFixed(0)+"%" : (st==="prefill" ? "…" : "—"));
+  $("prefillSub").textContent = (S.prefill && S.prefill.cached_pct != null) ? "~"+S.prefill.cached_pct.toFixed(0)+"% cached" : "";
   setT("prefillRate", S.rates && S.rates.prefill_tps ? S.rates.prefill_tps.toFixed(0)+" tok/s" : "—");
   drawSpark();
 

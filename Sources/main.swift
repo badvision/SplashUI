@@ -6,17 +6,16 @@ import Darwin
 // MARK: - Configuration (mirrors start.sh)
 
 enum Cfg {
-    private static let env = ProcessInfo.processInfo.environment
     static let host = "127.0.0.1"
-    static let port = Int(env["SPLASH_PORT"] ?? "") ?? 8123
-    static let apiKey = env["SPLASH_KEY"] ?? "splash-standalone-1"
-    static let kitDir = env["SPLASH_KIT_DIR"] ?? NSHomeDirectory() + "/SplashUI/kit/splash-1.2.1-arm64-macos26"
+    static let port = 8123
+    static let apiKey = "splash-standalone-1"
+    static let kitDir = NSHomeDirectory() + "/Documents/code/splash-standalone/splash-1.2.1-arm64-macos26"
     static let python = kitDir + "/python/bin/python"
-    static let modelRoot = env["SPLASH_MODEL_ROOT"] ?? NSHomeDirectory() + "/SplashUI/models/incoai/Qwen3.8-27B-Splash"
+    static let modelRoot = NSHomeDirectory() + "/.lmstudio/models/incoai/Qwen3.8-27B-Splash"
     static let modelId = "incoai/Qwen3.8-27B-Splash"
-    static let maxCacheDisk = env["SPLASH_MAX_CACHE_DISK"] ?? "100g"
-    static let idleRelease = env["SPLASH_IDLE_RELEASE"] ?? "240m"
-    static let logLink = "/tmp/splashui.log"
+    static let maxCacheDisk = "100g"
+    static let idleRelease = "240m"
+    static let logLink = "/tmp/splash-standalone.log"
     static var base: String { "http://\(host):\(port)" }
     static var engineArgs: [String] {
         ["-u", "-m", "server.server", modelRoot,
@@ -326,6 +325,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     private var lastDecodeSample: (v: Double, t: Date)?
     private var lastPrefillTok: Double?
     private var lastPrefillWall: Double?
+    private var lastPrefillSample: (v: Double, t: Date)?
+    private var lastPrefillPayload: (p: [String: Any], t: Date)?
     private var metrics: [String: Double] = [:]
     private var statusJSON: [String: Any]?
     private var lastServerSeen = Date.distantPast
@@ -560,6 +561,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         }
         lastPrefillTok = metrics["splash_prefill_input_tokens_total"]
         lastPrefillWall = metrics["splash_prefill_wall_milliseconds_total"]
+        if let p = prefillTps { lastPrefillSample = (p, now) }
+        // Latch like the decode rate: prefill on a cached session lasts only a few
+        // seconds, so the last real sample is held for up to 15 s.
+        let prefillRate: Double? = prefillTps ?? lastPrefillSample.flatMap { now.timeIntervalSince($0.t) < 15 ? $0.v : nil }
 
         let prefilling = (metrics["splash_scheduler_prefilling"] ?? 0) > 0
         let decoding = (metrics["splash_scheduler_decoding"] ?? 0) > 0 || decodeRate != nil
@@ -677,7 +682,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         j["rates"] = [
             "decode_tps": js(decodeRate),
             "decode_avg": js(gaugeDecode),
-            "prefill_tps": js(prefillTps),
+            "prefill_tps": js(prefillRate),
         ]
         j["sched"] = [
             "prefilling": js(metrics["splash_scheduler_prefilling"]),
@@ -698,7 +703,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         if state == "prefill", let first = activeList.first {
             var pf: [String: Any] = ["pct": first["pct"] as? Double ?? 0, "input": first["input"] as? Double ?? 0]
             if let c = first["cached_pct"] as? Double { pf["cached_pct"] = c }
+            lastPrefillPayload = (pf, now)
             j["prefill"] = pf
+        } else if let lp = lastPrefillPayload, now.timeIntervalSince(lp.t) < 15 {
+            j["prefill"] = lp.p
         } else {
             j["prefill"] = NSNull()
         }
