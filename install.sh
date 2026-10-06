@@ -40,6 +40,7 @@ TARGET="$MODELS/$MODEL_ID"
 if [ -n "$(ls -A "$TARGET" 2>/dev/null)" ]; then
   echo "model already present: $TARGET"
 elif [ -d "$HOME/.lmstudio/models/$MODEL_ID" ] && [ -n "$(ls -A "$HOME/.lmstudio/models/$MODEL_ID" 2>/dev/null)" ]; then
+  mkdir -p "$(dirname "$TARGET")"
   ln -s "$HOME/.lmstudio/models/$MODEL_ID" "$TARGET"
   echo "linked existing LM Studio copy: $TARGET"
 else
