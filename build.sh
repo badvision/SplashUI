@@ -6,7 +6,7 @@ rm -rf build
 mkdir -p build/SplashUI.app/Contents/MacOS build/SplashUI.app/Contents/Resources
 cp Info.plist build/SplashUI.app/Contents/Info.plist
 cp Resources/panel.html build/SplashUI.app/Contents/Resources/
-swiftc -O Sources/main.swift -o build/SplashUI.app/Contents/MacOS/splash-ui \
+swiftc -O Sources/main.swift -o build/SplashUI.app/Contents/MacOS/splash-launcher \
   -framework Cocoa -framework WebKit
 codesign --force -s - build/SplashUI.app
 echo "built build/SplashUI.app"
