@@ -654,7 +654,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         if procGone {
             state = server.launchedByApp && server.pendingRestart && !server.restartsExhausted ? "restarting" : "down"
         }
-        else if down { state = "down" }
+        else if down { state = server.launchedByApp && server.pid != nil ? "loading" : "down" }
         else if !ready { state = "loading" }
         else if prefilling { state = "prefill" }
         else if decoding || !tail.active.isEmpty { state = "decode" }
