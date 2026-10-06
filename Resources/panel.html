@@ -30,6 +30,7 @@ body {
 .k { color: var(--gray); font-family: var(--display); font-size: 11px; letter-spacing: .09em; line-height: 1.2; }
 .big, .mid { font-family: var(--display); font-weight: 700; letter-spacing: .025em; line-height: 1.15; white-space: nowrap; }
 .big { font-size: 25px; }
+.big .unit { font-size: 11px; letter-spacing: .09em; }
 .mid { font-size: 16px; }
 .pill { padding: 4px 10px; font-family: var(--display); font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center; white-space: nowrap; }
 .o { background: var(--orange); color: var(--bg); } .t { background: var(--teal); color: var(--bg); }
@@ -63,13 +64,13 @@ section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 
 .track::after, .bar::after, .seg::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 34px, var(--bg) 34px 37px); pointer-events: none; }
 #spark { background: var(--bg2); border-radius: 0; border-bottom: 1px solid var(--teal-dim); }
 table { width: 100%; border-collapse: separate; border-spacing: 0 3px; font-size: 11px; line-height: 1.2; }
-th { background: var(--teal); color: var(--bg); font-family: var(--display); font-size: 12px; text-align: right; padding: 3px 4px; font-weight: 600; letter-spacing: .08em; line-height: 1; }
+th { background: var(--lavender); color: var(--bg); font-family: var(--display); font-size: 12px; text-align: right; padding: 3px 4px; font-weight: 600; letter-spacing: .08em; line-height: 1; }
 th:first-child, td:first-child { text-align: left; }
 td { text-align: right; padding: 2px 4px; border-bottom: 1px solid var(--track); line-height: 1; }
 td:first-child { background: var(--lavender); color: var(--bg); border-bottom: 0; font-weight: 700; }
 button { font-family: var(--display); text-transform: uppercase; letter-spacing: .08em; border: none; cursor: pointer; }
 .btn { min-height: 28px; padding: 4px 16px; font-size: 15px; border-radius: 0; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
-.btn.gr { background: var(--lavender); }
+.btn.gr { background: var(--green); }
 .btn.y { background: var(--orange); }
 .btn:first-child { border-radius: 14px 0 0 14px; }
 .btn:last-of-type { border-radius: 0 14px 14px 0; }
@@ -101,14 +102,14 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 <section class="performance" data-channel="01" aria-label="Performance">
   <div class="section-heading"><h2>Performance</h2><span>Live telemetry</span></div>
   <div class="row">
-    <div class="col" style="flex:1.2" data-tip="Committed output tokens per second — only tokens that survived the target model's verification. The DFlash-2 draft proposes extra tokens each step; rejected ones don't count, so this matches the tok/s in the completion log. The last real sample is kept for up to 15 s."><div class="k">Decode</div><div class="big" style="color:var(--teal)" id="toks">—</div><div class="k" id="toksSub">tok/s</div></div>
+    <div class="col" style="flex:1.2" data-tip="Committed output tokens per second — only tokens that survived the target model's verification. The DFlash-2 draft proposes extra tokens each step; rejected ones don't count, so this matches the tok/s in the completion log. The last real sample is kept for up to 15 s."><div class="k">Decode</div><div class="big" style="color:var(--teal)"><span id="toks">—</span><span class="unit"> tok/s</span></div></div>
     <div class="col" style="flex:1" data-tip="Median time-to-first-token per request. For reasoning models this includes the entire thinking phase — the first output token arrives after thinking completes."><div class="k">TTFT p50</div><div class="mid" id="ttft50">—</div></div>
     <div class="col" style="flex:1" data-tip="Median inter-token latency during decode (lower = faster); 1 / ITL ≈ decode speed."><div class="k">ITL p50</div><div class="mid" id="itl50">—</div></div>
     <div class="col" style="flex:1.2" data-tip="Progress of the prefill work: tokens prefilled ÷ this request's uncached tail. The tail is measured from the engine's cache for this request — resident KV, SSD restores, and resumed context (falls back to the recent requests' hit rates until the lookup resolves). For a fully uncached prompt it reads 100% from the start. The last sample is kept for up to 15 s after prefill ends."><div class="k">Prefill</div><div class="mid" style="color:#33cc99" id="prefill">—</div><div class="k" id="prefillSub" style="color:var(--teal)"></div></div>
     <div class="col" style="flex:1.2" data-tip="The engine's own memory-pressure verdict (normal / warning / critical) — KV cache and state against the memory plan."><div class="k">Pressure</div><div class="mid" id="pressure">—</div></div>
   </div>
   <div class="row" style="margin-top:6px">
-    <div class="col" style="flex:1" data-tip="Prefill throughput — input tokens per second of prefill wall-time, one sample per second while a request is prefilling. The last real sample is kept for up to 15 s."><div class="k">Rate</div><div class="big" style="color:#33cc99" id="prefillRate">—</div></div>
+    <div class="col" style="flex:1" data-tip="Prefill throughput — input tokens per second of prefill wall-time, one sample per second while a request is prefilling. The last real sample is kept for up to 15 s."><div class="k">Prefill</div><div class="big" style="color:#33cc99" id="prefillRate">—</div></div>
     <div class="col" style="flex:2.2" data-tip="Decode tok/s samples, last 90 s."><div class="k">Tok/s — last 90 s</div><canvas id="spark" width="470" height="28" style="width:100%;height:28px"></canvas></div>
   </div>
 </section>
@@ -295,7 +296,7 @@ function render(){
   setT("reqActive", act.length ? act.length+" active" : (S.sched && (S.sched.queued||S.sched.waiting_resources) ? (S.sched.queued||0)+" queued" : "none"));
   setT("reqTotals", S.req ? "done "+nn(S.req.completed_total)+" · fail "+nn(S.req.failed_total)+" · cancel "+nn(S.req.cancelled_total) : "");
   $("activeList").innerHTML = act.map(r =>
-    '<div class="row" style="margin-bottom:4px" data-tip="Active request. Bar = elapsed time. Chip = estimated share of the prompt served from the prefix cache — the rest is what prefill is actually working on."><div class="track" style="height:16px"><i style="width:'+Math.min(100,r.age_s*4)+'%;background:var(--orange)"></i></div>'+
+    '<div class="row" style="margin-bottom:4px" data-tip="Active request. Bar = elapsed time. Chip = estimated share of the prompt served from the prefix cache — the rest is what prefill is actually working on."><div class="track" style="height:16px"><i style="width:'+Math.min(100,r.age_s*4)+'%;background:var(--lavender)"></i></div>'+
     '<span style="padding:0 8px;color:var(--orange)">#'+r.id+"</span><span style='color:var(--gray)'>in "+n(r.input)+(r.cached_pct!=null?" · <span style='color:var(--teal)'>~"+r.cached_pct.toFixed(0)+"% cached</span>":(r.pct!=null?" · "+r.pct.toFixed(0)+"%":""))+" · "+r.age_s.toFixed(0)+"s</span></div>"
   ).join("");
   $("recentBody").innerHTML = (S.req ? S.req.recent : []).map(r =>
