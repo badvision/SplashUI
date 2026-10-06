@@ -6,16 +6,17 @@ import Darwin
 // MARK: - Configuration (mirrors start.sh)
 
 enum Cfg {
+    private static let env = ProcessInfo.processInfo.environment
     static let host = "127.0.0.1"
-    static let port = 8123
-    static let apiKey = "splash-standalone-1"
-    static let kitDir = NSHomeDirectory() + "/Documents/code/splash-standalone/splash-1.2.1-arm64-macos26"
+    static let port = Int(env["SPLASH_PORT"] ?? "") ?? 8123
+    static let apiKey = env["SPLASH_KEY"] ?? "splash-standalone-1"
+    static let kitDir = env["SPLASH_KIT_DIR"] ?? NSHomeDirectory() + "/SplashUI/kit/splash-1.2.1-arm64-macos26"
     static let python = kitDir + "/python/bin/python"
-    static let modelRoot = NSHomeDirectory() + "/.lmstudio/models/incoai/Qwen3.8-27B-Splash"
+    static let modelRoot = env["SPLASH_MODEL_ROOT"] ?? NSHomeDirectory() + "/SplashUI/models/incoai/Qwen3.8-27B-Splash"
     static let modelId = "incoai/Qwen3.8-27B-Splash"
-    static let maxCacheDisk = "100g"
-    static let idleRelease = "240m"
-    static let logLink = "/tmp/splash-standalone.log"
+    static let maxCacheDisk = env["SPLASH_MAX_CACHE_DISK"] ?? "100g"
+    static let idleRelease = env["SPLASH_IDLE_RELEASE"] ?? "240m"
+    static let logLink = "/tmp/splashui.log"
     static var base: String { "http://\(host):\(port)" }
     static var engineArgs: [String] {
         ["-u", "-m", "server.server", modelRoot,

@@ -65,6 +65,11 @@ Point any OpenAI-compatible client at `http://127.0.0.1:8123/v1` with the key ab
   WKWebView. The decode readout is the *committed* output rate: counter delta divided by
   the real elapsed time between samples. DFlash-2 draft tokens that fail verification do
   not count, so it matches the per-request tok/s in the completion log.
+- The Prefill cell measures work, not prompt size: progress = tokens actually prefilled
+  ÷ the estimated uncached tail (from the recent requests' cache hit rates, shown as a
+  `~NN% cached` chip), so a 98%-cached prompt fills quickly and a fully cached one reads
+  0% *with the reason visible*. Mostly-uncached prompts fall back to the classic
+  whole-input sweep.
 - The engine port is the ground truth: the app only *launches* a server when the port is
   not actually serving, and only treats it as *gone* when the port stops answering.
 - No launchd persistence: quit the app and supervision goes with it (the server keeps
