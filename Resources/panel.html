@@ -71,8 +71,8 @@ button { font-family: inherit; text-transform: uppercase; letter-spacing: .08em;
     <div class="col" style="flex:1.2" data-tip="Committed output tokens per second — only tokens that survived the target model's verification. The DFlash-2 draft proposes extra tokens each step; rejected ones don't count, so this matches the tok/s in the completion log. The last real sample is kept for up to 15 s."><div class="k">Decode</div><div class="big" style="color:var(--teal)" id="toks">—</div><div class="k" id="toksSub">tok/s</div></div>
     <div class="col" style="flex:1" data-tip="Median time-to-first-token per request. For reasoning models this includes the entire thinking phase — the first output token arrives after thinking completes."><div class="k">TTFT p50</div><div class="mid" id="ttft50">—</div></div>
     <div class="col" style="flex:1" data-tip="Median inter-token latency during decode (lower = faster); 1 / ITL ≈ decode speed."><div class="k">ITL p50</div><div class="mid" id="itl50">—</div></div>
+    <div class="col" style="flex:1.2" data-tip="Progress of the prefill work: rows prefilled ÷ the estimated uncached tail. The estimate comes from the last completed requests' cache hit rates (exact once this request finishes); for a fully uncached prompt it reads 100% from the start."><div class="k">Prefill</div><div class="mid" style="color:var(--orange)" id="prefill">—</div><div class="k" id="prefillSub" style="color:var(--teal)"></div></div>
     <div class="col" style="flex:1.2" data-tip="The engine's own memory-pressure verdict (normal / warning / critical) — KV cache and state against the memory plan."><div class="k">Pressure</div><div class="mid" id="pressure">—</div></div>
-    <div class="col" style="flex:1.2" data-tip="Prefill progress of the frontmost request: prefill rows processed ÷ input tokens. Reads low when much of the prompt was served from cache."><div class="k">Prefill</div><div class="mid" style="color:var(--orange)" id="prefill">—</div></div>
   </div>
   <div class="row" style="margin-top:6px">
     <div class="col" style="flex:1" data-tip="Prefill throughput — input tokens per second of prefill wall-time. Only meaningful while a request is prefilling; big uncached prompts spike it."><div class="k">Rate</div><div class="big" style="color:var(--orange)" id="prefillRate">—</div></div>
@@ -206,6 +206,7 @@ function render(){
   setT("pressure", pr || "—");
   $("pressure").style.color = pr==="normal" ? "var(--green)" : pr==="warning" ? "var(--yellow)" : "var(--red)";
   setT("prefill", st==="prefill" && S.prefill ? S.prefill.pct.toFixed(0)+"%" : (st==="prefill" ? "…" : "—"));
+  $("prefillSub").textContent = (st==="prefill" && S.prefill && S.prefill.cached_pct != null) ? "~"+S.prefill.cached_pct.toFixed(0)+"% cached" : "";
   setT("prefillRate", S.rates && S.rates.prefill_tps ? S.rates.prefill_tps.toFixed(0)+" tok/s" : "—");
   drawSpark();
 
@@ -261,8 +262,8 @@ function render(){
   setT("reqActive", act.length ? act.length+" active" : (S.sched && (S.sched.queued||S.sched.waiting_resources) ? (S.sched.queued||0)+" queued" : "none"));
   setT("reqTotals", S.req ? "done "+nn(S.req.completed_total)+" · fail "+nn(S.req.failed_total)+" · cancel "+nn(S.req.cancelled_total) : "");
   $("activeList").innerHTML = act.map(r =>
-    '<div class="row" style="margin-bottom:4px" data-tip="Active request. Bar = elapsed time; % = prefill rows ÷ input tokens (low when much is cached)."><div class="track" style="height:16px"><i style="width:'+Math.min(100,r.age_s*4)+'%;background:var(--orange)"></i></div>'+
-    '<span style="padding:0 8px;color:var(--orange)">#'+r.id+"</span><span style='color:var(--gray)'>in "+n(r.input)+(r.pct!=null?" · "+r.pct.toFixed(0)+"%":"")+" · "+r.age_s.toFixed(0)+"s</span></div>"
+    '<div class="row" style="margin-bottom:4px" data-tip="Active request. Bar = elapsed time. Chip = estimated share of the prompt served from the prefix cache — the rest is what prefill is actually working on."><div class="track" style="height:16px"><i style="width:'+Math.min(100,r.age_s*4)+'%;background:var(--orange)"></i></div>'+
+    '<span style="padding:0 8px;color:var(--orange)">#'+r.id+"</span><span style='color:var(--gray)'>in "+n(r.input)+(r.cached_pct!=null?" · <span style='color:var(--teal)'>~"+r.cached_pct.toFixed(0)+"% cached</span>":(r.pct!=null?" · "+r.pct.toFixed(0)+"%":""))+" · "+r.age_s.toFixed(0)+"s</span></div>"
   ).join("");
   $("recentBody").innerHTML = (S.req ? S.req.recent : []).map(r =>
     "<tr><td>#"+r.id+'</td><td>'+n(r.input)+"</td><td>"+n(r.cached)+"</td><td>"+n(r.output)+"</td><td>"+(r.ttft_s?r.ttft_s.toFixed(1)+"s":"—")+"</td><td>"+(r.tps?r.tps.toFixed(1):"—")+"</td></tr>"

@@ -6,17 +6,16 @@ import Darwin
 // MARK: - Configuration (mirrors start.sh)
 
 enum Cfg {
-    private static let env = ProcessInfo.processInfo.environment
     static let host = "127.0.0.1"
-    static let port = Int(env["SPLASH_PORT"] ?? "") ?? 8123
-    static let apiKey = env["SPLASH_KEY"] ?? "splash-standalone-1"
-    static let kitDir = env["SPLASH_KIT_DIR"] ?? NSHomeDirectory() + "/SplashUI/kit/splash-1.2.1-arm64-macos26"
+    static let port = 8123
+    static let apiKey = "splash-standalone-1"
+    static let kitDir = NSHomeDirectory() + "/Documents/code/splash-standalone/splash-1.2.1-arm64-macos26"
     static let python = kitDir + "/python/bin/python"
-    static let modelRoot = env["SPLASH_MODEL_ROOT"] ?? NSHomeDirectory() + "/SplashUI/models/incoai/Qwen3.8-27B-Splash"
+    static let modelRoot = NSHomeDirectory() + "/.lmstudio/models/incoai/Qwen3.8-27B-Splash"
     static let modelId = "incoai/Qwen3.8-27B-Splash"
-    static let maxCacheDisk = env["SPLASH_MAX_CACHE_DISK"] ?? "100g"
-    static let idleRelease = env["SPLASH_IDLE_RELEASE"] ?? "240m"
-    static let logLink = "/tmp/splashui.log"
+    static let maxCacheDisk = "100g"
+    static let idleRelease = "240m"
+    static let logLink = "/tmp/splash-standalone.log"
     static var base: String { "http://\(host):\(port)" }
     static var engineArgs: [String] {
         ["-u", "-m", "server.server", modelRoot,
@@ -216,7 +215,7 @@ final class LogTail {
         var id: Int
         var input: Int
         var start: Date
-        var rowsBase: Double?
+        var prefillBase: Double?
     }
     struct DoneReq {
         var id: Int; var input: Int; var cached: Int; var output: Int
@@ -227,6 +226,15 @@ final class LogTail {
     private var pending = ""
     var active: [Int: ActiveReq] = [:]
     private(set) var recent: [DoneReq] = []
+
+    // Token-weighted prefix-cache hit rate over the most recent completions. The engine
+    // only reports a request's exact prefix match at completion, so in-flight work is
+    // estimated from this window.
+    var recentHitRate: Double? {
+        let ins = recent.reduce(0) { $0 + $1.input }
+        guard ins > 0 else { return nil }
+        return min(1.0, Double(recent.reduce(0) { $0 + $1.cached }) / Double(ins))
+    }
 
     func poll() {
         guard let dest = try? FileManager.default.destinationOfSymbolicLink(atPath: Cfg.logLink) else { return }
@@ -265,7 +273,7 @@ final class LogTail {
             guard let id = Int(parts.last ?? ""), id > 0 else { return }
             var input = 0
             for p in parts { if let v = labeled(p, "input") { input = num(v) } }
-            active[id] = ActiveReq(id: id, input: input, start: Date(), rowsBase: nil)
+            active[id] = ActiveReq(id: id, input: input, start: Date(), prefillBase: nil)
         } else if first.hasSuffix("Done") || first.hasSuffix("Cancelled") {
             var d = DoneReq(id: 0, input: 0, cached: 0, output: 0, ttft: 0, tps: nil)
             var id: Int?
@@ -559,17 +567,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         // ---- log tail
         tail.poll()
         tail.active = tail.active.filter { Date().timeIntervalSince($0.value.start) < 3600 }
-        let rowsTotal = metrics["splash_target_prefill_rows_total"]
+        // Cumulative tokens actually prefilled — moves live during prefill. (The
+        // target_prefill_rows counter is a draft-context snapshot that does not move
+        // per request, which is why the old readout sat at 0%.)
+        let prefilledTotal = metrics["splash_prefill_input_tokens_total"]
         for (id, var req) in tail.active {
-            if req.rowsBase == nil { req.rowsBase = rowsTotal ?? 0 }
+            if req.prefillBase == nil { req.prefillBase = prefilledTotal ?? 0 }
             tail.active[id] = req
         }
+        // Prefix-cache hit rate: token-weighted over the last 8 completions, falling
+        // back to session counters (cached vs prefilled tokens) until the window fills.
+        var hitRate = tail.recentHitRate
+        if hitRate == nil,
+           let kt = (statusJSON?["cache"] as? [String: Any])?["kv_hit_tokens"] as? Double,
+           let pt = metrics["splash_prefill_input_tokens_total"] {
+            let den = kt + pt
+            if den > 0 { hitRate = min(1.0, kt / den) }
+        }
         let activeList = tail.active.values.map { req -> [String: Any] in
-            let pct: Double
-            if let base = req.rowsBase, let rows = rowsTotal, req.input > 0 {
-                pct = min(100, max(0, (rows - base) * 100.0 / Double(req.input)))
-            } else { pct = 0 }
-            return ["id": req.id, "input": Double(req.input), "age_s": Date().timeIntervalSince(req.start), "pct": pct]
+            let workDone = max(0, (prefilledTotal ?? 0) - (req.prefillBase ?? 0))
+            var r: [String: Any] = ["id": req.id, "input": Double(req.input), "age_s": Date().timeIntervalSince(req.start)]
+            if req.input > 0 {
+                if let hr = hitRate {
+                    // Progress against the *uncached* tail, clamped so it can neither
+                    // overshoot the observed work nor under-claim the whole input.
+                    let est = Double(req.input) * (1 - hr)
+                    // Work within the estimate → progress against the uncached tail;
+                    // work beyond it (a mostly-uncached prompt) → classic whole-input sweep.
+                    let denom = (est >= workDone) ? est : Double(req.input)
+                    if denom > 0 { r["pct"] = min(100, max(0, workDone * 100.0 / denom)) }
+                    else { r["pct"] = 0.0 }
+                    if est >= workDone { r["cached_pct"] = hr * 100 }
+                } else {
+                    r["pct"] = min(100, max(0, workDone * 100.0 / Double(req.input)))
+                }
+            } else { r["pct"] = 0.0 }
+            return r
         }.sorted { ($0["id"] as? Int) ?? 0 > ($1["id"] as? Int) ?? 0 }
         let recentList = tail.recent.map { r -> [String: Any] in
             var d: [String: Any] = ["id": r.id, "input": r.input, "cached": r.cached,
@@ -662,7 +695,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         let pressure = statusJSON?["memory_pressure"] as? String
         if let pressure = pressure { j["pressure"] = pressure }
         if state == "prefill", let first = activeList.first {
-            j["prefill"] = ["pct": first["pct"] as? Double ?? 0, "input": first["input"] as? Double ?? 0]
+            var pf: [String: Any] = ["pct": first["pct"] as? Double ?? 0, "input": first["input"] as? Double ?? 0]
+            if let c = first["cached_pct"] as? Double { pf["cached_pct"] = c }
+            j["prefill"] = pf
         } else {
             j["prefill"] = NSNull()
         }
