@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+:root {
+  --bg: #141414; --bg2: #1d1d1d; --track: #2a2a2a;
+  --orange: #fa8a3c; --orange-dim: #8a4d20;
+  --teal: #3fc1c9; --teal-dim: #256b70;
+  --gray: #8d9099; --gray-dim: #3c3f45;
+  --white: #e8e8e8; --red: #e05545; --yellow: #e8c840; --green: #67c96a;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--white);
+  font-family: "Futura", "Avenir Next Condensed", "Helvetica Neue", sans-serif;
+  font-weight: 600; letter-spacing: .05em; font-size: 11px;
+  width: 100%; padding: 8px; text-transform: uppercase; overflow: hidden;
+  -webkit-user-select: none; user-select: none;
+}
+/* ---- LCARS primitives ---- */
+.track { background: var(--track); border-radius: 10px; height: 20px; position: relative; overflow: hidden; flex: 1; }
+.track > i { position: absolute; top: 0; bottom: 0; left: 0; width: 0%; transition: width .45s; }
+.bar { position: relative; background: var(--track); border-radius: 10px; height: 16px; overflow: hidden; }
+.bar > i { position: absolute; top: 0; bottom: 0; left: 0; width: 0%; transition: width .45s; }
+.seg { display: flex; height: 16px; border-radius: 10px; overflow: hidden; background: var(--track); }
+.seg > div { height: 100%; transition: width .45s; }
+.row { display: flex; gap: 6px; margin-bottom: 6px; align-items: stretch; }
+.col { display: flex; flex-direction: column; gap: 5px; }
+.label { color: var(--gray); font-size: 9px; letter-spacing: .12em; margin: 8px 0 3px; display: flex; justify-content: space-between; }
+.label b { color: var(--white); font-weight: 600; }
+.pill { border-radius: 10px; padding: 4px 10px; font-size: 10px; display: inline-block; text-align: center; white-space: nowrap; }
+.o { background: var(--orange); color: #161616; } .t { background: var(--teal); color: #161616; }
+.g { background: var(--gray-dim); color: var(--gray); } .r { background: var(--red); color: #161616; }
+.y { background: var(--yellow); color: #161616; } .gr { background: var(--green); color: #161616; }
+.big { font-size: 21px; font-weight: 700; letter-spacing: .02em; }
+.mid { font-size: 13px; font-weight: 700; }
+/* ---- sections ---- */
+#header { display: flex; gap: 6px; margin-bottom: 8px; height: 34px; }
+#header .title { background: var(--orange); color: #161616; border-radius: 17px 0 0 17px; display: flex; align-items: center; padding: 0 14px; font-size: 16px; font-weight: 700; letter-spacing: .14em; }
+#header .model { background: var(--teal); color: #161616; display: flex; align-items: center; padding: 0 12px; font-size: 11px; flex: 1; overflow: hidden; white-space: nowrap; }
+#statusPill { border-radius: 17px; display: flex; align-items: center; padding: 0 14px; font-size: 12px; }
+section { background: var(--bg2); border-radius: 12px; padding: 8px 10px 10px; margin-bottom: 6px; }
+.stat { display: flex; justify-content: space-between; align-items: baseline; }
+.k { color: var(--gray); font-size: 9px; letter-spacing: .1em; }
+#spark { background: var(--track); border-radius: 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 9.5px; }
+th { color: var(--gray); text-align: right; padding: 1px 4px; font-weight: 600; }
+th:first-child, td:first-child { text-align: left; }
+td { text-align: right; padding: 1.5px 4px; border-top: 1px solid var(--gray-dim); }
+button { font-family: inherit; text-transform: uppercase; letter-spacing: .08em; border: none; cursor: pointer; }
+.btn { border-radius: 10px; padding: 5px 14px; font-size: 10px; }
+#footer { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
+#footNote { color: var(--gray-dim); font-size: 8.5px; flex: 1; letter-spacing: .08em; }
+#tip { position: fixed; display: none; z-index: 10; pointer-events: none;
+  background: #0c0c0c; border: 1px solid var(--gray-dim); border-radius: 6px;
+  color: var(--white); font-size: 10px; font-weight: 400; text-transform: none;
+  letter-spacing: 0; line-height: 1.5; padding: 6px 9px; max-width: 250px;
+  box-shadow: 0 3px 12px rgba(0,0,0,.7); white-space: normal; }
+</style>
+</head>
+<body>
+<div id="header">
+  <div class="title" id="hName">SPLASH</div>
+  <div class="model" id="hModel">—</div>
+  <div class="pill g" id="statusPill" data-tip="Engine state — DOWN: no server · LOADING: model loading · PREFILL: prompt being processed · DECODE: generating output · QUEUED: waiting for resources · IDLE: no work · RESTART: app is restarting the server">WAITING</div>
+</div>
+
+<section>
+  <div class="row">
+    <div class="col" style="flex:1.2" data-tip="Committed output tokens per second — only tokens that survived the target model's verification. The DFlash-2 draft proposes extra tokens each step; rejected ones don't count, so this matches the tok/s in the completion log. The last real sample is kept for up to 15 s."><div class="k">Decode</div><div class="big" style="color:var(--teal)" id="toks">—</div><div class="k" id="toksSub">tok/s</div></div>
+    <div class="col" style="flex:1" data-tip="Median time-to-first-token per request. For reasoning models this includes the entire thinking phase — the first output token arrives after thinking completes."><div class="k">TTFT p50</div><div class="mid" id="ttft50">—</div></div>
+    <div class="col" style="flex:1" data-tip="Median inter-token latency during decode (lower = faster); 1 / ITL ≈ decode speed."><div class="k">ITL p50</div><div class="mid" id="itl50">—</div></div>
+    <div class="col" style="flex:1.2" data-tip="The engine's own memory-pressure verdict (normal / warning / critical) — KV cache and state against the memory plan."><div class="k">Pressure</div><div class="mid" id="pressure">—</div></div>
+    <div class="col" style="flex:1.2" data-tip="Prefill progress of the frontmost request: prefill rows processed ÷ input tokens. Reads low when much of the prompt was served from cache."><div class="k">Prefill</div><div class="mid" style="color:var(--orange)" id="prefill">—</div></div>
+  </div>
+  <div class="row" style="margin-top:6px">
+    <div class="col" style="flex:1" data-tip="Prefill throughput — input tokens per second of prefill wall-time. Only meaningful while a request is prefilling; big uncached prompts spike it."><div class="k">Rate</div><div class="big" style="color:var(--orange)" id="prefillRate">—</div></div>
+    <div class="col" style="flex:2.2" data-tip="Decode tok/s samples, last 90 s."><div class="k">Tok/s — last 90 s</div><canvas id="spark" width="470" height="34" style="width:100%;height:34px"></canvas></div>
+  </div>
+</section>
+
+<section>
+  <div class="label" data-tip="Engine readiness and server uptime."><span>Engine</span><b id="engState">—</b></div>
+  <div class="row">
+    <div class="col" style="flex:1" data-tip="GPU backend health — whether the Metal device reports healthy."><div class="k">Metal</div><div class="mid" id="metal">—</div></div>
+    <div class="col" style="flex:1" data-tip="Maximum context the model was loaded with (tokens)."><div class="k">Context</div><div class="mid" id="ctx">—</div></div>
+    <div class="col" style="flex:1" data-tip="Engine main-loop tick time (ms) — the scheduler cycle; spikes mean a slow step."><div class="k">Loop max</div><div class="mid" id="loop">—</div></div>
+    <div class="col" style="flex:1" data-tip="Decode lanes — concurrent sequences decoding / total scheduler states."><div class="k">Lanes</div><div class="mid" id="lanes">—</div></div>
+    <div class="col" style="flex:1" data-tip="KV cache quantization format (int8 = symmetric 8-bit)."><div class="k">KV fmt</div><div class="mid" id="kvfmt">—</div></div>
+  </div>
+</section>
+
+<section>
+  <div class="label" data-tip="KV cache usage vs planned capacity — per-request attention state in GPU memory."><span>KV cache — engine</span><b id="kvPct">—</b></div>
+  <div class="bar"><i id="kvBar" style="background:var(--teal)"></i></div>
+  <div class="row" style="margin-top:7px">
+    <div class="col" style="flex:1" data-tip="KV cache bytes in use."><div class="k">KV alloc</div><div class="mid" id="kvAlloc">—</div></div>
+    <div class="col" style="flex:1" data-tip="Active KV pages / parked cache pages (32 tokens per page). Parked pages hold context that can resume without re-prefill."><div class="k">Pages act/cache</div><div class="mid" id="kvPages">—</div></div>
+    <div class="col" style="flex:1" data-tip="Scheduler state bytes — per-request runtime state (not model weights)."><div class="k">State mem</div><div class="mid" id="stateMem">—</div></div>
+  </div>
+  <div class="row" style="margin-top:7px">
+    <div class="col" style="flex:1" data-tip="Engine process physical footprint right now (weights + KV + state)."><div class="k">Eng mem</div><div class="mid" id="engMem">—</div></div>
+    <div class="col" style="flex:1" data-tip="Engine peak footprint since model load."><div class="k">Peak</div><div class="mid" id="engPeak">—</div></div>
+    <div class="col" style="flex:1" data-tip="Memory-governor headroom — how much more the engine may use before it starts shedding cache."><div class="k">Gov headroom</div><div class="mid" id="govHeadroom">—</div></div>
+    <div class="col" style="flex:1.4" data-tip="OS-reported available host memory."><div class="k">Host avail</div><div class="mid" id="hostAvail">—</div></div>
+  </div>
+  <div class="label" style="margin-top:8px" data-tip="SSD prefix cache — KV state persisted to disk and reused across requests (survives restarts with --persistent-cache)."><span>SSD cache (prefix) <span id="ssdNote"></span></span><b id="ssdSize">—</b></div>
+  <div class="bar"><i id="ssdBar" style="background:var(--orange)"></i></div>
+  <div class="row" style="margin-top:7px">
+    <div class="col" style="flex:1" data-tip="Cache lookups that found a stored prefix."><div class="k">Hits</div><div class="mid" id="hits">—</div></div>
+    <div class="col" style="flex:1" data-tip="Cache lookups that found nothing — a full prefill was required."><div class="k">Cold misses</div><div class="mid" id="misses">—</div></div>
+    <div class="col" style="flex:1" data-tip="Input tokens served from cached KV — these skip prefill."><div class="k">Reused tok</div><div class="mid" id="reused">—</div></div>
+  </div>
+</section>
+
+<section>
+  <div class="label" data-tip="Physical RAM by class: wired / compressed / active / inactive / free."><span>System memory</span><b id="ramUsed">—</b></div>
+  <div class="seg" id="ramSeg">
+    <div id="ramWired" style="background:var(--orange)"></div>
+    <div id="ramCompressed" style="background:var(--teal)"></div>
+    <div id="ramActive" style="background:var(--gray)"></div>
+    <div id="ramInactive" style="background:var(--gray-dim)"></div>
+    <div id="ramFree" style="background:transparent"></div>
+  </div>
+  <div class="row" style="margin-top:6px">
+    <div class="col" style="flex:1" data-tip="Memory locked in physical RAM (kernels, drivers, page cache)."><div class="k">Wired</div><div class="mid" style="color:var(--orange)" id="wired">—</div></div>
+    <div class="col" style="flex:1" data-tip="Memory compressed on disk by the OS when RAM is under pressure."><div class="k">Compressed</div><div class="mid" style="color:var(--teal)" id="comp">—</div></div>
+    <div class="col" style="flex:1" data-tip="Free physical RAM."><div class="k">Free</div><div class="mid" id="free">—</div></div>
+    <div class="col" style="flex:1.4" data-tip="The engine process's physical footprint (RSS)."><div class="k">Engine footprint</div><div class="mid" id="footprint">—</div></div>
+  </div>
+  <div class="label" style="margin-top:8px" data-tip="System swap usage; the trend is the change per second."><span>Swap <span id="swapTrend"></span></span><b id="swapUsed">—</b></div>
+  <div class="bar"><i id="swapBar" style="background:var(--yellow)"></i></div>
+</section>
+
+<section>
+  <div class="label" data-tip="Live requests. The counters are session totals; the table shows the last 8 completions."><span>Requests <span id="reqTotals"></span></span><b id="reqActive">—</b></div>
+  <div id="activeList" style="margin-bottom:6px"></div>
+  <table id="recentTable">
+    <thead><tr><th data-tip="Prompt tokens">Req</th><th data-tip="Prompt tokens">Input</th><th data-tip="Prompt tokens served from cached KV — these skipped prefill">Cached</th><th data-tip="Output tokens generated">Out</th><th data-tip="Time to first output token — includes thinking for reasoning models">TTFT</th><th data-tip="Streamed output rate from the completion log">tok/s</th></tr></thead>
+    <tbody id="recentBody"></tbody>
+  </table>
+</section>
+
+<div id="footer">
+  <button class="btn gr" id="btnStart">Start</button>
+  <button class="btn r" id="btnStop">Stop</button>
+  <button class="btn y" id="btnRestart">Restart</button>
+  <span id="footNote">—</span>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let S = null, hist = [], lastSwap = 0, lastSwapT = 0, lastH = 0;
+const g = (b) => b >= 1073741824 ? (b/1073741824).toFixed(1)+" GiB" : b >= 1048576 ? (b/1048576).toFixed(0)+" MiB" : (b/1024).toFixed(0)+" KiB";
+const n = (v) => v == null ? "—" : v >= 1e6 ? (v/1e6).toFixed(1)+"M" : v >= 1e3 ? (v/1e3).toFixed(1)+"K" : String(v);
+const nn = (v) => v == null ? "—" : v;
+const ms = (v) => v == null ? "—" : v >= 60000 ? (v/60000).toFixed(1)+" min" : v >= 1000 ? (v/1000).toFixed(1)+" s" : v.toFixed(0)+" ms";
+
+function setT(id, v){ $(id).textContent = v == null || v === "" ? "—" : v; }
+
+// ---- hover help (shows after a short hover delay, hides immediately on leave)
+const tip = document.createElement("div"); tip.id = "tip"; document.body.appendChild(tip);
+let tipEl = null, tipTimer = null;
+function placeTip(el) {
+  const r = el.getBoundingClientRect();
+  const x = Math.max(4, Math.min(innerWidth - tip.offsetWidth - 4, r.left + r.width / 2 - tip.offsetWidth / 2));
+  tip.style.left = x + "px";
+  tip.style.top = (r.top - tip.offsetHeight < 4 ? r.bottom + 6 : r.top - tip.offsetHeight - 6) + "px";
+}
+function hideTip() { if (tipTimer) { clearTimeout(tipTimer); tipTimer = null; } tipEl = null; tip.style.display = "none"; }
+document.addEventListener("mousemove", e => {
+  const el = e.target && e.target.closest ? e.target.closest("[data-tip]") : null;
+  if (el === tipEl) { if (tip.style.display === "block") placeTip(el); return; }
+  if (tipTimer) { clearTimeout(tipTimer); tipTimer = null; }
+  tipEl = el;
+  if (!el) { tip.style.display = "none"; return; }
+  if (tip.style.display === "block") tip.style.display = "none";
+  tipTimer = setTimeout(() => {
+    tipTimer = null;
+    if (tipEl !== el || !el.isConnected) return;
+    tip.textContent = el.getAttribute("data-tip");
+    tip.style.display = "block";
+    placeTip(el);
+  }, 500);
+});
+document.addEventListener("mouseleave", hideTip);
+
+function render(){
+  if(!S) return;
+  const st = S.state || "wait";
+  const pill = $("statusPill");
+  const map = {down:["DOWN","r"], loading:["LOADING","y"], prefill:["PREFILL","o"], decode:["DECODE","t"], queue:["QUEUED","y"], idle:["IDLE","g"], wait:["WAITING","g"], restarting:["RESTART","y"]};
+  const [txt, cls] = map[st] || ["?","g"];
+  pill.textContent = txt + (st==="prefill" && S.prefill && S.prefill.pct != null ? " "+S.prefill.pct.toFixed(0)+"%" : "");
+  pill.className = "pill " + cls;
+  setT("hModel", S.model ? S.model.replace("incoai/","") + " · 1.2.1" : "—");
+
+  // decode + prefill
+  const tps = S.rates && S.rates.decode_tps;
+  setT("toks", st==="decode" ? (tps ? tps.toFixed(0) : "—") : "—");
+  if(tps != null) hist.push(tps), hist.length > 90 && hist.shift();
+  setT("ttft50", S.engine ? ms(S.engine.ttft_p50_ms) : "—");
+  setT("itl50", S.engine ? ms(S.engine.itl_p50_ms) : "—");
+  const pr = S.engine && S.engine.pressure;
+  setT("pressure", pr || "—");
+  $("pressure").style.color = pr==="normal" ? "var(--green)" : pr==="warning" ? "var(--yellow)" : "var(--red)";
+  setT("prefill", st==="prefill" && S.prefill ? S.prefill.pct.toFixed(0)+"%" : (st==="prefill" ? "…" : "—"));
+  setT("prefillRate", S.rates && S.rates.prefill_tps ? S.rates.prefill_tps.toFixed(0)+" tok/s" : "—");
+  drawSpark();
+
+  // engine
+  setT("engState", (S.ready?"READY":"NOT READY") + " · " + (S.server && S.server.up_seconds ? up(S.server.up_seconds) : "—"));
+  setT("metal", S.engine && S.engine.metal_healthy != null ? (S.engine.metal_healthy ? "OK" : "FAIL") : "—");
+  setT("ctx", S.ctx ? (S.ctx/1024).toFixed(0)+"K" : "—");
+  setT("loop", S.engine && S.engine.loop_tick_ms != null ? S.engine.loop_tick_ms.toFixed(1)+" ms" : "—");
+  setT("lanes", S.state_mem && S.state_mem.active_lanes != null && S.state_mem.entries != null ? S.state_mem.active_lanes + " act / " + S.state_mem.entries : "—");
+  setT("kvfmt", S.kv_fmt || "—");
+
+  // kv
+  const kv = S.kv || {}, cap = kv.capacity_bytes || 0;
+  const kvPct = cap ? Math.min(100, (kv.allocated_bytes||0)/cap*100) : 0;
+  setT("kvPct", kvPct.toFixed(1)+"%");
+  $("kvBar").style.width = kvPct+"%";
+  setT("kvAlloc", g(kv.allocated_bytes||0));
+  setT("kvPages", (kv.active_pages||0)+" / "+(kv.cache_pages||0));
+  setT("stateMem", g(S.state_mem ? S.state_mem.bytes : 0));
+  const em = S.eng_mem || {};
+  setT("engMem", g(em.current_bytes||0));
+  setT("engPeak", g(em.peak_bytes||0));
+  setT("govHeadroom", g(em.headroom_bytes||0));
+  setT("hostAvail", g(em.host_available_bytes||0));
+  const ssd = S.ssd || {};
+  setT("ssdSize", g(ssd.bytes||0));
+  setT("ssdNote", ssd.quota ? "("+g(ssd.quota)+" quota)" : "");
+  $("ssdBar").style.width = ssd.quota ? Math.min(100,(ssd.bytes||0)/ssd.quota*100)+"%" : "0%";
+  setT("hits", n(S.cache ? S.cache.hits : null));
+  setT("misses", n(S.cache ? S.cache.cold_misses : null));
+  setT("reused", n(S.cache ? S.cache.reused_tokens : null));
+
+  // system ram
+  const s_ = S.sys || {}, tot = s_.phys_bytes || 1;
+  const w = s_.wired_bytes||0, c = s_.compressed_bytes||0, a = s_.active_bytes||0, i = s_.inactive_bytes||0, f = s_.free_bytes||0;
+  $("ramWired").style.width = w/tot*100+"%"; $("ramCompressed").style.width = c/tot*100+"%";
+  $("ramActive").style.width = a/tot*100+"%"; $("ramInactive").style.width = i/tot*100+"%"; $("ramFree").style.width = f/tot*100+"%";
+  setT("ramUsed", ((tot-f)/tot*100).toFixed(0)+"% · "+g(tot-f)+" / "+g(tot));
+  setT("wired", g(w)); setT("comp", g(c)); setT("free", g(f));
+  setT("footprint", s_.engine_footprint_bytes ? g(s_.engine_footprint_bytes) : "—");
+
+  // swap
+  setT("swapUsed", g(s_.swap_used_bytes||0)+" / "+g(s_.swap_total_bytes||0));
+  $("swapBar").style.width = s_.swap_total_bytes ? (s_.swap_used_bytes/s_.swap_total_bytes*100)+"%" : "0%";
+  const now = Date.now()/1000;
+  if(lastSwapT){ const dt = now-lastSwapT; if(dt>0.5){ const rb = (s_.swap_used_bytes-lastSwap)/dt; setT("swapTrend", (rb>524288?"▲ ":"")+(rb<-524288?"▼ ":"")+(Math.abs(rb)/1048576).toFixed(2)+" MiB/s"); } }
+  lastSwap = s_.swap_used_bytes||0; lastSwapT = now;
+  const swPct = s_.swap_total_bytes ? s_.swap_used_bytes/s_.swap_total_bytes : 0;
+  $("swapBar").style.background = swPct>0.8 ? "var(--red)" : swPct>0.5 ? "var(--yellow)" : "var(--gray)";
+
+  // requests
+  const act = S.req ? S.req.active : [];
+  setT("reqActive", act.length ? act.length+" active" : (S.sched && (S.sched.queued||S.sched.waiting_resources) ? (S.sched.queued||0)+" queued" : "none"));
+  setT("reqTotals", S.req ? "done "+nn(S.req.completed_total)+" · fail "+nn(S.req.failed_total)+" · cancel "+nn(S.req.cancelled_total) : "");
+  $("activeList").innerHTML = act.map(r =>
+    '<div class="row" style="margin-bottom:4px" data-tip="Active request. Bar = elapsed time; % = prefill rows ÷ input tokens (low when much is cached)."><div class="track" style="height:16px"><i style="width:'+Math.min(100,r.age_s*4)+'%;background:var(--orange)"></i></div>'+
+    '<span style="padding:0 8px;color:var(--orange)">#'+r.id+"</span><span style='color:var(--gray)'>in "+n(r.input)+(r.pct!=null?" · "+r.pct.toFixed(0)+"%":"")+" · "+r.age_s.toFixed(0)+"s</span></div>"
+  ).join("");
+  $("recentBody").innerHTML = (S.req ? S.req.recent : []).map(r =>
+    "<tr><td>#"+r.id+'</td><td>'+n(r.input)+"</td><td>"+n(r.cached)+"</td><td>"+n(r.output)+"</td><td>"+(r.ttft_s?r.ttft_s.toFixed(1)+"s":"—")+"</td><td>"+(r.tps?r.tps.toFixed(1):"—")+"</td></tr>"
+  ).join("");
+
+  // footer
+  setT("footNote", S.server && S.server.pid ? "pid "+S.server.pid+(S.server.launched_by_app?" · app-managed":" · external")+" · "+up(S.server.up_seconds||0) : "server not running");
+  const h = document.body.scrollHeight;
+  if (h !== lastH) { lastH = h; try { window.webkit.messageHandlers.size.postMessage(h) } catch(e) {} }
+}
+function up(s){ s=Math.max(0,s|0); const h=s/3600|0, m=(s%3600)/60|0, ss=s%60; return (h?h+"h ":"")+(m?m+"m ":"")+ss+"s"; }
+function drawSpark(){
+  const c = $("spark"), x = c.getContext("2d");
+  x.clearRect(0,0,c.width,c.height);
+  const max = Math.max(30, ...hist);
+  x.strokeStyle = "#3fc1c9"; x.lineWidth = 1.5; x.beginPath();
+  hist.forEach((v,i)=>{ const px = i/(89)*c.width, py = c.height - v/max*(c.height-4) - 2; i?x.lineTo(px,py):x.moveTo(px,py); });
+  x.stroke();
+}
+window.update = d => { S = d; render(); };
+const cmd = c => { try { window.webkit.messageHandlers.cmd.postMessage(c); } catch(e) {} };
+$("btnStart").onclick = () => cmd("start");
+$("btnStop").onclick = () => cmd("stop");
+$("btnRestart").onclick = () => cmd("restart");
+
+if (location.search.includes("demo")) {
+  const D = { t:Date.now()/1000, state:"decode", ready:true, model:"incoai/Qwen3.8-27B-Splash", ctx:262144,
+    engine:{metal_healthy:1, pressure:"normal", loop_tick_ms:41.2, ttft_p50_ms:24500, itl_p50_ms:45, ttft_p95_ms:1475400, itl_p95_ms:180},
+    sched:{prefilling:0, decoding:1, queued:0, waiting_resources:0, waiting_prefix:0, frontend_active:1, frontend_waiting:0},
+    rates:{decode_tps:86, prefill_tps:0}, prefill:null, kv_fmt:"int8",
+    kv:{allocated_bytes:9.2e9, active_pages:1200, cache_pages:4100, free_pages:83, capacity_bytes:1.95e10},
+    state_mem:{bytes:3.5e8, entries:3, in_use:1, active_lanes:1},
+    eng_mem:{current_bytes:3.16e10, peak_bytes:3.17e10, limit_bytes:3.9e10, headroom_bytes:6.7e9, host_available_bytes:6.8e9},
+    ssd:{bytes:8.1e9, quota:1.07e11, kv_bytes:7.9e9, rest_bytes:0, restores:4888, reads:5.4e9, writes:5.8e9},
+    cache:{hits:42, cold_misses:3, reused_tokens:2.9e6},
+    req:{active:[{id:9, input:161870, age_s:12, pct:64}], recent:[{id:8,input:159779,cached:156448,output:1740,ttft_s:40.4,tps:27.2},{id:7,input:131555,cached:0,output:8635,ttft_s:1475,tps:22.4}], completed_total:8, failed_total:0, cancelled_total:0},
+    sys:{phys_bytes:5.15e10, free_bytes:4.3e8, active_bytes:8.6e9, inactive_bytes:8.3e9, wired_bytes:3.05e10, compressed_bytes:2.5e9, swap_total_bytes:6.4e9, swap_used_bytes:5.3e9, engine_footprint_bytes:3.3e10},
+    server:{pid:67911, launched_by_app:true, up_seconds:3725} };
+  (function loop(){ D.state = Math.random()<.7?"decode":"prefill"; if(D.state==="prefill"){D.prefill={pct:20+Math.random()*70, input:161870}; D.rates.prefill_tps=600+Math.random()*900; D.rates.decode_tps=0; D.engine.pressure=Math.random()<.1?"warning":"normal";} else {D.prefill=null; D.rates.decode_tps=60+Math.random()*60; D.engine.pressure="normal";} D.sys.free_bytes=3e8+Math.random()*2e9; D.sys.swap_used_bytes=5.3e9+Math.random()*5e8; window.update({...D, t:Date.now()/1000}); setTimeout(loop, 1000); })();
+}
+</script>
+</body>
+</html>
