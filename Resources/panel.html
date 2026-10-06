@@ -45,7 +45,7 @@ body {
 section { --accent: var(--lavender); position: relative; padding: 0 0 8px 64px; margin-bottom: 6px; }
 section::before { content: attr(data-channel); position: absolute; left: 0; top: 0; bottom: 0; width: 42px; background: var(--accent); color: var(--bg); display: flex; align-items: flex-end; justify-content: flex-end; padding: 8px 6px; font-family: var(--display); font-size: 23px; font-weight: 700; }
 section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 0; height: 4px; border-radius: 0 2px 2px 0; background: linear-gradient(to right, var(--accent) 0 58%, var(--bg) 58% 60%, var(--accent) 60% 82%, var(--bg) 82% 84%, var(--accent) 84% 100%); }
-.performance { --accent: var(--orange); }
+.performance { --accent: #33cc99; }
 .engine-panel { --accent: var(--lavender); }
 .cache-panel { --accent: var(--teal); }
 .memory-panel { --accent: var(--peach); }
@@ -53,7 +53,7 @@ section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 
 .section-heading, section > .label:first-child { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 0 0 5px; color: var(--accent); font-family: var(--display); font-size: 14px; letter-spacing: .12em; line-height: 1; }
 .section-heading h2 { font: inherit; }
 .section-heading span { color: var(--gray); font-size: 11px; letter-spacing: .08em; }
-.stat { display: flex; justify-content: space-between; align-items: baseline; }
+.section-heading, section > .label:first-child { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 0 0 5px; color: var(--accent); font-family: var(--display); font-size: 14px; letter-spacing: .12em; line-height: 1; }
 /* Black breaks turn the meters into LCARS segments without changing their scale. */
 .track, .bar, .seg { position: relative; background: var(--track); border-radius: 0 7px 7px 0; height: 14px; overflow: hidden; }
 .track { flex: 1; }
@@ -104,11 +104,11 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
     <div class="col" style="flex:1.2" data-tip="Committed output tokens per second — only tokens that survived the target model's verification. The DFlash-2 draft proposes extra tokens each step; rejected ones don't count, so this matches the tok/s in the completion log. The last real sample is kept for up to 15 s."><div class="k">Decode</div><div class="big" style="color:var(--teal)" id="toks">—</div><div class="k" id="toksSub">tok/s</div></div>
     <div class="col" style="flex:1" data-tip="Median time-to-first-token per request. For reasoning models this includes the entire thinking phase — the first output token arrives after thinking completes."><div class="k">TTFT p50</div><div class="mid" id="ttft50">—</div></div>
     <div class="col" style="flex:1" data-tip="Median inter-token latency during decode (lower = faster); 1 / ITL ≈ decode speed."><div class="k">ITL p50</div><div class="mid" id="itl50">—</div></div>
-    <div class="col" style="flex:1.2" data-tip="Progress of the prefill work: tokens prefilled ÷ this request's uncached tail. The tail is measured from the engine's cache for this request — resident KV, SSD restores, and resumed context (falls back to the recent requests' hit rates until the lookup resolves). For a fully uncached prompt it reads 100% from the start. The last sample is kept for up to 15 s after prefill ends."><div class="k">Prefill</div><div class="mid" style="color:var(--orange)" id="prefill">—</div><div class="k" id="prefillSub" style="color:var(--teal)"></div></div>
+    <div class="col" style="flex:1.2" data-tip="Progress of the prefill work: tokens prefilled ÷ this request's uncached tail. The tail is measured from the engine's cache for this request — resident KV, SSD restores, and resumed context (falls back to the recent requests' hit rates until the lookup resolves). For a fully uncached prompt it reads 100% from the start. The last sample is kept for up to 15 s after prefill ends."><div class="k">Prefill</div><div class="mid" style="color:#33cc99" id="prefill">—</div><div class="k" id="prefillSub" style="color:var(--teal)"></div></div>
     <div class="col" style="flex:1.2" data-tip="The engine's own memory-pressure verdict (normal / warning / critical) — KV cache and state against the memory plan."><div class="k">Pressure</div><div class="mid" id="pressure">—</div></div>
   </div>
   <div class="row" style="margin-top:6px">
-    <div class="col" style="flex:1" data-tip="Prefill throughput — input tokens per second of prefill wall-time, one sample per second while a request is prefilling. The last real sample is kept for up to 15 s."><div class="k">Rate</div><div class="big" style="color:var(--orange)" id="prefillRate">—</div></div>
+    <div class="col" style="flex:1" data-tip="Prefill throughput — input tokens per second of prefill wall-time, one sample per second while a request is prefilling. The last real sample is kept for up to 15 s."><div class="k">Rate</div><div class="big" style="color:#33cc99" id="prefillRate">—</div></div>
     <div class="col" style="flex:2.2" data-tip="Decode tok/s samples, last 90 s."><div class="k">Tok/s — last 90 s</div><canvas id="spark" width="470" height="28" style="width:100%;height:28px"></canvas></div>
   </div>
 </section>
