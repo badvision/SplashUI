@@ -1,8 +1,7 @@
 # SplashUI
 
 A menu-bar UI + lifecycle manager for running [Splash](https://github.com/incoai/splash) —
-Inco AI's local inference engine for Apple silicon — as a **standalone service**, with no
-LM Studio required.
+Inco AI's local inference engine for Apple silicon — as a **standalone service**.
 
 You get:
 
