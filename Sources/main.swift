@@ -216,7 +216,8 @@ final class LogTail {
         var input: Int
         var start: Date
         var prefillBase: Double?
-        var kvHitBase: Double?
+        var cacheBase: Double?
+        var resumeBase: Double?
     }
     struct DoneReq {
         var id: Int; var input: Int; var cached: Int; var output: Int
@@ -274,7 +275,7 @@ final class LogTail {
             guard let id = Int(parts.last ?? ""), id > 0 else { return }
             var input = 0
             for p in parts { if let v = labeled(p, "input") { input = num(v) } }
-            active[id] = ActiveReq(id: id, input: input, start: Date(), prefillBase: nil, kvHitBase: nil)
+            active[id] = ActiveReq(id: id, input: input, start: Date(), prefillBase: nil, cacheBase: nil, resumeBase: nil)
         } else if first.hasSuffix("Done") || first.hasSuffix("Cancelled") {
             var d = DoneReq(id: 0, input: 0, cached: 0, output: 0, ttft: 0, tps: nil)
             var id: Int?
@@ -578,10 +579,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         // target_prefill_rows counter is a draft-context snapshot that does not move
         // per request, which is why the old readout sat at 0%.)
         let prefilledTotal = metrics["splash_prefill_input_tokens_total"]
-        let kvHitTokensNow = (statusJSON?["cache"] as? [String: Any])?["kv_hit_tokens"] as? Double
+        let cacheBlock = statusJSON?["cache"] as? [String: Any]
+        let cacheTokensNow = ((cacheBlock?["kv_hit_tokens"] as? Double) ?? 0)
+            + ((cacheBlock?["kv_disk_hit_tokens"] as? Double) ?? 0)
+            + ((cacheBlock?["reused_tokens"] as? Double) ?? 0)
+        let resumptionsNow = (cacheBlock?["resource_resumptions"] as? Double) ?? 0
         for (id, var req) in tail.active {
             if req.prefillBase == nil { req.prefillBase = prefilledTotal ?? 0 }
-            if req.kvHitBase == nil { req.kvHitBase = kvHitTokensNow ?? 0 }
+            if req.cacheBase == nil { req.cacheBase = cacheTokensNow }
+            if req.resumeBase == nil { req.resumeBase = resumptionsNow }
             tail.active[id] = req
         }
         // Prefix-cache hit rate: token-weighted over the last 8 completions, falling
@@ -597,13 +603,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             let workDone = max(0, (prefilledTotal ?? 0) - (req.prefillBase ?? 0))
             var r: [String: Any] = ["id": req.id, "input": Double(req.input), "age_s": Date().timeIntervalSince(req.start)]
             if req.input > 0 {
-                // The engine credits this request's prefix match to kv_hit_tokens when
-                // its lookup resolves, so the uncached tail is a measurement, not a
+                // The engine credits this request's cached tokens from three sources
+                // when its lookup resolves: resident KV (kv_hit_tokens), SSD restores
+                // (kv_disk_hit_tokens; the governor demotes idle pages to disk), and
+                // state resumption (reused_tokens; ongoing conversations resume the
+                // prior turn's state). So the uncached tail is a measurement, not a
                 // guess from other requests' hit rates (which sits flat when the
-                // recent mix varies). A cold request reads 0 hits and falls back to
-                // the window estimate / whole-input sweep.
-                let kvHitTokens = (statusJSON?["cache"] as? [String: Any])?["kv_hit_tokens"] as? Double
-                let cachedNow = min(Double(req.input), max(0, (kvHitTokens ?? 0) - (req.kvHitBase ?? 0)))
+                // recent mix varies). A cold request reads 0 and falls back to the
+                // window estimate / whole-input sweep.
+                let cacheTokens = ((cacheBlock?["kv_hit_tokens"] as? Double) ?? 0)
+                    + ((cacheBlock?["kv_disk_hit_tokens"] as? Double) ?? 0)
+                    + ((cacheBlock?["reused_tokens"] as? Double) ?? 0)
+                var cachedNow = min(Double(req.input), max(0, cacheTokens - (req.cacheBase ?? 0)))
+                if let rb = req.resumeBase, resumptionsNow - rb >= 1 {
+                    // The full-resume path (e.g. an exact duplicate) returns before
+                    // token accounting runs, so the counters stay silent — treat the
+                    // whole prompt as resumed: nothing to prefill, reads 100%.
+                    cachedNow = Double(req.input)
+                }
                 var est: Double?
                 if cachedNow > 0 {
                     est = max(1, Double(req.input) - cachedNow)
