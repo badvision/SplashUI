@@ -1,13 +1,13 @@
 #!/bin/bash
 # SplashUI one-time install: pinned Splash engine release + the Qwen3.8-27B model.
 #
-#   SPLASH_VERSION  engine version to pin      (default 1.2.1)
+#   SPLASH_VERSION  engine version to pin      (default 1.3.0)
 #   SPLASHUI_HOME   install root               (default ~/SplashUI)
 #   HF_TOKEN        set only if the model needs auth
 #
 # Idempotent: safe to re-run; skips what is already present.
 set -euo pipefail
-KIT_VERSION="${SPLASH_VERSION:-1.2.1}"
+KIT_VERSION="${SPLASH_VERSION:-1.3.0}"
 ROOT="${SPLASHUI_HOME:-$HOME/SplashUI}"
 KIT_NAME="splash-$KIT_VERSION-arm64-macos26"
 KIT_DIR="$ROOT/kit"

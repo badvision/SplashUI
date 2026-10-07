@@ -9,21 +9,26 @@ enum Cfg {
     static let host = "127.0.0.1"
     static let port = 8123
     static let apiKey = "splash-standalone-1"
-    static let kitDir = NSHomeDirectory() + "/Documents/code/splash-standalone/splash-1.2.1-arm64-macos26"
+    static let kitDir = NSHomeDirectory() + "/Documents/code/splash-standalone/splash-1.3.0-arm64-macos26"
     static let python = kitDir + "/python/bin/python"
     static let modelRoot = NSHomeDirectory() + "/.lmstudio/models/incoai/Qwen3.8-27B-Splash"
     static let modelId = "incoai/Qwen3.8-27B-Splash"
     static let maxCacheDisk = "100g"
     static let idleRelease = "240m"
+    // GPU/Neural-Engine prefill split (1.3.0): on by default; SPLASH_ANE=off
+    // adds --disable-ane for a GPU-only path.
+    static let ane = (ProcessInfo.processInfo.environment["SPLASH_ANE"] ?? "on").lowercased()
     static let logLink = "/tmp/splash-standalone.log"
     static var base: String { "http://\(host):\(port)" }
     static var engineArgs: [String] {
-        ["-u", "-m", "server.server", modelRoot,
-         "--tokenizer", modelRoot + "/tokenizer",
-         "--model", modelId, "--binary", "./engine/splash",
-         "--host", host, "--port", String(port), "--api-key", apiKey,
-         "--persistent-cache", "--max-cache-disk", maxCacheDisk,
-         "--idle-release", idleRelease]
+        var a = ["-u", "-m", "server.server", modelRoot,
+                 "--tokenizer", modelRoot + "/tokenizer",
+                 "--model", modelId, "--binary", "./engine/splash",
+                 "--host", host, "--port", String(port), "--api-key", apiKey,
+                 "--persistent-cache", "--max-cache-disk", maxCacheDisk,
+                 "--idle-release", idleRelease]
+        if ane != "on" { a.append("--disable-ane") }
+        return a
     }
 }
 
@@ -710,6 +715,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             "itl_p95_ms": js(metrics["splash_itl_p95_milliseconds"]),
             "draft_accept": js(metrics["splash_draft_acceptance_ratio"]),
         ]
+        if let a = statusJSON?["ane_ffn"] as? [String: Any] {
+            j["ane"] = [
+                "state": a["state"] ?? NSNull(),
+                "share": js(a["share"]),
+                "minimum_rows": js(a["minimum_rows"]),
+                "reason": a["reason"] ?? NSNull(),
+            ]
+        } else {
+            j["ane"] = NSNull()
+        }
         j["rates"] = [
             "decode_tps": js(decodeRate),
             "decode_avg": js(gaugeDecode),

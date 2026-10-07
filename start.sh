@@ -4,18 +4,18 @@
 # a fresh server, so a stale UI can never linger. NOTE: kills in-flight requests on the
 # old server — don't run mid-conversation.
 #
-#   SPLASH_VERSION  engine version        (default 1.2.1)
+#   SPLASH_VERSION  engine version        (default 1.3.0)
 #   SPLASHUI_HOME   install root          (default ~/SplashUI)
 #   SPLASH_PORT     engine port           (default 8123)
 #   SPLASH_KEY      engine api-key        (default splash-standalone-1)
 #   SPLASH_MODEL_ROOT  model directory    (default $SPLASHUI_HOME/models/..., falling
 #                                         back to the LM Studio copy)
 #   SPLASH_MAX_CACHE_DISK  SSD cache cap (default 100g)
-#   SPLASH_IDLE_RELEASE    release idle models after (default 240m)
+#   SPLASH_ANE       GPU+Neural-Engine prefill split (default on; off = GPU-only)
 set -eu
 PKG="$(cd "$(dirname "$0")" && pwd)"
 
-KIT_VERSION="${SPLASH_VERSION:-1.2.1}"
+KIT_VERSION="${SPLASH_VERSION:-1.3.0}"
 ROOT="${SPLASHUI_HOME:-$HOME/SplashUI}"
 KIT="$ROOT/kit/splash-$KIT_VERSION-arm64-macos26"
 PORT="${SPLASH_PORT:-8123}"
@@ -29,6 +29,9 @@ export SPLASH_KIT_DIR="$KIT"
 export SPLASH_MODEL_ROOT="$MODEL_ROOT"
 export SPLASH_PORT="$PORT"
 export SPLASH_KEY="$KEY"
+export SPLASH_ANE="${SPLASH_ANE:-on}"
+ANE_ARGS=()
+if [ "$SPLASH_ANE" != "on" ]; then ANE_ARGS=(--disable-ane); fi
 
 APP="$PKG/build/SplashUI.app"
 UI_BIN="$APP/Contents/MacOS/splash-ui"
@@ -54,7 +57,7 @@ STAMP=$(date +%Y%m%d-%H%M%S)
 LOG="/tmp/splashui-$STAMP.log"
 ln -sf "$LOG" /tmp/splashui.log
 
-echo "starting service (model: $MODEL_ROOT)..."
+echo "starting service (model: $MODEL_ROOT, ANE: $SPLASH_ANE)..."
 cd "$KIT"
 nohup ./python/bin/python -u -m server.server "$MODEL_ROOT" \
   --tokenizer "$MODEL_ROOT/tokenizer" \
@@ -62,7 +65,7 @@ nohup ./python/bin/python -u -m server.server "$MODEL_ROOT" \
   --binary ./engine/splash \
   --host 127.0.0.1 --port $PORT --api-key $KEY \
   --persistent-cache --max-cache-disk "${SPLASH_MAX_CACHE_DISK:-100g}" \
-  --idle-release "${SPLASH_IDLE_RELEASE:-240m}" > "$LOG" 2>&1 &
+  --idle-release "${SPLASH_IDLE_RELEASE:-240m}" ${ANE_ARGS[@]+"${ANE_ARGS[@]}"} > "$LOG" 2>&1 &
 SRV_PID=$!
 echo "service pid $SRV_PID — log: $LOG (symlink /tmp/splashui.log)"
 

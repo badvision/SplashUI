@@ -10,7 +10,7 @@ You get:
 - An OpenAI-compatible API on `127.0.0.1:8123` serving Qwen3.8-27B (Splash-tuned, with
   DFlash-2 speculative decoding)
 - A menu-bar app (SplashUI) that owns the engine's lifecycle and shows a live telemetry
-  panel: decode rate, TTFT, ITL, KV cache, SSD prefix cache, system memory/swap, and a
+  panel: decode rate, TTFT, ITL, KV cache, ANE split, SSD prefix cache, system memory/swap, and a
   per-request log — every counter has hover help
 - LCARS-style console: elbow framing, numbered rails in the classic LCARS palette
   (orange, lilac, ice blue, honey), condensed readouts, and segmented meters — local
@@ -57,7 +57,8 @@ Point any OpenAI-compatible client at `http://127.0.0.1:8123/v1` with the key ab
 | `SPLASH_MODEL_ROOT`    | `~/SplashUI/models/incoai/Qwen3.8-27B-Splash`  | model dir (falls back to the LM Studio copy if present) |
 | `SPLASH_MAX_CACHE_DISK`| `100g`                                         | SSD prefix-cache cap             |
 | `SPLASH_IDLE_RELEASE`  | `240m`                                         | unload an idle model after this  |
-| `SPLASH_VERSION`       | `1.2.1`                                        | engine release pin               |
+| `SPLASH_ANE`           | `on`                                           | GPU + Neural-Engine prefill split (`off` = GPU-only) |
+| `SPLASH_VERSION`       | `1.3.0`                                        | engine release pin               |
 | `SPLASHUI_HOME`        | `~/SplashUI`                                   | install root (kit + models)      |
 
 ## How it works
@@ -84,9 +85,11 @@ Point any OpenAI-compatible client at `http://127.0.0.1:8123/v1` with the key ab
 
 ## Upgrading the engine
 
-Change `SPLASH_VERSION` and re-run `install.sh`. The pinned 1.2.1 argv
+Change `SPLASH_VERSION` and re-run `install.sh`. The pinned 1.3.0 argv
 (`--persistent-cache --max-cache-disk --idle-release`, `python -m server.server`) is
-known-good; verify the CLI of any newer release before pointing `start.sh` at it.
+known-good. 1.3.0 splits dense-model prefill across GPU and Neural Engine by default
+(`SPLASH_ANE` controls it) and speaks native protocol 8, so the server must restart on
+upgrade. Verify the CLI of any newer release before pointing `start.sh` at it.
 
 ## License
 

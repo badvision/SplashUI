@@ -124,6 +124,7 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
     <div class="col" style="flex:1" data-tip="Engine main-loop tick time (ms) — the scheduler cycle; spikes mean a slow step."><div class="k">Loop max</div><div class="mid" id="loop">—</div></div>
     <div class="col" style="flex:1" data-tip="Decode lanes — concurrent sequences decoding / total scheduler states."><div class="k">Lanes</div><div class="mid" id="lanes">—</div></div>
     <div class="col" style="flex:1" data-tip="KV cache quantization format (int8 = symmetric 8-bit)."><div class="k">KV fmt</div><div class="mid" id="kvfmt">—</div></div>
+    <div class="col" style="flex:1.2" data-tip="GPU/Neural-Engine prefill split (Splash 1.3.0) — share of the feed-forward layers the engine runs on the Neural Engine for this Mac and model; prompts smaller than the minimum chunk stay on the GPU. The split is calibrated once per Mac+model, remembered, and a chunk reverts to the GPU after a failed evaluation, a timeout, or when it loses to the GPU alone. Disable with SPLASH_ANE=off."><div class="k">ANE</div><div class="mid" id="ane">—</div></div>
   </div>
 </section>
 
@@ -230,7 +231,7 @@ function render(){
   const [txt, cls] = map[st] || ["?","g"];
   pill.textContent = txt + (st==="prefill" && S.prefill && S.prefill.pct != null ? " "+S.prefill.pct.toFixed(0)+"%" : "");
   pill.className = "pill " + cls;
-  setT("hModel", S.model ? S.model.replace("incoai/","") + " · 1.2.1" : "—");
+  setT("hModel", S.model ? S.model.replace("incoai/","") + " · 1.3.0" : "—");
 
   // decode + prefill
   const tps = S.rates && S.rates.decode_tps;
@@ -253,6 +254,18 @@ function render(){
   setT("loop", S.engine && S.engine.loop_tick_ms != null ? S.engine.loop_tick_ms.toFixed(1)+" ms" : "—");
   setT("lanes", S.state_mem && S.state_mem.active_lanes != null && S.state_mem.entries != null ? S.state_mem.active_lanes + " act / " + S.state_mem.entries : "—");
   setT("kvfmt", S.kv_fmt || "—");
+  {
+    const aneEl = $("ane");
+    if (S.ane && S.ane.state != null) {
+      const st = String(S.ane.state).toLowerCase();
+      const off = st.includes("off") || st.includes("disabled") || st.includes("none") || st.includes("gpu");
+      if (off) { aneEl.textContent = "DISABLED"; aneEl.style.color = "var(--gray)"; }
+      else {
+        aneEl.textContent = (S.ane.share != null && S.ane.share > 0) ? "ON · " + (S.ane.share*100).toFixed(0) + "%" : "ON";
+        aneEl.style.color = "var(--green)";
+      }
+    } else { aneEl.textContent = "—"; aneEl.style.color = ""; }
+  }
 
   // kv
   const kv = S.kv || {}, cap = kv.capacity_bytes || 0;
@@ -330,7 +343,7 @@ if (location.search.includes("demo")) {
   const D = { t:Date.now()/1000, state:"decode", ready:true, model:"incoai/Qwen3.8-27B-Splash", ctx:262144,
     engine:{metal_healthy:1, pressure:"normal", loop_tick_ms:41.2, ttft_p50_ms:24500, itl_p50_ms:45, ttft_p95_ms:1475400, itl_p95_ms:180},
     sched:{prefilling:0, decoding:1, queued:0, waiting_resources:0, waiting_prefix:0, frontend_active:1, frontend_waiting:0},
-    rates:{decode_tps:86, prefill_tps:0}, prefill:null, kv_fmt:"int8",
+    rates:{decode_tps:86, prefill_tps:0}, prefill:null, kv_fmt:"int8", ane:{state:"on", share:0.42, minimum_rows:4096, reason:null},
     kv:{allocated_bytes:9.2e9, active_pages:1200, cache_pages:4100, free_pages:83, capacity_bytes:1.95e10},
     state_mem:{bytes:3.5e8, entries:3, in_use:1, active_lanes:1},
     eng_mem:{current_bytes:3.16e10, peak_bytes:3.17e10, limit_bytes:3.9e10, headroom_bytes:6.7e9, host_available_bytes:6.8e9},
