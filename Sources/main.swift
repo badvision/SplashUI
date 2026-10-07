@@ -103,6 +103,9 @@ final class ServerProc {
             .replacingOccurrences(of: "-", with: "").replacingOccurrences(of: ":", with: "")
         let logPath = "/tmp/splash-standalone-\(stamp).log"
         FileManager.default.createFile(atPath: logPath, contents: Data())
+        // Re-point the tail's link each launch: createSymbolicLink silently fails
+        // when a link from a previous run exists, stranding the new log out of view.
+        try? FileManager.default.removeItem(atPath: Cfg.logLink)
         try? FileManager.default.createSymbolicLink(atPath: Cfg.logLink, withDestinationPath: logPath)
 
         let p = Process()
