@@ -3,6 +3,8 @@
 A menu-bar UI + lifecycle manager for running [Splash](https://github.com/incoai/splash) —
 Inco AI's local inference engine for Apple silicon — as a **standalone service**.
 
+<img width="515" height="895" alt="image" src="https://github.com/user-attachments/assets/f2f76cd3-1932-48d4-8634-c612b21463df" />
+
 You get:
 
 - An OpenAI-compatible API on `127.0.0.1:8123` serving Qwen3.8-27B (Splash-tuned, with
