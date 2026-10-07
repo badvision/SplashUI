@@ -79,7 +79,11 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 #footer { position: relative; display: grid; grid-template-columns: repeat(3, max-content) 1fr; gap: 5px; align-items: center; margin-top: 6px; padding: 0 0 23px 64px; }
 #footer::before { content: ""; position: absolute; left: 0; bottom: 0; width: 64px; height: 100%; border-left: 42px solid #4455ff; border-bottom: 12px solid #4455ff; border-bottom-left-radius: 58px 38px; pointer-events: none; }
 #footer::after { content: ""; position: absolute; left: 64px; right: 0; bottom: 0; height: 12px; background: #4455ff; border-radius: 0 6px 6px 0; }
-#footNote { color: var(--gray); font-size: 9px; letter-spacing: .08em; }
+#pidPill { display: inline-flex; }
+#pidPill .h, #envPill { background: #888; color: #000; font-family: var(--display); letter-spacing: .08em; min-height: 28px; padding: 6px 10px 2px; font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; text-transform: uppercase; }
+#pidLabel { border-radius: 14px 0 0 14px; }
+#pidNum { border-radius: 0 14px 14px 0; margin-left: 3px; }
+#envPill { border-radius: 14px; margin-left: 5px; }
 #tip { position: fixed; display: none; z-index: 10; pointer-events: none;
   background: var(--bg); border: 1px solid var(--gray-dim); border-left: 4px solid var(--lavender); border-radius: 0;
   color: var(--white); font-family: "Avenir Next", "Helvetica Neue", sans-serif; font-size: 10px; font-weight: 400; text-transform: none;
@@ -178,7 +182,7 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
   <button class="btn gr" id="btnStart">Start</button>
   <button class="btn y" id="btnRestart">Restart</button>
   <button class="btn r" id="btnStop">Stop</button>
-  <span id="footNote">—</span>
+  <span style="display:inline-flex;flex-wrap:nowrap;white-space:nowrap"><span id="pidPill"><span class="h" id="pidLabel">PID</span><span class="h" id="pidNum">—</span></span><span class="h" id="envPill">—</span></span>
 </div>
 
 <script>
@@ -302,7 +306,8 @@ function render(){
   ).join("");
 
   // footer
-  setT("footNote", S.server && S.server.pid ? "pid "+S.server.pid+(S.server.launched_by_app?" · app-managed":" · external")+" · "+up(S.server.up_seconds||0) : "server not running");
+  $("pidNum").textContent = S.server && S.server.pid ? S.server.pid : "—";
+  $("envPill").textContent = S.server && S.server.pid ? (S.server.launched_by_app ? "APP-MANAGED" : "EXTERNAL") : "NOT RUNNING";
   const h = document.body.scrollHeight;
   if (h !== lastH) { lastH = h; try { window.webkit.messageHandlers.size.postMessage(h) } catch(e) {} }
 }
@@ -334,6 +339,7 @@ if (location.search.includes("demo")) {
     req:{active:[{id:9, input:161870, age_s:12, pct:64}], recent:[{id:8,input:159779,cached:156448,output:1740,ttft_s:40.4,tps:27.2},{id:7,input:131555,cached:0,output:8635,ttft_s:1475,tps:22.4}], completed_total:8, failed_total:0, cancelled_total:0},
     sys:{phys_bytes:5.15e10, free_bytes:4.3e8, active_bytes:8.6e9, inactive_bytes:8.3e9, wired_bytes:3.05e10, compressed_bytes:2.5e9, swap_total_bytes:6.4e9, swap_used_bytes:5.3e9, engine_footprint_bytes:3.3e10},
     server:{pid:67911, launched_by_app:true, up_seconds:3725} };
+  $("pidNum").textContent = D.server.pid; $("envPill").textContent = "APP-MANAGED";
   (function loop(){ D.state = Math.random()<.7?"decode":"prefill"; if(D.state==="prefill"){D.prefill={pct:20+Math.random()*70, input:161870}; D.rates.prefill_tps=600+Math.random()*900; D.rates.decode_tps=0; D.engine.pressure=Math.random()<.1?"warning":"normal";} else {D.prefill=null; D.rates.decode_tps=60+Math.random()*60; D.engine.pressure="normal";} D.sys.free_bytes=3e8+Math.random()*2e9; D.sys.swap_used_bytes=5.3e9+Math.random()*5e8; window.update({...D, t:Date.now()/1000}); setTimeout(loop, 1000); })();
 }
 </script>
