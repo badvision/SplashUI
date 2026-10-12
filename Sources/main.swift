@@ -41,6 +41,15 @@ func findBrewKeg() -> String? {
     return nil
 }
 
+// A kit's on-disk engine version, from its release.json — the flavor
+// discriminator the launch contract is keyed to. nil when absent (the test
+// harness injects its own).
+func kitVersion(_ kit: String) -> String? {
+    guard let data = FileManager.default.contents(atPath: kit + "/release.json") else { return nil }
+    guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+    return obj["version"] as? String
+}
+
 func resolve() -> SplashPaths {
     resolveSplashPaths(
         env: ProcessInfo.processInfo.environment,
@@ -48,7 +57,8 @@ func resolve() -> SplashPaths {
         home: NSHomeDirectory(),
         isDir: isDir,
         isExecutable: { access($0, X_OK) == 0 },
-        brewKeg: findBrewKeg)
+        brewKeg: findBrewKeg,
+        kitVersion: kitVersion)
 }
 
 // MARK: - Process helpers

@@ -21,9 +21,11 @@ func kitPaths(_ d: String) -> (dirs: Set<String>, exe: Set<String>) {
     (["\(d)"], ["\(d)/engine/splash", "\(d)/python/bin/python"])
 }
 
-// A brew keg: dir + bin/splash + libexec/engine dir + libexec/python/bin/python3.
+// A Homebrew keg: the libexec/ dir IS the engine kit (engine/splash + bundled
+// python3 + server package); the prefix also carries the bin/splash shim.
 func brewPaths(_ p: String) -> (dirs: Set<String>, exe: Set<String>) {
-    (["\(p)", "\(p)/libexec/engine"], ["\(p)/bin/splash", "\(p)/libexec/python/bin/python3"])
+    (["\(p)", "\(p)/libexec", "\(p)/libexec/engine"],
+     ["\(p)/bin/splash", "\(p)/libexec/engine/splash", "\(p)/libexec/python/bin/python3"])
 }
 
 // ---- resolveSplashPaths: engine ladder --------------------------------------
@@ -37,8 +39,7 @@ do {
         appRoot: "/app", home: "/home",
         isDir: { (kd | bd).contains($0) }, isExecutable: { (ke | be).contains($0) },
         brewKeg: { "/opt/homebrew" })
-    check(r.plan == .tarball, "ladder: SPLASH_KIT_DIR env wins over brew")
-    check(r.workDir == "/env/kit", "ladder: env kit is the work dir")
+    check(r.workDir == "/env/kit", "ladder: SPLASH_KIT_DIR env wins over brew")
     check(r.executable == "/env/kit/python/bin/python", "ladder: env kit python derived")
 }
 
@@ -70,43 +71,57 @@ do {
           "ladder: SPLASHUI_HOME + SPLASH_VERSION honored")
 }
 
-// brew keg detected: the preferred default — used ahead of SPLASHUI_HOME and
-// appRoot kit rungs.
+// brew is the LAST rung — a path-based install (SPLASHUI_HOME) beats it.
 do {
     let (bd, be) = brewPaths("/opt/homebrew")
     let (rd, re) = kitPaths("/root/kit/splash-1.3.0-arm64-macos26")
-    let (ad, ae) = kitPaths("/app/kit/splash-1.3.0-arm64-macos26")
-    let dirs: Set<String> = bd | rd | ad
-    let exe: Set<String> = be | re | ae
+    let dirs: Set<String> = bd | rd
+    let exe: Set<String> = be | re
     let r = resolveSplashPaths(
         env: ["SPLASHUI_HOME": "/root"],
-        appRoot: "/app", home: "/home",
+        appRoot: "", home: "/home",
         isDir: { dirs.contains($0) }, isExecutable: { exe.contains($0) },
         brewKeg: { "/opt/homebrew" })
-    check(r.plan == .brew, "ladder: brew wins over SPLASHUI_HOME + appRoot rungs")
-    check(r.executable == "/opt/homebrew/bin/splash", "ladder: brew shim is the executable")
-    check(r.workDir == nil, "ladder: brew has no work dir")
-    check(r.modelRoot == "incoai/Qwen3.8-27B-Splash", "ladder: brew model is the model name")
-    check(r.error == nil, "ladder: brew needs no pre-existing model")
+    check(r.workDir == "/root/kit/splash-1.3.0-arm64-macos26",
+          "ladder: SPLASHUI_HOME rung beats brew (brew is last)")
 }
 
-// brew launcher args: `serve --model <id>` — no cwd, no positional model dir.
+// brew is used when no path-based install exists (the only kit present).
 do {
     let (bd, be) = brewPaths("/opt/homebrew")
     let r = resolveSplashPaths(
         env: [:],
         appRoot: "", home: "/home",
         isDir: { bd.contains($0) }, isExecutable: { be.contains($0) },
-        brewKeg: { "/opt/homebrew" })
-    check(r.engineArgs.first == "serve" && r.engineArgs.contains("--model")
-          && r.engineArgs.contains("incoai/Qwen3.8-27B-Splash"),
-          "brew args: serve --model <id> shape")
-    check(r.engineArgs.contains("--port") && r.engineArgs.contains("8123"),
-          "brew args: explicit port passed")
-    check(r.engineArgs.contains("--persistent-cache") && r.engineArgs.contains("--max-cache-disk"),
-          "brew args: shared serve options passed")
-    check(!r.engineArgs.contains("-m") && !r.engineArgs.contains("server.server"),
-          "brew args: not the python module form")
+        brewKeg: { "/opt/homebrew" },
+        kitVersion: { $0.hasPrefix("/opt/homebrew/libexec") ? "1.3.1" : nil })
+    check(r.workDir == "/opt/homebrew/libexec",
+          "ladder: brew keg's libexec is the kit when only brew is present")
+    check(r.executable == "/opt/homebrew/libexec/python/bin/python3",
+          "ladder: brew kit uses the keg's bundled python3")
+    check(r.error == nil, "ladder: brew (1.3.1) needs no model dir (loads by id)")
+}
+
+// brew (1.3.1) runs the launcher's id form, not the tarball module form.
+do {
+    let (bd, be) = brewPaths("/opt/homebrew")
+    let model = "/opt/homebrew/libexec/model"
+    let r = resolveSplashPaths(
+        env: ["SPLASH_MODEL_ROOT": model],
+        appRoot: "", home: "/home",
+        isDir: { bd.contains($0) || $0 == model }, isExecutable: { be.contains($0) },
+        brewKeg: { "/opt/homebrew" },
+        kitVersion: { $0.hasPrefix("/opt/homebrew/libexec") ? "1.3.1" : nil })
+    check(r.engineArgs.contains("install/launcher.py"),
+          "brew args: runs the kit's install/launcher.py")
+    check(r.engineArgs.contains("serve") && r.engineArgs.contains("--model"),
+          "brew args: serve --model (id form)")
+    check(r.engineArgs.contains("incoai/Qwen3.8-27B-Splash"),
+          "brew args: Hugging Face model id passed")
+    check(!r.engineArgs.contains("server.server") && !r.engineArgs.contains("--binary"),
+          "brew args: not the module form (no server.server / --binary)")
+    check(!r.engineArgs.contains(model),
+          "brew args: a 1.3.0 model dir is ignored (loads by id)")
 }
 
 // appRoot rung: a kit in the checkout the app was launched from (install.sh's
@@ -118,7 +133,7 @@ do {
         env: [:],
         appRoot: "/app", home: "/home",
         isDir: { (d | md).contains($0) }, isExecutable: { e.contains($0) })
-    check(r.plan == .tarball && r.workDir == "/app/kit/splash-1.3.0-arm64-macos26",
+    check(r.workDir == "/app/kit/splash-1.3.0-arm64-macos26",
           "ladder: appRoot kit rung found")
     check(r.modelRoot == "/app/models/incoai/Qwen3.8-27B-Splash",
           "model: appRoot models rung")
@@ -129,13 +144,13 @@ do {
     let r = resolveSplashPaths(
         env: [:],
         appRoot: "", home: "/home",
-        isDir: { _ in true }, isExecutable: { _ in false })
+        isDir: { _ in false }, isExecutable: { _ in false })
     check(r.executable == nil, "ladder: nothing found -> no executable")
     check(r.modelRoot == nil, "ladder: nothing found -> no model")
     let e = r.error ?? ""
     check(e.contains("engine kit not found"), "miss: error says kit not found")
     check(!e.contains("model not found"),
-          "miss: no model error — model is moot when there is no kit to run")
+          "miss: no model error when the engine itself is absent (fix the kit first)")
 }
 
 // empty-string env values count as unset.
@@ -143,11 +158,11 @@ do {
     let r = resolveSplashPaths(
         env: ["SPLASH_KIT_DIR": "", "SPLASH_MODEL_ROOT": ""],
         appRoot: "", home: "/home",
-        isDir: { _ in true }, isExecutable: { _ in false })
+        isDir: { _ in false }, isExecutable: { _ in false })
     check(r.executable == nil && r.modelRoot == nil, "empty env values treated as unset")
 }
 
-// ---- resolveSplashPaths: model ladder (tarball plan) ------------------------
+// ---- resolveSplashPaths: model ladder ---------------------------------------
 
 // env SPLASH_MODEL_ROOT wins.
 do {
@@ -203,6 +218,21 @@ do {
           "model miss: error suggests env var / install.sh")
 }
 
+// model error is dirModel-only: a 1.3.1 (id) engine needs no model dir.
+do {
+    let (kd, ke) = kitPaths("/k")
+    let r = resolveSplashPaths(
+        env: ["SPLASH_KIT_DIR": "/k"],
+        appRoot: "", home: "/home",
+        isDir: { kd.contains($0) }, isExecutable: { ke.contains($0) },
+        kitVersion: { $0 == "/k" ? "1.3.1" : nil })
+    check(r.modelRoot == nil, "id model: modelRoot nil")
+    let e = r.error ?? ""
+    check(!e.contains("model not found"), "id model: no model error (loads by id)")
+    check(r.engineArgs.contains("serve") && r.engineArgs.contains("--model"),
+          "id model: id-form argv with no model dir")
+}
+
 // ---- knobs ------------------------------------------------------------------
 
 do {
@@ -246,22 +276,26 @@ do {
     check(!r.engineArgs.contains("--disable-ane"), "ane: on by default (no --disable-ane)")
 }
 
-// SPLASH_ANE=off adds --disable-ane (both plans).
+// SPLASH_ANE=off adds --disable-ane (both flavors).
 do {
     let (_, ke) = kitPaths("/k")
     let r = resolveSplashPaths(
         env: ["SPLASH_KIT_DIR": "/k", "SPLASH_MODEL_ROOT": "/m", "SPLASH_ANE": "off"],
         appRoot: "", home: "/home",
         isDir: { $0 == "/k" || $0 == "/m" }, isExecutable: { ke.contains($0) })
-    check(r.engineArgs.last == "--disable-ane", "ane: SPLASH_ANE=off adds --disable-ane")
+    check(r.engineArgs.last == "--disable-ane", "ane: SPLASH_ANE=off adds --disable-ane (module form)")
 
     let (bd, be) = brewPaths("/opt/homebrew")
     let rb = resolveSplashPaths(
         env: ["SPLASH_ANE": "off"],
         appRoot: "", home: "/home",
         isDir: { bd.contains($0) }, isExecutable: { be.contains($0) },
-        brewKeg: { "/opt/homebrew" })
-    check(rb.engineArgs.last == "--disable-ane", "ane: SPLASH_ANE=off honored for brew plan")
+        brewKeg: { "/opt/homebrew" },
+        kitVersion: { $0.hasPrefix("/opt/homebrew/libexec") ? "1.3.1" : nil })
+    check(rb.engineArgs.last == "--disable-ane", "ane: SPLASH_ANE=off adds --disable-ane (id form)")
+    check(rb.engineArgs.contains("serve"), "ane: id form for the 1.3.1 brew kit")
+    check(rb.executable == "/opt/homebrew/libexec/python/bin/python3",
+          "ane: brew kit still resolves the keg python")
 }
 
 // ---- autoQuitDecision: truth table ------------------------------------------

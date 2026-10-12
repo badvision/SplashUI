@@ -48,7 +48,7 @@ Point any OpenAI-compatible client at `http://127.0.0.1:8123/v1` with the key ab
 
 ## Configuration (environment)
 
-`start.sh` passes these to the UI; all have defaults. The same variables apply when launching `build/SplashUI.app` directly from Finder (e.g. via the shell or a wrapper). The UI finds the engine by **discovery**, in order: `SPLASH_KIT_DIR` → a Homebrew install (`brew install incoai/tap/splash`) when present → `SPLASHUI_HOME/kit/splash-$SPLASH_VERSION-arm64-macos26` → the directory the app was launched from (where `./install.sh` defaults to installing). The model dir is found similarly: `SPLASH_MODEL_ROOT` → `SPLASHUI_HOME/models/<id>` → `<launch dir>/models/<id>` → `~/.lmstudio/models/<id>`. When nothing resolves, the menu bar stays up and shows the missing paths (with every location it tried) instead of quitting; a failed launch retries every 30 s (10 attempts), re-resolving fresh each time.
+`start.sh` passes these to the UI; all have defaults. The same variables apply when launching `build/SplashUI.app` directly from Finder (e.g. via the shell or a wrapper). The UI finds the engine by **discovery**, in order: `SPLASH_KIT_DIR` → `SPLASHUI_HOME/kit/splash-$SPLASH_VERSION-arm64-macos26` (when `SPLASHUI_HOME` is set) → the directory the app was launched from (where `./install.sh` defaults to installing) → a Homebrew install (`brew install incoai/tap/splash`) as the last-resort fallback. The model is identified by its Hugging Face id in every case; a **model dir** is found additionally — `SPLASH_MODEL_ROOT` → `SPLASHUI_HOME/models/<id>` → `<launch dir>/models/<id>` → `~/.lmstudio/models/<id>` — and is only *used* by the 1.3.0-style engine (it loads the dir positionally, reusing an installed model instead of re-downloading); the 1.3.1+ engine (the Homebrew keg) always loads by id. When nothing resolves, the menu bar stays up and shows the missing paths (with every location it tried) instead of quitting; a failed launch retries every 30 s (10 attempts), so an install fixed while the app is running takes effect on the next attempt.
 
 | Variable               | Default                                        | Meaning                          |
 |------------------------|------------------------------------------------|----------------------------------|
@@ -69,9 +69,19 @@ Point any OpenAI-compatible client at `http://127.0.0.1:8123/v1` with the key ab
 - `start.sh` is a **full reset**: it stops any UI + server on the port, starts a fresh
   server (timestamped log, `/tmp/splashui.log` symlink), waits for `ready`, then launches
   the app, which **adopts** the running server (the panel marks it "external").
-- A brew install runs the `splash` shim as `splash serve --model incoai/Qwen3.8-27B-Splash`
-  instead of the bundled-python module form — the formula's launcher downloads and
-  verifies the model itself, so a brew setup needs no model dir at all.
+- The engine is an "engine kit" — a directory holding `engine/splash`, a bundled
+  `python`, and the `server` package. Both the release tarball's kit dir and a Homebrew
+  keg's `libexec/` are exactly that. The launch contract is keyed to the kit's on-disk
+  `release.json` version:
+  - **1.3.0-style** (tarball install): runs the bundled python in module form
+    (`-m server.server <model-dir> --tokenizer <model-dir> --binary ./engine/splash`)
+    and passes the **on-disk model dir positionally**, so an already-installed model is
+    reused — never re-downloaded. A model dir is required; without one the UI names the
+    locations it tried.
+  - **1.3.1+** (the Homebrew keg): runs the kit's own `install/launcher.py serve --model
+    <id>` (the same thing the brew formula's `splash` shim does under the hood). It loads
+    the model **by id** — a one-time download it manages itself — so a 1.3.0 model dir is
+    not usable by it.
 - The app polls `/status` (1 s) and `/metrics` (1 s) and renders the panel in a
   WKWebView. The decode readout is the *committed* output rate: counter delta divided by
   the real elapsed time between samples. DFlash-2 draft tokens that fail verification do
@@ -91,11 +101,13 @@ Point any OpenAI-compatible client at `http://127.0.0.1:8123/v1` with the key ab
 
 ## Upgrading the engine
 
-Change `SPLASH_VERSION` and re-run `install.sh`. The pinned 1.3.0 argv
-(`--persistent-cache --max-cache-disk --idle-release`, `python -m server.server`) is
-known-good. 1.3.0 splits dense-model prefill across GPU and Neural Engine by default
-(`SPLASH_ANE` controls it) and speaks native protocol 8, so the server must restart on
-upgrade. Verify the CLI of any newer release before pointing `start.sh` at it.
+Change `SPLASH_VERSION` and re-run `install.sh`. The UI reads the installed kit's
+`release.json` version and switches to that release's launch contract automatically:
+1.3.0-style runs `python -m server.server` with the model dir positional; 1.3.1+ (the
+Homebrew keg) runs the kit's `install/launcher.py serve --model <id>`. 1.3.0 splits
+dense-model prefill across GPU and Neural Engine by default (`SPLASH_ANE` controls it)
+and speaks native protocol 8, so the server must restart on upgrade. Verify the CLI of
+any newer release before pointing `start.sh` at it.
 
 ## License
 
