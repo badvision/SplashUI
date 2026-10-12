@@ -48,7 +48,7 @@ Point any OpenAI-compatible client at `http://127.0.0.1:8123/v1` with the key ab
 
 ## Configuration (environment)
 
-`start.sh` passes these to the UI; all have defaults. The same variables apply when launching `build/SplashUI.app` directly from Finder (e.g. via the shell or a wrapper). The UI assumes no install location of its own: point it at your Splash engine and model with `SPLASH_KIT_DIR` / `SPLASH_MODEL_ROOT` (or set `SPLASHUI_HOME`); when nothing resolves, the menu bar stays up and shows the missing paths instead of quitting.
+`start.sh` passes these to the UI; all have defaults. The same variables apply when launching `build/SplashUI.app` directly from Finder (e.g. via the shell or a wrapper). The UI finds the engine by **discovery**, in order: `SPLASH_KIT_DIR` → a Homebrew install (`brew install incoai/tap/splash`) when present → `SPLASHUI_HOME/kit/splash-$SPLASH_VERSION-arm64-macos26` → the directory the app was launched from (where `./install.sh` defaults to installing). The model dir is found similarly: `SPLASH_MODEL_ROOT` → `SPLASHUI_HOME/models/<id>` → `<launch dir>/models/<id>` → `~/.lmstudio/models/<id>`. When nothing resolves, the menu bar stays up and shows the missing paths (with every location it tried) instead of quitting; a failed launch retries every 30 s (10 attempts), re-resolving fresh each time.
 
 | Variable               | Default                                        | Meaning                          |
 |------------------------|------------------------------------------------|----------------------------------|
@@ -69,6 +69,9 @@ Point any OpenAI-compatible client at `http://127.0.0.1:8123/v1` with the key ab
 - `start.sh` is a **full reset**: it stops any UI + server on the port, starts a fresh
   server (timestamped log, `/tmp/splashui.log` symlink), waits for `ready`, then launches
   the app, which **adopts** the running server (the panel marks it "external").
+- A brew install runs the `splash` shim as `splash serve --model incoai/Qwen3.8-27B-Splash`
+  instead of the bundled-python module form — the formula's launcher downloads and
+  verifies the model itself, so a brew setup needs no model dir at all.
 - The app polls `/status` (1 s) and `/metrics` (1 s) and renders the panel in a
   WKWebView. The decode readout is the *committed* output rate: counter delta divided by
   the real elapsed time between samples. DFlash-2 draft tokens that fail verification do

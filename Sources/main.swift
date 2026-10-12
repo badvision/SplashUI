@@ -20,11 +20,35 @@ func isDir(_ path: String) -> Bool {
     return values[.type] as? FileAttributeType == .typeDirectory
 }
 
+// The checkout the app was launched from — install.sh's default install root.
+// `build/SplashUI.app` sits two levels below it.
+let appRoot = Bundle.main.bundleURL
+    .deletingLastPathComponent()
+    .deletingLastPathComponent()
+    .path
+
+// The Homebrew keg of the splash formula, if installed. The formula versions
+// its Cellar path per release, so the newest version dir is picked.
+func findBrewKeg() -> String? {
+    for base in ["/opt/homebrew", "/usr/local"] {
+        let cellar = base + "/Cellar/splash"
+        let versions = (try? FileManager.default.contentsOfDirectory(atPath: cellar)) ?? []
+        if let v = versions.sorted().last {
+            let keg = cellar + "/" + v
+            if access(keg + "/bin/splash", X_OK) == 0 { return keg }
+        }
+    }
+    return nil
+}
+
 func resolve() -> SplashPaths {
     resolveSplashPaths(
         env: ProcessInfo.processInfo.environment,
+        appRoot: appRoot,
+        home: NSHomeDirectory(),
         isDir: isDir,
-        isExecutable: { access($0, X_OK) == 0 })
+        isExecutable: { access($0, X_OK) == 0 },
+        brewKeg: findBrewKeg)
 }
 
 // MARK: - Process helpers
@@ -135,10 +159,10 @@ final class ServerProc {
         // Pre-flight: if the install is missing/broken, record it and stop —
         // no process is touched, and the app stays up showing the actionable error.
         if let e = slash.error { recordLaunchFailure(e, logPath: logPath); return }
-        guard let python = slash.python, let kitDir = slash.kitDir else { return }
+        guard let executable = slash.executable else { return }
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: python)
-        p.currentDirectoryURL = URL(fileURLWithPath: kitDir)
+        p.executableURL = URL(fileURLWithPath: executable)
+        if let dir = slash.workDir { p.currentDirectoryURL = URL(fileURLWithPath: dir) }
         p.arguments = slash.engineArgs
         guard let out = FileHandle(forWritingAtPath: logPath) else {
             recordLaunchFailure("cannot write engine log: \(logPath)", logPath: logPath)
@@ -888,7 +912,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             "launched_by_app": server.launchedByApp && server.pid != nil,
             "up_seconds": server.upSeconds(),
             "launch_error": js(server.lastLaunchError?.message),
-            "kit_dir": js(server.slash.kitDir),
+            "kit_dir": js(server.slash.workDir),
         ]
 
         if let data = try? JSONSerialization.data(withJSONObject: j),
