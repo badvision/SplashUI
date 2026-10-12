@@ -7,7 +7,6 @@ import Darwin
 
 enum Cfg {
     static let host = "127.0.0.1"
-    static let modelId = "incoai/Qwen3.8-27B-Splash"
     static let logLink = "/tmp/splash-standalone.log"
 }
 
@@ -815,7 +814,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             "t": now.timeIntervalSince1970,
             "state": state,
             "ready": ready,
-            "model": Cfg.modelId,
+            "model": js(server.slash.modelId),
             "ctx": js(fld("maximum_context_tokens")),
         ]
         j["engine"] = [

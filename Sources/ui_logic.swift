@@ -13,6 +13,7 @@ public struct SplashPaths {
     public var idleRelease: String
     public var base: String
     public var engineArgs: [String]
+    public var modelId: String?       // the model id actually served (flavor-aware)
     public var error: String?
 }
 
@@ -44,7 +45,13 @@ public func resolveSplashPaths(env: [String: String],
                                isExecutable: (String) -> Bool,
                                brewKeg: () -> String? = { nil },
                                kitVersion: (String) -> String? = { _ in nil }) -> SplashPaths {
-    let modelId = "incoai/Qwen3.8-27B-Splash"
+    // The on-disk model (the 1.3.0 Splash package): loaded positionally by a
+    // 1.3.0-style engine. A 1.3.1+ engine (the Homebrew keg) cannot read that
+    // format at all — neither the launcher ("Splash no longer loads") nor the
+    // engine binary — so it downloads and loads its own MLX model by id
+    // instead; the local package is unusable by it.
+    let dirModelId = "incoai/Qwen3.8-27B-Splash"
+    let idModelId = "mlx-community/Qwen3.8-27B-4bit"
     let root = env["SPLASHUI_HOME"]
     let version = env["SPLASH_VERSION"] ?? "1.3.0"
 
@@ -65,47 +72,38 @@ public func resolveSplashPaths(env: [String: String],
     }
 
     var tried: [String] = []
-    var kit: String?
 
-    // 1. Explicit path-based install (always wins)
-    if let k = env["SPLASH_KIT_DIR"], k != "" {
-        tried.append(k)
-        if isKit(k) { kit = k }
-    }
-
-    // 2. install.sh layout under an explicitly-set home
-    if kit == nil, let r = root, r != "" {
-        let d = r + "/kit/splash-\(version)-arm64-macos26"
-        tried.append(d)
-        if isKit(d) { kit = d }
-    }
-
-    // 3. The checkout the app was launched from (install.sh's default layout)
-    if kit == nil, !appRoot.isEmpty {
-        let d = appRoot + "/kit/splash-\(version)-arm64-macos26"
-        tried.append(d)
-        if isKit(d) { kit = d }
-    }
-
-    // 4. Homebrew — the fallback when no path-based install is found; the
-    //    keg's libexec/ IS the engine kit
-    if kit == nil, let b = brewKeg(), b != "" {
-        let k = b + "/libexec"
-        tried.append(k)
-        if isKit(k) { kit = k }
-    }
-
-    let executable = kit.flatMap { pythonOf($0) }
-
-    // Model discovery: an independent axis from the engine. Always identify
-    // the model by id; a found dir is extra information for a 1.3.0-style
-    // engine to load from directly.
+    // Model discovery first: the engine selection depends on whether a local
+    // model is present, because only a 1.3.0-style engine can load it.
     var modelCandidates: [String] = []
     if let m = env["SPLASH_MODEL_ROOT"], m != "" { modelCandidates.append(m) }
-    if let r = root, r != "" { modelCandidates.append(r + "/models/" + modelId) }
-    if !appRoot.isEmpty { modelCandidates.append(appRoot + "/models/" + modelId) }
-    modelCandidates.append(home + "/.lmstudio/models/" + modelId)
+    if let r = root, r != "" { modelCandidates.append(r + "/models/" + dirModelId) }
+    if !appRoot.isEmpty { modelCandidates.append(appRoot + "/models/" + dirModelId) }
+    modelCandidates.append(home + "/.lmstudio/models/" + dirModelId)
     let modelRoot = modelCandidates.first { isDir($0) }
+
+    var kit: String?
+    func tryKit(_ d: String) {
+        tried.append(d)
+        if kit == nil, isKit(d) { kit = d }
+    }
+
+    // 1. Explicit path-based install (always wins).
+    if let k = env["SPLASH_KIT_DIR"], k != "" { tryKit(k) }
+    // 2. install.sh layout under an explicitly-set home.
+    if kit == nil, let r = root, r != "" {
+        tryKit(r + "/kit/splash-\(version)-arm64-macos26")
+    }
+    // 3. The checkout the app was launched from (install.sh's default layout).
+    if kit == nil, !appRoot.isEmpty {
+        tryKit(appRoot + "/kit/splash-\(version)-arm64-macos26")
+    }
+    // 4. Homebrew (1.3.1) — only when no local model is present: a 1.3.1
+    //    engine cannot load the 1.3.0 package and would re-download the
+    //    model, which is not what the user wants.
+    if kit == nil, modelRoot == nil, let b = brewKeg(), b != "" {
+        tryKit(b + "/libexec")
+    }
 
     // Engine version gates the launch contract: >= 1.3.1 (the Homebrew keg)
     // loads the model by id; 1.3.0-style loads it positionally.
@@ -113,11 +111,25 @@ public func resolveSplashPaths(env: [String: String],
         .map { versionGE($0, "1.3.1") } ?? false
 
     if kit == nil {
-        kitError(tried.joined(separator: ", "))
+        if modelRoot != nil {
+            let kt = tried.isEmpty ? "" : " — tried: " + tried.joined(separator: ", ")
+            errorParts.append("local model found (at: \(modelRoot!)) but no 1.3.0 engine kit\(kt) — "
+                + "the 1.3.1 Homebrew engine cannot load it (it would re-download the model instead); "
+                + "set SPLASH_KIT_DIR=/path/to/splash-1.3.0-arm64-macos26")
+        } else {
+            kitError(tried.joined(separator: ", "))
+        }
     }
+
+    let executable = kit.flatMap { pythonOf($0) }
     if kit != nil, executable != nil, !idModel, modelRoot == nil {
         let mt = modelCandidates.isEmpty ? "" : " — tried: " + modelCandidates.joined(separator: ", ")
         errorParts.append("model not found" + mt + " — set SPLASH_MODEL_ROOT=/path/to/model, or run `./install.sh`")
+    }
+    if idModel, let k = kit, modelRoot != nil {
+        errorParts.append("local model found (at: \(modelRoot!)) but the engine at \(k) is \(kitVersion(k) ?? "unknown") — "
+            + "it cannot load the 1.3.0 model format (it would re-download the model); "
+            + "point SPLASH_KIT_DIR at a 1.3.0 kit")
     }
 
     let port: Int = {
@@ -140,7 +152,7 @@ public func resolveSplashPaths(env: [String: String],
         // 1.3.1+ (Homebrew keg): load the model by id; the key assembles its
         // own copy (one-time download). launcher.py is script-relative, so
         // cwd=kit is enough to find it.
-        engineArgs = ["-u", "install/launcher.py", "serve", "--model", modelId,
+        engineArgs = ["-u", "install/launcher.py", "serve", "--model", idModelId,
                       "--host", "127.0.0.1", "--port", String(port),
                       "--api-key", apiKey, "--persistent-cache",
                       "--max-cache-disk", maxCacheDisk, "--idle-release", idleRelease]
@@ -158,10 +170,24 @@ public func resolveSplashPaths(env: [String: String],
     if (env["SPLASH_ANE"] ?? "on").lowercased() != "on" {
         engineArgs.append("--disable-ane")
     }
+    // The model id actually served — flavor-aware, so the panel shows the real
+    // model (the user's local package under the 1.3.0 engine, the MLX id under
+    // 1.3.1) rather than a fixed string.
+    let modelId: String?
+    if executable == nil {
+        modelId = nil
+    } else if idModel {
+        modelId = idModelId
+    } else if modelRoot != nil {
+        modelId = dirModelId
+    } else {
+        modelId = nil
+    }
 
     return SplashPaths(workDir: kit, executable: executable, modelRoot: modelRoot,
                        port: port, apiKey: apiKey, maxCacheDisk: maxCacheDisk,
                        idleRelease: idleRelease, base: base, engineArgs: engineArgs,
+                       modelId: modelId,
                        error: errorParts.isEmpty ? nil : errorParts.joined(separator: " | "))
 }
 

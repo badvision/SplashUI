@@ -41,14 +41,14 @@ Click the menu-bar icon to show/hide the panel. `./stop.sh` tears everything dow
 ```sh
 curl http://127.0.0.1:8123/v1/chat/completions \
   -H "x-api-key: splash-standalone-1" -H "Content-Type: application/json" \
-  -d '{"model":"incoai/Qwen3.8-27B-Splash","stream":true,"messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"mlx-community/Qwen3.8-27B-4bit","stream":true,"messages":[{"role":"user","content":"hi"}]}'
 ```
 
 Point any OpenAI-compatible client at `http://127.0.0.1:8123/v1` with the key above.
 
 ## Configuration (environment)
 
-`start.sh` passes these to the UI; all have defaults. The same variables apply when launching `build/SplashUI.app` directly from Finder (e.g. via the shell or a wrapper). The UI finds the engine by **discovery**, in order: `SPLASH_KIT_DIR` → `SPLASHUI_HOME/kit/splash-$SPLASH_VERSION-arm64-macos26` (when `SPLASHUI_HOME` is set) → the directory the app was launched from (where `./install.sh` defaults to installing) → a Homebrew install (`brew install incoai/tap/splash`) as the last-resort fallback. The model is identified by its Hugging Face id in every case; a **model dir** is found additionally — `SPLASH_MODEL_ROOT` → `SPLASHUI_HOME/models/<id>` → `<launch dir>/models/<id>` → `~/.lmstudio/models/<id>` — and is only *used* by the 1.3.0-style engine (it loads the dir positionally, reusing an installed model instead of re-downloading); the 1.3.1+ engine (the Homebrew keg) always loads by id. When nothing resolves, the menu bar stays up and shows the missing paths (with every location it tried) instead of quitting; a failed launch retries every 30 s (10 attempts), so an install fixed while the app is running takes effect on the next attempt.
+`start.sh` passes these to the UI; all have defaults. The same variables apply when launching `build/SplashUI.app` directly from Finder (e.g. via the shell or a wrapper). The UI finds the engine by **discovery**, in order: `SPLASH_KIT_DIR` → `SPLASHUI_HOME/kit/splash-$SPLASH_VERSION-arm64-macos26` (when `SPLASHUI_HOME` is set) → the directory the app was launched from (where `./install.sh` defaults to installing) → a Homebrew install (`brew install incoai/tap/splash`) as the last-resort fallback. A **model dir** is found the same way — `SPLASH_MODEL_ROOT` → `SPLASHUI_HOME/models/<id>` → `<launch dir>/models/<id>` → `~/.lmstudio/models/<id>`. A 1.3.0-style engine loads that dir positionally (reusing an installed model, never re-downloading); the 1.3.1+ engine (the Homebrew keg) loads by Hugging Face id and *cannot read* the 1.3.0 package format, so **when a local model dir is present the Homebrew fallback is skipped** — picking it would ignore the model and re-download it — and if no 1.3.0-style engine is found the app reports exactly that. When nothing resolves, the menu bar stays up and shows the missing paths (with every location it tried) instead of quitting; a failed launch retries every 30 s (10 attempts), so an install fixed while the app is running takes effect on the next attempt.
 
 | Variable               | Default                                        | Meaning                          |
 |------------------------|------------------------------------------------|----------------------------------|
@@ -79,9 +79,12 @@ Point any OpenAI-compatible client at `http://127.0.0.1:8123/v1` with the key ab
     reused — never re-downloaded. A model dir is required; without one the UI names the
     locations it tried.
   - **1.3.1+** (the Homebrew keg): runs the kit's own `install/launcher.py serve --model
-    <id>` (the same thing the brew formula's `splash` shim does under the hood). It loads
-    the model **by id** — a one-time download it manages itself — so a 1.3.0 model dir is
-    not usable by it.
+    mlx-community/Qwen3.8-27B-4bit` (the same thing the brew formula's `splash` shim does
+    under the hood). It loads the model **by id** — a one-time download it manages itself.
+    It refuses the 1.3.0 Splash-package id (`incoai/Qwen3.8-27B-Splash`) outright — "Splash
+    no longer loads" that prebuilt format — so a 1.3.0 model dir is not usable by it either.
+    Consequently, when a local model dir is present the app does not fall back to the Homebrew
+    keg (it would re-download the model); it asks for a 1.3.0-style engine instead.
 - The app polls `/status` (1 s) and `/metrics` (1 s) and renders the panel in a
   WKWebView. The decode readout is the *committed* output rate: counter delta divided by
   the real elapsed time between samples. DFlash-2 draft tokens that fail verification do

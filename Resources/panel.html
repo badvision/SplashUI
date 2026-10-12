@@ -231,7 +231,7 @@ function render(){
   const [txt, cls] = map[st] || ["?","g"];
   pill.textContent = txt + (st==="prefill" && S.prefill && S.prefill.pct != null ? " "+S.prefill.pct.toFixed(0)+"%" : "");
   pill.className = "pill " + cls;
-  let m = S.model ? S.model.replace("incoai/","") + " · 1.3.0" : "—";
+  let m = S.model ? S.model.split("/").pop() : "—";
   if (S.server && S.server.launch_error) {
     const lm = $("hModel");
     lm.textContent = S.server.launch_error;

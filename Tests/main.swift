@@ -102,26 +102,80 @@ do {
     check(r.error == nil, "ladder: brew (1.3.1) needs no model dir (loads by id)")
 }
 
-// brew (1.3.1) runs the launcher's id form, not the tarball module form.
+// brew (1.3.1) runs the launcher's id form, not the tarball module form —
+// only when there is no local model (which a 1.3.1 engine can't load).
 do {
     let (bd, be) = brewPaths("/opt/homebrew")
-    let model = "/opt/homebrew/libexec/model"
     let r = resolveSplashPaths(
-        env: ["SPLASH_MODEL_ROOT": model],
+        env: [:],
         appRoot: "", home: "/home",
-        isDir: { bd.contains($0) || $0 == model }, isExecutable: { be.contains($0) },
+        isDir: { bd.contains($0) }, isExecutable: { be.contains($0) },
         brewKeg: { "/opt/homebrew" },
         kitVersion: { $0.hasPrefix("/opt/homebrew/libexec") ? "1.3.1" : nil })
     check(r.engineArgs.contains("install/launcher.py"),
           "brew args: runs the kit's install/launcher.py")
     check(r.engineArgs.contains("serve") && r.engineArgs.contains("--model"),
           "brew args: serve --model (id form)")
-    check(r.engineArgs.contains("incoai/Qwen3.8-27B-Splash"),
-          "brew args: Hugging Face model id passed")
+    check(r.engineArgs.contains("mlx-community/Qwen3.8-27B-4bit"),
+          "brew args: the 1.3.1 MLX model id (family of the 1.3.0 package)")
     check(!r.engineArgs.contains("server.server") && !r.engineArgs.contains("--binary"),
           "brew args: not the module form (no server.server / --binary)")
-    check(!r.engineArgs.contains(model),
-          "brew args: a 1.3.0 model dir is ignored (loads by id)")
+    check(r.modelId == "mlx-community/Qwen3.8-27B-4bit",
+          "brew: modelId is the MLX id it will download/serve (panel label)")
+    check(r.error == nil, "brew args: no local model -> no error (downloads by id)")
+}
+
+// a local model excludes the 1.3.1 brew keg: picking it would re-download the
+// model, so with only brew present the app reports an actionable error.
+do {
+    let (bd, be) = brewPaths("/opt/homebrew")
+    let model = "/home/.lmstudio/models/incoai/Qwen3.8-27B-Splash"
+    let r = resolveSplashPaths(
+        env: [:],
+        appRoot: "", home: "/home",
+        isDir: { bd.contains($0) || $0 == model }, isExecutable: { be.contains($0) },
+        brewKeg: { "/opt/homebrew" },
+        kitVersion: { $0.hasPrefix("/opt/homebrew/libexec") ? "1.3.1" : nil })
+    check(r.modelRoot == model, "local model: model dir resolved")
+    check(r.executable == nil, "local model: no 1.3.0 kit -> brew (1.3.1) not used")
+    let e = r.error ?? ""
+    check(e.contains("local model found"), "local model: error names the local model")
+    check(e.contains("1.3.0 engine kit"), "local model: error says a 1.3.0 kit is needed")
+}
+
+// local model + a 1.3.1 engine chosen explicitly (SPLASH_KIT_DIR) is rejected:
+// it would ignore the model and re-download it.
+do {
+    let (bd, be) = brewPaths("/opt/homebrew")
+    let model = "/env/model"
+    let r = resolveSplashPaths(
+        env: ["SPLASH_KIT_DIR": "/opt/homebrew/libexec", "SPLASH_MODEL_ROOT": model],
+        appRoot: "", home: "/home",
+        isDir: { bd.contains($0) || $0 == model }, isExecutable: { be.contains($0) },
+        brewKeg: { "/opt/homebrew" },
+        kitVersion: { $0.hasPrefix("/opt/homebrew/libexec") ? "1.3.1" : nil })
+    check(r.executable == "/opt/homebrew/libexec/python/bin/python3",
+          "explicit 1.3.1 + local model: kit still resolves")
+    let e = r.error ?? ""
+    check(e.contains("cannot load the 1.3.0 model format"),
+          "explicit 1.3.1 + local model: error says it can't load it")
+}
+
+// local model + a 1.3.0 kit (the common case) runs the module form on it.
+do {
+    let (kd, ke) = kitPaths("/kit130")
+    let model = "/env/model"
+    let r = resolveSplashPaths(
+        env: ["SPLASH_KIT_DIR": "/kit130", "SPLASH_MODEL_ROOT": model],
+        appRoot: "", home: "/home",
+        isDir: { kd.contains($0) || $0 == model }, isExecutable: { ke.contains($0) })
+    check(r.error == nil, "local model + 1.3.0 kit: no error")
+    check(r.engineArgs.contains("-m") && r.engineArgs.contains("server.server"),
+          "local model + 1.3.0 kit: module form")
+    check(r.engineArgs.contains(model),
+          "local model + 1.3.0 kit: local model dir passed positionally")
+    check(r.modelId == "incoai/Qwen3.8-27B-Splash",
+          "local model + 1.3.0 kit: modelId is the local package id (panel label)")
 }
 
 // appRoot rung: a kit in the checkout the app was launched from (install.sh's
