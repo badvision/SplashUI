@@ -48,18 +48,21 @@ Point any OpenAI-compatible client at `http://127.0.0.1:8123/v1` with the key ab
 
 ## Configuration (environment)
 
-`start.sh` passes these to the UI; all have defaults.
+`start.sh` passes these to the UI; all have defaults. The same variables apply when launching `build/SplashUI.app` directly from Finder (e.g. via the shell or a wrapper). The UI assumes no install location of its own: point it at your Splash engine and model with `SPLASH_KIT_DIR` / `SPLASH_MODEL_ROOT` (or set `SPLASHUI_HOME`); when nothing resolves, the menu bar stays up and shows the missing paths instead of quitting.
 
 | Variable               | Default                                        | Meaning                          |
 |------------------------|------------------------------------------------|----------------------------------|
 | `SPLASH_PORT`          | `8123`                                         | engine listen port               |
 | `SPLASH_KEY`           | `splash-standalone-1`                          | API key (loopback-only service)  |
-| `SPLASH_MODEL_ROOT`    | `~/SplashUI/models/incoai/Qwen3.8-27B-Splash`  | model dir (falls back to the LM Studio copy if present) |
+| `SPLASH_MODEL_ROOT`    | *(none — UI assumes no location)*<sup>†</sup>  | model dir                      |
 | `SPLASH_MAX_CACHE_DISK`| `100g`                                         | SSD prefix-cache cap             |
 | `SPLASH_IDLE_RELEASE`  | `240m`                                         | unload an idle model after this  |
 | `SPLASH_ANE`           | `on`                                           | GPU + Neural-Engine prefill split (`off` = GPU-only) |
 | `SPLASH_VERSION`       | `1.3.0`                                        | engine release pin               |
-| `SPLASHUI_HOME`        | `~/SplashUI`                                   | install root (kit + models)      |
+| `SPLASHUI_HOME`        | *(none — UI assumes no location)*<sup>†</sup> | install root (kit + models)    |
+| `SPLASH_KIT_DIR`       | *(none)* — derived from `SPLASHUI_HOME` when set | point at an existing Splash engine install |
+
+<sup>†</sup> `start.sh` and `install.sh` default the install root to `~/SplashUI` for script installs; the UI itself assumes no location and errors actionably when nothing is provided.
 
 ## How it works
 

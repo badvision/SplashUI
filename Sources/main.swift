@@ -3,43 +3,38 @@ import WebKit
 import Foundation
 import Darwin
 
-// MARK: - Configuration (mirrors start.sh)
+// MARK: - Configuration
 
 enum Cfg {
     static let host = "127.0.0.1"
-    static let port = 8123
-    static let apiKey = "splash-standalone-1"
-    static let kitDir = NSHomeDirectory() + "/Documents/code/splash-standalone/splash-1.3.0-arm64-macos26"
-    static let python = kitDir + "/python/bin/python"
-    static let modelRoot = NSHomeDirectory() + "/.lmstudio/models/incoai/Qwen3.8-27B-Splash"
     static let modelId = "incoai/Qwen3.8-27B-Splash"
-    static let maxCacheDisk = "100g"
-    static let idleRelease = "240m"
-    // GPU/Neural-Engine prefill split (1.3.0): on by default; SPLASH_ANE=off
-    // adds --disable-ane for a GPU-only path.
-    static let ane = (ProcessInfo.processInfo.environment["SPLASH_ANE"] ?? "on").lowercased()
     static let logLink = "/tmp/splash-standalone.log"
-    static var base: String { "http://\(host):\(port)" }
-    static var engineArgs: [String] {
-        var a = ["-u", "-m", "server.server", modelRoot,
-                 "--tokenizer", modelRoot + "/tokenizer",
-                 "--model", modelId, "--binary", "./engine/splash",
-                 "--host", host, "--port", String(port), "--api-key", apiKey,
-                 "--persistent-cache", "--max-cache-disk", maxCacheDisk,
-                 "--idle-release", idleRelease]
-        if ane != "on" { a.append("--disable-ane") }
-        return a
-    }
+}
+
+// Resolve the engine paths + engine argv from the documented env contract
+// (README "Configuration (environment)"). Re-resolved on every launch attempt so a
+// user fixing the install while the app is running takes effect on the next try.
+func isDir(_ path: String) -> Bool {
+    var values = [FileAttributeKey: Any]()
+    do { try values = FileManager.default.attributesOfItem(atPath: path) } catch { return false }
+    return values[.type] as? FileAttributeType == .typeDirectory
+}
+
+func resolve() -> SplashPaths {
+    resolveSplashPaths(
+        env: ProcessInfo.processInfo.environment,
+        isDir: isDir,
+        isExecutable: { access($0, X_OK) == 0 })
 }
 
 // MARK: - Process helpers
 
-func serverPids() -> [Int32] {
+func serverPids(port: Int) -> [Int32] {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
     // Bracket, not dot: a dot would also match a *concurrent pgrep's own argv* (the
     // pattern text appears there verbatim), which looks like a phantom server.
-    p.arguments = ["-f", "server[.]server.*--port " + String(Cfg.port)]
+    p.arguments = ["-f", "server[.]server.*--port " + String(port)]
     let pipe = Pipe()
     p.standardOutput = pipe
     p.standardError = FileHandle.nullDevice
@@ -52,10 +47,10 @@ func serverPids() -> [Int32] {
 
 // Is anything listening on the engine port? Ground truth for "a server exists" —
 // a raw socket connect: no child process, no pgrep, immune to spawn flakiness.
-func portAlive() -> Bool {
+func portAlive(port: Int) -> Bool {
     var addr = sockaddr_in()
     addr.sin_family = sa_family_t(AF_INET)
-    addr.sin_port = UInt16(Cfg.port).bigEndian
+    addr.sin_port = UInt16(port).bigEndian
     addr.sin_addr = in_addr(s_addr: inet_addr(Cfg.host))
     let fd = socket(AF_INET, SOCK_STREAM, 0)
     guard fd >= 0 else { return false }
@@ -87,13 +82,25 @@ final class ServerProc {
     private(set) var userStopped = false
     private(set) var pendingRestart = false
     private(set) var restartsExhausted = false
+    // Launch-failure record (surfaced in the panel + engine log) and retry bookkeeping.
+    private(set) var lastLaunchError: LaunchError?
+    private(set) var launchFailRetries = 0
+    // True once the app has started (or adopted) a server that is serving: the
+    // auto-quit policy only applies to a service that actually ran.
+    private(set) var everUp = false
     private var launchDate = Date()
     private var restartDates: [Date] = []
     private var outHandle: FileHandle?
 
+    // Resolved engine paths/config. Re-resolved on every launch attempt so a fixed
+    // install takes effect; also read each tick for the poll endpoint's port.
+    var slash: SplashPaths
+
+    init() { slash = resolve() }
+
     var pid: Int32? {
         if let p = process, p.isRunning { return p.processIdentifier }
-        return serverPids().first
+        return serverPids(port: slash.port).first
     }
 
     func upSeconds() -> Double {
@@ -102,8 +109,20 @@ final class ServerProc {
         return processUptime(pid)
     }
 
+    // App-side adoption of an already-serving engine (e.g. one started by start.sh).
+    func adopt() { everUp = true }
+
+    // Clear the error state so a user-pressed Start/Restart begins a fresh attempt.
+    func clearLaunchError() {
+        lastLaunchError = nil
+        launchFailRetries = 0
+    }
+
     func launch() {
-        guard pid == nil, !portAlive() else { return }
+        slash = resolve()
+        guard pid == nil, !portAlive(port: slash.port) else { return }
+        // Fresh engine log + tail symlink on every attempt, before the pre-flight,
+        // so even a missing-install failure lands in /tmp (the panel + `tail -f`).
         let stamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: "-", with: "").replacingOccurrences(of: ":", with: "")
         let logPath = "/tmp/splash-standalone-\(stamp).log"
@@ -113,11 +132,18 @@ final class ServerProc {
         try? FileManager.default.removeItem(atPath: Cfg.logLink)
         try? FileManager.default.createSymbolicLink(atPath: Cfg.logLink, withDestinationPath: logPath)
 
+        // Pre-flight: if the install is missing/broken, record it and stop —
+        // no process is touched, and the app stays up showing the actionable error.
+        if let e = slash.error { recordLaunchFailure(e, logPath: logPath); return }
+        guard let python = slash.python, let kitDir = slash.kitDir else { return }
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: Cfg.python)
-        p.currentDirectoryURL = URL(fileURLWithPath: Cfg.kitDir)
-        p.arguments = Cfg.engineArgs
-        guard let out = FileHandle(forWritingAtPath: logPath) else { return }
+        p.executableURL = URL(fileURLWithPath: python)
+        p.currentDirectoryURL = URL(fileURLWithPath: kitDir)
+        p.arguments = slash.engineArgs
+        guard let out = FileHandle(forWritingAtPath: logPath) else {
+            recordLaunchFailure("cannot write engine log: \(logPath)", logPath: logPath)
+            return
+        }
         p.standardOutput = out
         p.standardError = out
         p.terminationHandler = { [weak self] proc in
@@ -127,29 +153,53 @@ final class ServerProc {
                 self?.terminated(proc)
             }
         }
-        do { try p.run() } catch { out.closeFile(); return }
+        do { try p.run() } catch {
+            out.closeFile()
+            recordLaunchFailure(error.localizedDescription, logPath: logPath)
+            return
+        }
         // Keep the parent-side copy alive while the child runs: Foundation's async
         // task-launch references the fd after run() returns; closing it early throws
         // NSFileHandleOperationException -> uncaught ObjC exception -> SIGABRT.
         outHandle = out
         process = p
         launchedByApp = true
+        everUp = true
         userStopped = false
         pendingRestart = false
         restartsExhausted = false
+        lastLaunchError = nil
+        launchFailRetries = 0
         launchDate = Date()
+    }
+
+    // One line to NSLog (Console.app) and an append to the engine log stream, so
+    // `tail -f /tmp/splashui.log` shows launch failures alongside engine output.
+    private func recordLaunchFailure(_ message: String, logPath: String) {
+        lastLaunchError = LaunchError(message: message, attempt: Date())
+        launchFailRetries += 1
+        let line = "SplashUI launch failed (attempt \(launchFailRetries)): \(message)\n"
+        NSLog("%@", line)
+        if let h = FileHandle(forWritingAtPath: logPath) {
+            h.seekToEndOfFile()
+            if let d = line.data(using: .utf8) { h.write(d) }
+            h.closeFile()
+        }
     }
 
     func stop() {
         userStopped = true
         pendingRestart = false
+        everUp = false
+        lastLaunchError = nil
+        launchFailRetries = 0
         if let p = process, p.isRunning {
             p.terminationHandler = nil
             kill(p.processIdentifier, SIGTERM)
         }
         outHandle?.closeFile()
         outHandle = nil
-        for pid in serverPids() { kill(pid, SIGTERM) }
+        for pid in serverPids(port: slash.port) { kill(pid, SIGTERM) }
         process = nil
     }
 
@@ -170,6 +220,8 @@ final class ServerProc {
         }
     }
 }
+
+struct LaunchError { let message: String; let attempt: Date }
 
 // MARK: - System memory
 // vm.swapusage ABI on this macOS: 32 bytes = {i64 total, i64 avail, i64 used, u32 pagesize, u32 flags}, values in bytes
@@ -353,8 +405,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             // launch a server when the port is actually not serving (otherwise adopt).
             get("/status") { [weak self] data in
                 guard let self = self else { return }
-                if data == nil { self.server.launch() }
+                if data == nil { self.server.launch() } else { self.server.adopt() }
             }
+        } else {
+            // An engine is already running (e.g. started by start.sh): it is as much a
+            // service "in charge" as one we launched, so it counts as up — 0.3 quit 10 s
+            // after such a server died, and this must stay true.
+            server.adopt()
         }
         let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(t, forMode: .common)
@@ -426,11 +483,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         }
         guard let cmd = message.body as? String else { return }
         switch cmd {
-        case "start": server.launch()
+        case "start": server.clearLaunchError(); server.launch()
         case "stop":
             server.stop()
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.quitApp() }
         case "restart":
+            // stop() clears the failure record + retry count, so a fresh attempt
+            // starts at attempt 1 with no stale error in the UI.
             server.stop()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.server.launch() }
         default: break
@@ -481,10 +540,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     // MARK: Polling
 
     private func get(_ path: String, _ done: @escaping (Data?) -> Void) {
-        guard let url = URL(string: Cfg.base + path) else { done(nil); return }
+        guard let url = URL(string: server.slash.base + path) else { done(nil); return }
         var req = URLRequest(url: url)
         req.timeoutInterval = 2.5
-        req.setValue(Cfg.apiKey, forHTTPHeaderField: "x-api-key")
+        req.setValue(server.slash.apiKey, forHTTPHeaderField: "x-api-key")
         URLSession.shared.dataTask(with: req) { data, resp, _ in
             let ok = (resp as? HTTPURLResponse)?.statusCode == 200
             DispatchQueue.main.async { done(ok ? data : nil) }
@@ -524,6 +583,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     }
 
     private func tick() {
+        // Keep the resolved port/key fresh (env changes + user fixing the install).
+        server.slash = resolve()
         get("/status") { [weak self] data in
             let j = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
             DispatchQueue.main.async {
@@ -660,7 +721,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         let procGone = server.pid == nil && !server.userStopped && Date().timeIntervalSince(lastServerSeen) > 5
         var state = "idle"
         if procGone {
-            state = server.launchedByApp && server.pendingRestart && !server.restartsExhausted ? "restarting" : "down"
+            // pendingRestart means the engine *ran* and just died (crash path, 3×/10 min
+            // backoff), so it wins over a launch-failure record.
+            if server.launchedByApp && server.pendingRestart && !server.restartsExhausted { state = "restarting" }
+            else if server.lastLaunchError != nil { state = "launchfailed" }
+            else { state = "down" }
         }
         else if down { state = server.launchedByApp && server.pid != nil ? "loading" : "down" }
         else if !ready { state = "loading" }
@@ -668,19 +733,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         else if decoding || !tail.active.isEmpty { state = "decode" }
         else if queued { state = "queue" }
 
-        // ---- the UI never outlives the service: quit 10 s after the service is gone
+        // ---- the UI never outlives the *service*: quit 10 s after a server that was
+        // observed up goes away (crash, or an adopted external server dying). A launch
+        // that never came up (everUp == false) must NOT quit — the menu bar stays
+        // available with the actionable error on display; Stop is always the exit.
         if procGone {
             if downSince == nil { downSince = Date() }
-            else if let ds = downSince, Date().timeIntervalSince(ds) > 10 {
+            else if let ds = downSince,
+                    autoQuitDecision(procGone: procGone, everUp: server.everUp,
+                                     downFor: Date().timeIntervalSince(ds), userStopped: server.userStopped) {
                 NSApplication.shared.terminate(nil)
             }
         } else {
             downSince = nil
         }
 
+        // ---- auto-retry a failed launch: every 30 s, up to 10 total attempts. The
+        // user may have installed/fixed the kit meanwhile; launch() re-resolves
+        // paths fresh and clears the error on success, re-records on failure.
+        if server.lastLaunchError != nil && !server.userStopped &&
+            launchRetryDue(error: server.lastLaunchError?.attempt,
+                           retries: server.launchFailRetries, now: Date()) {
+            server.launch()
+        }
         // ---- tray
         switch state {
         case "down": updateTray(detail: "DOWN", color: .systemRed, fill: 0)
+        case "launchfailed": updateTray(detail: "ERR", color: .systemRed, fill: 0)
         case "restarting": updateTray(detail: "RESTART", color: .systemYellow, fill: 0.3)
         case "loading": updateTray(detail: "LOAD", color: .systemYellow, fill: 0.4)
         case "prefill":
@@ -808,6 +887,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             "pid": Int(server.pid ?? 0),
             "launched_by_app": server.launchedByApp && server.pid != nil,
             "up_seconds": server.upSeconds(),
+            "launch_error": js(server.lastLaunchError?.message),
+            "kit_dir": js(server.slash.kitDir),
         ]
 
         if let data = try? JSONSerialization.data(withJSONObject: j),

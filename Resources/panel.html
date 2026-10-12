@@ -98,7 +98,7 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 <div id="header">
   <div class="title" id="hName">Splash interface control</div>
   <div class="model" id="hModel">—</div>
-  <div class="pill g" id="statusPill" data-tip="Engine state — DOWN: no server · LOADING: model loading · PREFILL: prompt being processed · DECODE: generating output · QUEUED: waiting for resources · IDLE: no work · RESTART: app is restarting the server">WAITING</div>
+  <div class="pill g" id="statusPill" data-tip="Engine state — DOWN: no server · LAUNCH FAIL: engine could not start (see error below, auto-retries) · LOADING: model loading · PREFILL: prompt being processed · DECODE: generating output · QUEUED: waiting for resources · IDLE: no work · RESTART: app is restarting the server">WAITING</div>
 </div>
 
 <section class="performance" data-channel="01" aria-label="Performance">
@@ -227,11 +227,17 @@ function render(){
   if(!S) return;
   const st = S.state || "wait";
   const pill = $("statusPill");
-  const map = {down:["DOWN","r"], loading:["LOADING","y"], prefill:["PREFILL","o"], decode:["DECODE","t"], queue:["QUEUED","y"], idle:["IDLE","g"], wait:["WAITING","g"], restarting:["RESTART","y"]};
+  const map = {down:["DOWN","r"], launchfailed:["LAUNCH FAIL","r"], loading:["LOADING","y"], prefill:["PREFILL","o"], decode:["DECODE","t"], queue:["QUEUED","y"], idle:["IDLE","g"], wait:["WAITING","g"], restarting:["RESTART","y"]};
   const [txt, cls] = map[st] || ["?","g"];
   pill.textContent = txt + (st==="prefill" && S.prefill && S.prefill.pct != null ? " "+S.prefill.pct.toFixed(0)+"%" : "");
   pill.className = "pill " + cls;
-  setT("hModel", S.model ? S.model.replace("incoai/","") + " · 1.3.0" : "—");
+  let m = S.model ? S.model.replace("incoai/","") + " · 1.3.0" : "—";
+  if (S.server && S.server.launch_error) {
+    const lm = $("hModel");
+    lm.textContent = S.server.launch_error;
+    lm.style.color = "var(--red)";
+    lm.setAttribute("data-tip", "Engine could not start (auto-retry every 30 s, up to 10 attempts):\n" + S.server.launch_error);
+  } else { setT("hModel", m); }
 
   // decode + prefill
   const tps = S.rates && S.rates.decode_tps;
