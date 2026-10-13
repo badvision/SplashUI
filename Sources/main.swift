@@ -818,6 +818,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             "ctx": js(fld("maximum_context_tokens")),
         ]
         j["engine"] = [
+            "version": js(server.slash.version),
             "metal_healthy": js(metrics["splash_metal_healthy"]),
             "pressure": js(statusJSON?["memory_pressure"]),
             "loop_tick_ms": js(fld("loop", "max_tick_ms")),

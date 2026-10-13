@@ -122,6 +122,7 @@ do {
           "brew args: not the module form (no server.server / --binary)")
     check(r.modelId == "mlx-community/Qwen3.8-27B-4bit",
           "brew: modelId is the MLX id it will download/serve (panel label)")
+    check(r.version == "1.3.1", "brew: resolved keg version surfaced (1.3.1)")
     check(r.error == nil, "brew args: no local model -> no error (downloads by id)")
 }
 
@@ -168,7 +169,8 @@ do {
     let r = resolveSplashPaths(
         env: ["SPLASH_KIT_DIR": "/kit130", "SPLASH_MODEL_ROOT": model],
         appRoot: "", home: "/home",
-        isDir: { kd.contains($0) || $0 == model }, isExecutable: { ke.contains($0) })
+        isDir: { kd.contains($0) || $0 == model }, isExecutable: { ke.contains($0) },
+        kitVersion: { $0 == "/kit130" ? "1.3.0" : nil })
     check(r.error == nil, "local model + 1.3.0 kit: no error")
     check(r.engineArgs.contains("-m") && r.engineArgs.contains("server.server"),
           "local model + 1.3.0 kit: module form")
@@ -180,6 +182,7 @@ do {
           "local model + 1.3.0 kit: --tokenizer points at the package's tokenizer/ subdir")
     check(r.modelId == "incoai/Qwen3.8-27B-Splash",
           "local model + 1.3.0 kit: modelId is the local package id (panel label)")
+    check(r.version == "1.3.0", "local model + 1.3.0 kit: resolved kit version surfaced")
 }
 
 // appRoot rung: a kit in the checkout the app was launched from (install.sh's

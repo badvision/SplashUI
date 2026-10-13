@@ -117,7 +117,7 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 </section>
 
 <section class="engine-panel" data-channel="02" aria-label="Engine">
-  <div class="label" data-tip="Engine readiness and server uptime."><span>Engine</span><b id="engState">—</b></div>
+  <div class="label" data-tip="Engine readiness and server uptime."><span>Engine</span><b id="engVer" data-tip="The engine kit version (release.json) actually running — it determines the launch contract (1.3.0 module form vs 1.3.1 id form).">—</b><b id="engState">—</b></div>
   <div class="row">
     <div class="col" style="flex:1" data-tip="GPU backend health — whether the Metal device reports healthy."><div class="k">Metal</div><div class="mid" id="metal">—</div></div>
     <div class="col" style="flex:1" data-tip="Maximum context the model was loaded with (tokens)."><div class="k">Context</div><div class="mid" id="ctx">—</div></div>
@@ -254,6 +254,7 @@ function render(){
   drawSpark();
 
   // engine
+  setT("engVer", S.engine && S.engine.version ? "v" + S.engine.version : "—");
   setT("engState", (S.ready?"READY":"NOT READY") + " · " + (S.server && S.server.up_seconds ? up(S.server.up_seconds) : "—"));
   setT("metal", S.engine && S.engine.metal_healthy != null ? (S.engine.metal_healthy ? "OK" : "FAIL") : "—");
   setT("ctx", S.ctx ? (S.ctx/1024).toFixed(0)+"K" : "—");

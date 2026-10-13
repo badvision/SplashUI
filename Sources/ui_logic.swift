@@ -14,6 +14,7 @@ public struct SplashPaths {
     public var base: String
     public var engineArgs: [String]
     public var modelId: String?       // the model id actually served (flavor-aware)
+    public var version: String?       // the engine kit version (release.json) actually running
     public var error: String?
 }
 
@@ -106,9 +107,10 @@ public func resolveSplashPaths(env: [String: String],
     }
 
     // Engine version gates the launch contract: >= 1.3.1 (the Homebrew keg)
-    // loads the model by id; 1.3.0-style loads it positionally.
-    let idModel = kit.flatMap { kitVersion($0) }
-        .map { versionGE($0, "1.3.1") } ?? false
+    // loads the model by id; 1.3.0-style loads it positionally. The resolved
+    // kit's release.json version is also surfaced in the panel (what's running).
+    let kitVer = kit.flatMap { kitVersion($0) }
+    let idModel = kitVer.map { versionGE($0, "1.3.1") } ?? false
 
     if kit == nil {
         if modelRoot != nil {
@@ -191,7 +193,7 @@ public func resolveSplashPaths(env: [String: String],
     return SplashPaths(workDir: kit, executable: executable, modelRoot: modelRoot,
                        port: port, apiKey: apiKey, maxCacheDisk: maxCacheDisk,
                        idleRelease: idleRelease, base: base, engineArgs: engineArgs,
-                       modelId: modelId,
+                       modelId: modelId, version: kitVer,
                        error: errorParts.isEmpty ? nil : errorParts.joined(separator: " | "))
 }
 
