@@ -19,12 +19,8 @@ func isDir(_ path: String) -> Bool {
     return values[.type] as? FileAttributeType == .typeDirectory
 }
 
-// The checkout the app was launched from — install.sh's default install root.
-// `build/SplashUI.app` sits two levels below it.
-let appRoot = Bundle.main.bundleURL
-    .deletingLastPathComponent()
-    .deletingLastPathComponent()
-    .path
+// The README ./install.sh default install root (SPLASHUI_HOME).
+let defaultRoot = NSHomeDirectory() + "/SplashUI"
 
 // The Homebrew keg of the splash formula, if installed. The formula versions
 // its Cellar path per release, so the newest version dir is picked.
@@ -52,7 +48,7 @@ func kitVersion(_ kit: String) -> String? {
 func resolve() -> SplashPaths {
     resolveSplashPaths(
         env: ProcessInfo.processInfo.environment,
-        appRoot: appRoot,
+        defaultRoot: defaultRoot,
         home: NSHomeDirectory(),
         isDir: isDir,
         isExecutable: { access($0, X_OK) == 0 },

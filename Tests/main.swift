@@ -36,7 +36,7 @@ do {
     let (bd, be) = brewPaths("/opt/homebrew")
     let r = resolveSplashPaths(
         env: ["SPLASH_KIT_DIR": "/env/kit"],
-        appRoot: "/app", home: "/home",
+        defaultRoot: "/home/SplashUI", home: "/home",
         isDir: { (kd | bd).contains($0) }, isExecutable: { (ke | be).contains($0) },
         brewKeg: { "/opt/homebrew" })
     check(r.workDir == "/env/kit", "ladder: SPLASH_KIT_DIR env wins over brew")
@@ -51,7 +51,7 @@ do {
     let r = resolveSplashPaths(
         env: ["SPLASH_KIT_DIR": "/env/broken/kit", "SPLASHUI_HOME": "/root",
               "SPLASH_MODEL_ROOT": "/env/model"],
-        appRoot: "/app", home: "/home",
+        defaultRoot: "/home/SplashUI", home: "/home",
         isDir: { dirs.contains($0) }, isExecutable: { exe.contains($0) })
     check(r.workDir == "/root/kit/splash-1.3.0-arm64-macos26",
           "ladder: incomplete env kit skipped, SPLASHUI_HOME rung wins")
@@ -65,7 +65,7 @@ do {
     let (d, e) = kitPaths("/customroot/kit/splash-9.9.9-arm64-macos26")
     let r = resolveSplashPaths(
         env: ["SPLASHUI_HOME": "/customroot", "SPLASH_VERSION": "9.9.9"],
-        appRoot: "", home: "/home",
+        defaultRoot: nil, home: "/home",
         isDir: { d.contains($0) }, isExecutable: { e.contains($0) })
     check(r.workDir == "/customroot/kit/splash-9.9.9-arm64-macos26",
           "ladder: SPLASHUI_HOME + SPLASH_VERSION honored")
@@ -79,7 +79,7 @@ do {
     let exe: Set<String> = be | re
     let r = resolveSplashPaths(
         env: ["SPLASHUI_HOME": "/root"],
-        appRoot: "", home: "/home",
+        defaultRoot: nil, home: "/home",
         isDir: { dirs.contains($0) }, isExecutable: { exe.contains($0) },
         brewKeg: { "/opt/homebrew" })
     check(r.workDir == "/root/kit/splash-1.3.0-arm64-macos26",
@@ -91,7 +91,7 @@ do {
     let (bd, be) = brewPaths("/opt/homebrew")
     let r = resolveSplashPaths(
         env: [:],
-        appRoot: "", home: "/home",
+        defaultRoot: nil, home: "/home",
         isDir: { bd.contains($0) }, isExecutable: { be.contains($0) },
         brewKeg: { "/opt/homebrew" },
         kitVersion: { $0.hasPrefix("/opt/homebrew/libexec") ? "1.3.1" : nil })
@@ -108,7 +108,7 @@ do {
     let (bd, be) = brewPaths("/opt/homebrew")
     let r = resolveSplashPaths(
         env: [:],
-        appRoot: "", home: "/home",
+        defaultRoot: nil, home: "/home",
         isDir: { bd.contains($0) }, isExecutable: { be.contains($0) },
         brewKeg: { "/opt/homebrew" },
         kitVersion: { $0.hasPrefix("/opt/homebrew/libexec") ? "1.3.1" : nil })
@@ -133,7 +133,7 @@ do {
     let model = "/home/.lmstudio/models/incoai/Qwen3.8-27B-Splash"
     let r = resolveSplashPaths(
         env: [:],
-        appRoot: "", home: "/home",
+        defaultRoot: nil, home: "/home",
         isDir: { bd.contains($0) || $0 == model }, isExecutable: { be.contains($0) },
         brewKeg: { "/opt/homebrew" },
         kitVersion: { $0.hasPrefix("/opt/homebrew/libexec") ? "1.3.1" : nil })
@@ -151,7 +151,7 @@ do {
     let model = "/env/model"
     let r = resolveSplashPaths(
         env: ["SPLASH_KIT_DIR": "/opt/homebrew/libexec", "SPLASH_MODEL_ROOT": model],
-        appRoot: "", home: "/home",
+        defaultRoot: nil, home: "/home",
         isDir: { bd.contains($0) || $0 == model }, isExecutable: { be.contains($0) },
         brewKeg: { "/opt/homebrew" },
         kitVersion: { $0.hasPrefix("/opt/homebrew/libexec") ? "1.3.1" : nil })
@@ -168,7 +168,7 @@ do {
     let model = "/env/model"
     let r = resolveSplashPaths(
         env: ["SPLASH_KIT_DIR": "/kit130", "SPLASH_MODEL_ROOT": model],
-        appRoot: "", home: "/home",
+        defaultRoot: nil, home: "/home",
         isDir: { kd.contains($0) || $0 == model }, isExecutable: { ke.contains($0) },
         kitVersion: { $0 == "/kit130" ? "1.3.0" : nil })
     check(r.error == nil, "local model + 1.3.0 kit: no error")
@@ -185,26 +185,40 @@ do {
     check(r.version == "1.3.0", "local model + 1.3.0 kit: resolved kit version surfaced")
 }
 
-// appRoot rung: a kit in the checkout the app was launched from (install.sh's
-// default layout) is found with no env.
+// Default install root: README install.sh layout is found with no env.
 do {
-    let (d, e) = kitPaths("/app/kit/splash-1.3.0-arm64-macos26")
-    let (md, _) = kitPaths("/app/models/incoai/Qwen3.8-27B-Splash")
+    let (d, e) = kitPaths("/home/SplashUI/kit/splash-1.3.0-arm64-macos26")
+    let model = "/home/SplashUI/models/incoai/Qwen3.8-27B-Splash"
     let r = resolveSplashPaths(
         env: [:],
-        appRoot: "/app", home: "/home",
-        isDir: { (d | md).contains($0) }, isExecutable: { e.contains($0) })
-    check(r.workDir == "/app/kit/splash-1.3.0-arm64-macos26",
-          "ladder: appRoot kit rung found")
-    check(r.modelRoot == "/app/models/incoai/Qwen3.8-27B-Splash",
-          "model: appRoot models rung")
+        defaultRoot: "/home/SplashUI", home: "/home",
+        isDir: { d.contains($0) || $0 == model }, isExecutable: { e.contains($0) })
+    check(r.workDir == "/home/SplashUI/kit/splash-1.3.0-arm64-macos26",
+          "ladder: default install root kit found with no env")
+    check(r.modelRoot == model, "model: default install root models found with no env")
+    check(r.error == nil, "default install root: kit and model resolve without error")
+}
+
+// Explicit SPLASHUI_HOME replaces the default root for both kit and model.
+do {
+    let (rd, re) = kitPaths("/root/kit/splash-1.3.0-arm64-macos26")
+    let (dd, de) = kitPaths("/home/SplashUI/kit/splash-1.3.0-arm64-macos26")
+    let model = "/root/models/incoai/Qwen3.8-27B-Splash"
+    let dirs = rd | dd | [model, "/home/SplashUI/models/incoai/Qwen3.8-27B-Splash"]
+    let r = resolveSplashPaths(
+        env: ["SPLASHUI_HOME": "/root"],
+        defaultRoot: "/home/SplashUI", home: "/home",
+        isDir: { dirs.contains($0) }, isExecutable: { (re | de).contains($0) })
+    check(r.workDir == "/root/kit/splash-1.3.0-arm64-macos26",
+          "ladder: explicit SPLASHUI_HOME wins over default root")
+    check(r.modelRoot == model, "model: explicit SPLASHUI_HOME wins over default root")
 }
 
 // nothing anywhere: no assumption is made — actionable error, no quit.
 do {
     let r = resolveSplashPaths(
         env: [:],
-        appRoot: "", home: "/home",
+        defaultRoot: nil, home: "/home",
         isDir: { _ in false }, isExecutable: { _ in false })
     check(r.executable == nil, "ladder: nothing found -> no executable")
     check(r.modelRoot == nil, "ladder: nothing found -> no model")
@@ -218,7 +232,7 @@ do {
 do {
     let r = resolveSplashPaths(
         env: ["SPLASH_KIT_DIR": "", "SPLASH_MODEL_ROOT": ""],
-        appRoot: "", home: "/home",
+        defaultRoot: nil, home: "/home",
         isDir: { _ in false }, isExecutable: { _ in false })
     check(r.executable == nil && r.modelRoot == nil, "empty env values treated as unset")
 }
@@ -230,7 +244,7 @@ do {
     let (_, ke) = kitPaths("/k")
     let r = resolveSplashPaths(
         env: ["SPLASH_KIT_DIR": "/k", "SPLASH_MODEL_ROOT": "/env/model"],
-        appRoot: "/app", home: "/home",
+        defaultRoot: "/home/SplashUI", home: "/home",
         isDir: { $0 == "/k" || $0 == "/env/model" }, isExecutable: { ke.contains($0) })
     check(r.modelRoot == "/env/model", "model: SPLASH_MODEL_ROOT wins")
     check(r.error == nil, "model: no error when both resolve")
@@ -242,7 +256,7 @@ do {
     let dirs: Set<String> = kd.union(["/customroot/models/incoai/Qwen3.8-27B-Splash"])
     let r = resolveSplashPaths(
         env: ["SPLASH_KIT_DIR": "/k", "SPLASHUI_HOME": "/customroot"],
-        appRoot: "", home: "/home",
+        defaultRoot: nil, home: "/home",
         isDir: { dirs.contains($0) }, isExecutable: { ke.contains($0) })
     check(r.modelRoot == "/customroot/models/incoai/Qwen3.8-27B-Splash",
           "model: SPLASHUI_HOME models rung")
@@ -254,7 +268,7 @@ do {
     let dirs: Set<String> = kd.union(["/home/.lmstudio/models/incoai/Qwen3.8-27B-Splash"])
     let r = resolveSplashPaths(
         env: ["SPLASH_KIT_DIR": "/k"],
-        appRoot: "", home: "/home",
+        defaultRoot: nil, home: "/home",
         isDir: { dirs.contains($0) }, isExecutable: { ke.contains($0) })
     check(r.modelRoot == "/home/.lmstudio/models/incoai/Qwen3.8-27B-Splash",
           "model: LM-Studio copy is the last rung")
@@ -266,7 +280,7 @@ do {
     let r = resolveSplashPaths(
         env: ["SPLASH_KIT_DIR": "/k", "SPLASH_MODEL_ROOT": "/env/model",
               "SPLASHUI_HOME": "/customroot"],
-        appRoot: "", home: "/home",
+        defaultRoot: nil, home: "/home",
         isDir: { kd.contains($0) }, isExecutable: { ke.contains($0) })
     check(r.modelRoot == nil, "model miss: modelRoot nil")
     let e = r.error ?? ""
@@ -284,7 +298,7 @@ do {
     let (kd, ke) = kitPaths("/k")
     let r = resolveSplashPaths(
         env: ["SPLASH_KIT_DIR": "/k"],
-        appRoot: "", home: "/home",
+        defaultRoot: nil, home: "/home",
         isDir: { kd.contains($0) }, isExecutable: { ke.contains($0) },
         kitVersion: { $0 == "/k" ? "1.3.1" : nil })
     check(r.modelRoot == nil, "id model: modelRoot nil")
@@ -301,7 +315,7 @@ do {
     let r = resolveSplashPaths(
         env: ["SPLASH_KIT_DIR": "/k", "SPLASH_MODEL_ROOT": "/m", "SPLASH_PORT": "8199",
               "SPLASH_KEY": "k2", "SPLASH_MAX_CACHE_DISK": "50g", "SPLASH_IDLE_RELEASE": "60m"],
-        appRoot: "", home: "/home",
+        defaultRoot: nil, home: "/home",
         isDir: { $0 == "/k" || $0 == "/m" }, isExecutable: { ke.contains($0) })
     check(r.port == 8199, "port: SPLASH_PORT honored")
     check(r.apiKey == "k2", "key: SPLASH_KEY honored")
@@ -316,7 +330,7 @@ do {
     let (_, ke) = kitPaths("/k")
     let r = resolveSplashPaths(
         env: ["SPLASH_KIT_DIR": "/k", "SPLASH_MODEL_ROOT": "/m", "SPLASH_PORT": "nope"],
-        appRoot: "", home: "/home",
+        defaultRoot: nil, home: "/home",
         isDir: { $0 == "/k" || $0 == "/m" }, isExecutable: { ke.contains($0) })
     check(r.port == 8123, "port: invalid SPLASH_PORT falls back to 8123")
     let e = r.error ?? ""
@@ -328,7 +342,7 @@ do {
     let (_, ke) = kitPaths("/k")
     let r = resolveSplashPaths(
         env: ["SPLASH_KIT_DIR": "/k", "SPLASH_MODEL_ROOT": "/m"],
-        appRoot: "", home: "/home",
+        defaultRoot: nil, home: "/home",
         isDir: { $0 == "/k" || $0 == "/m" }, isExecutable: { ke.contains($0) })
     check(r.port == 8123 && r.apiKey == "splash-standalone-1" && r.maxCacheDisk == "100g"
           && r.idleRelease == "240m", "defaults: port/key/cache/idle")
@@ -342,14 +356,14 @@ do {
     let (_, ke) = kitPaths("/k")
     let r = resolveSplashPaths(
         env: ["SPLASH_KIT_DIR": "/k", "SPLASH_MODEL_ROOT": "/m", "SPLASH_ANE": "off"],
-        appRoot: "", home: "/home",
+        defaultRoot: nil, home: "/home",
         isDir: { $0 == "/k" || $0 == "/m" }, isExecutable: { ke.contains($0) })
     check(r.engineArgs.last == "--disable-ane", "ane: SPLASH_ANE=off adds --disable-ane (module form)")
 
     let (bd, be) = brewPaths("/opt/homebrew")
     let rb = resolveSplashPaths(
         env: ["SPLASH_ANE": "off"],
-        appRoot: "", home: "/home",
+        defaultRoot: nil, home: "/home",
         isDir: { bd.contains($0) }, isExecutable: { be.contains($0) },
         brewKeg: { "/opt/homebrew" },
         kitVersion: { $0.hasPrefix("/opt/homebrew/libexec") ? "1.3.1" : nil })

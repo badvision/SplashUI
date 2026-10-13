@@ -48,7 +48,7 @@ Point any OpenAI-compatible client at `http://127.0.0.1:8123/v1` with the key ab
 
 ## Configuration (environment)
 
-`start.sh` passes these to the UI; all have defaults. The same variables apply when launching `build/SplashUI.app` directly from Finder (e.g. via the shell or a wrapper). The UI finds the engine by **discovery**, in order: `SPLASH_KIT_DIR` → `SPLASHUI_HOME/kit/splash-$SPLASH_VERSION-arm64-macos26` (when `SPLASHUI_HOME` is set) → the directory the app was launched from (where `./install.sh` defaults to installing) → a Homebrew install (`brew install incoai/tap/splash`) as the last-resort fallback. A **model dir** is found the same way — `SPLASH_MODEL_ROOT` → `SPLASHUI_HOME/models/<id>` → `<launch dir>/models/<id>` → `~/.lmstudio/models/<id>`. A 1.3.0-style engine loads that dir positionally (reusing an installed model, never re-downloading); the 1.3.1+ engine (the Homebrew keg) loads by Hugging Face id and *cannot read* the 1.3.0 package format, so **when a local model dir is present the Homebrew fallback is skipped** — picking it would ignore the model and re-download it — and if no 1.3.0-style engine is found the app reports exactly that. When nothing resolves, the menu bar stays up and shows the missing paths (with every location it tried) instead of quitting; a failed launch retries every 30 s (10 attempts), so an install fixed while the app is running takes effect on the next attempt.
+`start.sh` passes these to the UI; all have defaults. The same variables apply when launching `build/SplashUI.app` directly from Finder (e.g. via the shell or a wrapper). The UI finds the engine by **discovery**, in order: `SPLASH_KIT_DIR` → `SPLASHUI_HOME/kit/splash-$SPLASH_VERSION-arm64-macos26` → a Homebrew install (`brew install incoai/tap/splash`) as the last-resort fallback; `SPLASHUI_HOME` defaults to `~/SplashUI` (the `./install.sh` default). A **model dir** is found the same way — `SPLASH_MODEL_ROOT` → `SPLASHUI_HOME/models/<id>` → `~/.lmstudio/models/<id>`. A 1.3.0-style engine loads that dir positionally (reusing an installed model, never re-downloading); the 1.3.1+ engine (the Homebrew keg) loads by Hugging Face id and *cannot read* the 1.3.0 package format, so **when a local model dir is present the Homebrew fallback is skipped** — picking it would ignore the model and re-download it — and if no 1.3.0-style engine is found the app reports exactly that. When nothing resolves, the menu bar stays up and shows the missing paths (with every location it tried) instead of quitting; a failed launch retries every 30 s (10 attempts), so an install fixed while the app is running takes effect on the next attempt.
 
 | Variable               | Default                                        | Meaning                          |
 |------------------------|------------------------------------------------|----------------------------------|
@@ -59,10 +59,10 @@ Point any OpenAI-compatible client at `http://127.0.0.1:8123/v1` with the key ab
 | `SPLASH_IDLE_RELEASE`  | `240m`                                         | unload an idle model after this  |
 | `SPLASH_ANE`           | `on`                                           | GPU + Neural-Engine prefill split (`off` = GPU-only) |
 | `SPLASH_VERSION`       | `1.3.0`                                        | engine release pin               |
-| `SPLASHUI_HOME`        | *(none — UI assumes no location)*<sup>†</sup> | install root (kit + models)    |
+| `SPLASHUI_HOME`        | `~/SplashUI`<sup>†</sup>                       | install root (kit + models)    |
 | `SPLASH_KIT_DIR`       | *(none)* — derived from `SPLASHUI_HOME` when set | point at an existing Splash engine install |
 
-<sup>†</sup> `start.sh` and `install.sh` default the install root to `~/SplashUI` for script installs; the UI itself assumes no location and errors actionably when nothing is provided.
+<sup>†</sup> The UI's default install root is `~/SplashUI`, matching `./install.sh` and `start.sh`; it errors actionably when nothing is found.
 
 ## How it works
 

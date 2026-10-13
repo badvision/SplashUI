@@ -24,12 +24,12 @@ public struct SplashPaths {
 // `python/bin/python3`, `server/`), only the launch contract differs. The UI
 // finds one by discovery, in order:
 //   1. SPLASH_KIT_DIR — an explicit path-based install (always wins)
-//   2. SPLASHUI_HOME/kit/splash-$SPLASH_VERSION-arm64-macos26 (install.sh layout)
-//   3. the directory the app was launched from (install.sh's default layout)
-//   4. a Homebrew keg when detected (`brew install incoai/tap/splash`) — the
+//   2. effective root/kit/splash-$SPLASH_VERSION-arm64-macos26 (install.sh layout)
+//      — SPLASHUI_HOME, or the default install root when unset
+//   3. a Homebrew keg when detected (`brew install incoai/tap/splash`) — the
 //      fallback
 // The model is a separate axis, found in order: SPLASH_MODEL_ROOT ->
-// SPLASHUI_HOME/models -> launchdir/models -> ~/.lmstudio/models. A found dir
+// effective root/models -> ~/.lmstudio/models. A found dir
 // tells a 1.3.0-style engine where to load from (reusing an installed model,
 // never re-downloading). The model is always identified by its Hugging Face id
 // regardless; the dir is only used by the 1.3.0 flavor. The launch contract is
@@ -40,7 +40,7 @@ public struct SplashPaths {
 // location tried instead of quitting. `home`, `brewKeg`, and `kitVersion` are
 // injected for tests.
 public func resolveSplashPaths(env: [String: String],
-                               appRoot: String,
+                               defaultRoot: String?,
                                home: String,
                                isDir: (String) -> Bool,
                                isExecutable: (String) -> Bool,
@@ -54,6 +54,7 @@ public func resolveSplashPaths(env: [String: String],
     let dirModelId = "incoai/Qwen3.8-27B-Splash"
     let idModelId = "mlx-community/Qwen3.8-27B-4bit"
     let root = env["SPLASHUI_HOME"]
+    let effRoot = root ?? defaultRoot
     let version = env["SPLASH_VERSION"] ?? "1.3.0"
 
     var errorParts: [String] = []
@@ -78,8 +79,7 @@ public func resolveSplashPaths(env: [String: String],
     // model is present, because only a 1.3.0-style engine can load it.
     var modelCandidates: [String] = []
     if let m = env["SPLASH_MODEL_ROOT"], m != "" { modelCandidates.append(m) }
-    if let r = root, r != "" { modelCandidates.append(r + "/models/" + dirModelId) }
-    if !appRoot.isEmpty { modelCandidates.append(appRoot + "/models/" + dirModelId) }
+    if let r = effRoot, r != "" { modelCandidates.append(r + "/models/" + dirModelId) }
     modelCandidates.append(home + "/.lmstudio/models/" + dirModelId)
     let modelRoot = modelCandidates.first { isDir($0) }
 
@@ -91,15 +91,11 @@ public func resolveSplashPaths(env: [String: String],
 
     // 1. Explicit path-based install (always wins).
     if let k = env["SPLASH_KIT_DIR"], k != "" { tryKit(k) }
-    // 2. install.sh layout under an explicitly-set home.
-    if kit == nil, let r = root, r != "" {
+    // 2. install.sh layout under SPLASHUI_HOME or the default install root.
+    if kit == nil, let r = effRoot, r != "" {
         tryKit(r + "/kit/splash-\(version)-arm64-macos26")
     }
-    // 3. The checkout the app was launched from (install.sh's default layout).
-    if kit == nil, !appRoot.isEmpty {
-        tryKit(appRoot + "/kit/splash-\(version)-arm64-macos26")
-    }
-    // 4. Homebrew (1.3.1) — only when no local model is present: a 1.3.1
+    // 3. Homebrew (1.3.1) — only when no local model is present: a 1.3.1
     //    engine cannot load the 1.3.0 package and would re-download the
     //    model, which is not what the user wants.
     if kit == nil, modelRoot == nil, let b = brewKeg(), b != "" {
