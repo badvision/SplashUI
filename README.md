@@ -106,8 +106,9 @@ Point any OpenAI-compatible client at `http://127.0.0.1:8123/v1` with the key ab
 
 Change `SPLASH_VERSION` and re-run `install.sh`. The UI reads the installed kit's
 `release.json` version and switches to that release's launch contract automatically:
-1.3.0-style runs `python -m server.server` with the model dir positional; 1.3.1+ (the
-Homebrew keg) runs the kit's `install/launcher.py serve --model <id>`. 1.3.0 splits
+1.3.0-style runs `python -m server.server <MODEL_DIR> --model <OWNER/REPO> --tokenizer <MODEL_DIR>/tokenizer` (the model dir is
+passed positionally and reused — no download); 1.3.1+ (the Homebrew keg) runs the kit's
+`install/launcher.py serve --model <id>`. 1.3.0 splits
 dense-model prefill across GPU and Neural Engine by default (`SPLASH_ANE` controls it)
 and speaks native protocol 8, so the server must restart on upgrade. Verify the CLI of
 any newer release before pointing `start.sh` at it.

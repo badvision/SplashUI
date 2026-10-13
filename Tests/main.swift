@@ -174,6 +174,10 @@ do {
           "local model + 1.3.0 kit: module form")
     check(r.engineArgs.contains(model),
           "local model + 1.3.0 kit: local model dir passed positionally")
+    check(r.engineArgs.contains("--model") && r.engineArgs.contains("incoai/Qwen3.8-27B-Splash"),
+          "local model + 1.3.0 kit: --model OWNER/REPO passed (server.py requires it)")
+    check(r.engineArgs.contains(model + "/tokenizer"),
+          "local model + 1.3.0 kit: --tokenizer points at the package's tokenizer/ subdir")
     check(r.modelId == "incoai/Qwen3.8-27B-Splash",
           "local model + 1.3.0 kit: modelId is the local package id (panel label)")
 }

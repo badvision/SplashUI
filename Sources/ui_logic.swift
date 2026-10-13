@@ -157,9 +157,13 @@ public func resolveSplashPaths(env: [String: String],
                       "--api-key", apiKey, "--persistent-cache",
                       "--max-cache-disk", maxCacheDisk, "--idle-release", idleRelease]
     } else if let m = modelRoot {
-        // 1.3.0-style: pass the on-disk model dir positionally (no download)
+        // 1.3.0-style: pass the on-disk model dir positionally (no download).
+        // server.py also requires --model OWNER/REPO (validated id), and the
+        // --tokenizer path must be the package's tokenizer/ subdir (the Splash
+        // package keeps tokenizer.json + config there, not at the model root).
         engineArgs = ["-u", "-m", "server.server", m,
-                      "--tokenizer", m, "--binary", "./engine/splash",
+                      "--model", dirModelId,
+                      "--tokenizer", m + "/tokenizer", "--binary", "./engine/splash",
                       "--host", "127.0.0.1", "--port", String(port),
                       "--api-key", apiKey, "--persistent-cache",
                       "--max-cache-disk", maxCacheDisk, "--idle-release", idleRelease]
