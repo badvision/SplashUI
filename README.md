@@ -89,14 +89,17 @@ Point any OpenAI-compatible client at `http://127.0.0.1:8123/v1` with the key ab
   WKWebView. The decode readout is the *committed* output rate: counter delta divided by
   the real elapsed time between samples. DFlash-2 draft tokens that fail verification do
   not count, so it matches the per-request tok/s in the completion log.
-- The Prefill cell measures work, not prompt size: progress = tokens actually prefilled
-  ÷ the request's uncached tail. The tail is *measured* from the engine's own prefix
-  lookup for that request (`cache.kv_hit_tokens`), so a 98%-cached prompt sweeps 0→100%
-  across its small tail instead of sitting flat at ~2%; until the lookup resolves (and
-  for fully cold prompts) it falls back to the recent requests' cache hit rates (shown
-  as a `~NN% cached` chip), and work beyond the estimate falls back to the classic
-  whole-input sweep. The last sample is kept for up to 15 s after prefill ends, so the
-  readout survives the short prefill phase of a cached turn.
+- In-flight work comes from live scheduler/frontend counters even when the engine emits
+  no `Request` log line. Without a known prompt size, Prefill shows cumulative work
+  since prefill started (`N tok · R tok/s`), not a fabricated percentage; until the
+  metrics baseline arrives, the count is unknown (`…`). When a real
+  request log supplies the input size, the existing uncached-tail percentage remains
+  available. The last prefill sample is held for up to 15 s after prefill ends.
+- Recent request rows prefer an explicit log id; otherwise a single app-side sequence,
+  seeded once from the engine's terminal counters, numbers both Done and Cancelled rows.
+  These display ids are unique across terminal kinds and do not depend on status/log
+  timing. Engine footprint is OS process RSS (`ps`, KiB converted to bytes), distinct
+  from Eng mem, which is the engine's own memory accounting.
 - The engine port is the ground truth: the app only *launches* a server when the port is
   not actually serving, and only treats it as *gone* when the port stops answering.
 - No launchd persistence: quit the app and supervision goes with it (the server keeps

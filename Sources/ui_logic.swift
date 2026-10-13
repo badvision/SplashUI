@@ -223,3 +223,34 @@ public func autoQuitDecision(procGone: Bool, everUp: Bool, downFor: TimeInterval
 public func launchRetryDue(error: Date?, retries: Int, now: Date) -> Bool {
     error != nil && retries < 10 && now.timeIntervalSince(error!) >= 30
 }
+
+public func requestRowId(current: Int, lineHasId: Int?) -> (id: Int, next: Int) {
+    let id = lineHasId ?? current
+    return (id, max(current, id == Int.max ? Int.max : id + 1))
+}
+
+public func inFlight(prefilling: Int, decoding: Int, frontendActive: Int) -> Bool {
+    prefilling > 0 || decoding > 0 || frontendActive > 0
+}
+
+public func prefillProgress(prefilledTotal: Double, prefillBase: Double?) -> Double? {
+    guard let base = prefillBase, base.isFinite, prefilledTotal.isFinite else { return nil }
+    return max(0, prefilledTotal - base)
+}
+
+public func prefillBaseline(prefilling: Bool, wasPrefilling: Bool, current: Double?, prefilledTotal: Double?) -> Double? {
+    guard prefilling else { return current }
+    let validTotal = prefilledTotal.flatMap { $0.isFinite ? $0 : nil }
+    return !wasPrefilling || current == nil ? validTotal : current
+}
+
+public func telemetryInt(_ value: Double?) -> Int {
+    guard let value = value, value.isFinite else { return 0 }
+    return Int(exactly: value.rounded(.towardZero)) ?? 0
+}
+
+public func rssBytesFromPsOutput(_ text: String) -> Int64? {
+    guard let kib = Int64(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+          kib >= 0, kib <= Int64.max / 1024 else { return nil }
+    return kib * 1024
+}

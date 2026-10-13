@@ -394,5 +394,43 @@ check(launchRetryDue(error: now.addingTimeInterval(-400), retries: 10, now: now)
 check(launchRetryDue(error: now.addingTimeInterval(-400), retries: 9, now: now) == true,
       "retry: 9 retries, long ago -> due")
 
+// ---- request display and RSS ------------------------------------------------
+let explicitId = requestRowId(current: 3, lineHasId: 42)
+check(explicitId.id == 42 && explicitId.next == 43, "request id: explicit id wins and advances sequence")
+let olderId = requestRowId(current: 43, lineHasId: 9)
+check(olderId.id == 9 && olderId.next == 43, "request id: older explicit id does not rewind")
+var sequence = 10
+var ids: [Int] = []
+for _ in ["Done", "Cancelled", "Done"] {
+    let row = requestRowId(current: sequence, lineHasId: nil)
+    ids.append(row.id); sequence = row.next
+}
+check(ids == [10, 11, 12], "request id: mixed aligned batch is unique and monotonic")
+let skewedRow = requestRowId(current: sequence, lineHasId: nil)
+check(skewedRow.id == 13 && skewedRow.next == 14, "request id: extra line after snapshot remains unique")
+check(requestRowId(current: 0, lineHasId: nil).id == 0, "request id: zero safe")
+check(!inFlight(prefilling: 0, decoding: 0, frontendActive: 0), "in flight: idle")
+check(inFlight(prefilling: 1, decoding: 0, frontendActive: 0), "in flight: prefill")
+check(inFlight(prefilling: 0, decoding: 1, frontendActive: 0), "in flight: decode")
+check(inFlight(prefilling: 0, decoding: 0, frontendActive: 1), "in flight: frontend")
+check(prefillProgress(prefilledTotal: 150, prefillBase: 100) == 50, "prefill: cumulative delta")
+check(prefillProgress(prefilledTotal: 80, prefillBase: 100) == 0, "prefill: reset clamps to zero")
+check(prefillProgress(prefilledTotal: 150, prefillBase: nil) == nil, "prefill: missing baseline is unknown")
+var baseline = prefillBaseline(prefilling: true, wasPrefilling: false, current: nil, prefilledTotal: nil)
+check(baseline == nil, "prefill: status-before-metrics starts unknown")
+baseline = prefillBaseline(prefilling: true, wasPrefilling: true, current: baseline, prefilledTotal: 100)
+check(prefillProgress(prefilledTotal: 125, prefillBase: baseline) == 25, "prefill: late metrics baseline makes progress")
+check(prefillBaseline(prefilling: true, wasPrefilling: true, current: baseline, prefilledTotal: 125) == 100, "prefill: established baseline remains stable")
+check(prefillProgress(prefilledTotal: .nan, prefillBase: 100) == nil, "prefill: invalid total is unknown")
+check(telemetryInt(12) == 12 && telemetryInt(12.5) == 12, "telemetry: representable integers")
+check(telemetryInt(nil) == 0 && telemetryInt(.nan) == 0 && telemetryInt(.infinity) == 0, "telemetry: missing and nonfinite are safe")
+check(telemetryInt(Double(Int.max)) == 0 && telemetryInt(-Double.greatestFiniteMagnitude) == 0, "telemetry: out-of-range values are safe")
+check(rssBytesFromPsOutput(" 437072\n") == 447561728, "RSS: KiB converted to bytes")
+check(rssBytesFromPsOutput("0") == 0, "RSS: zero")
+check(rssBytesFromPsOutput("") == nil, "RSS: empty")
+check(rssBytesFromPsOutput("NaN") == nil, "RSS: malformed")
+check(rssBytesFromPsOutput("-1") == nil, "RSS: negative")
+check(rssBytesFromPsOutput(String(Int64.max)) == nil, "RSS: overflow")
+
 print(failures == 0 ? "ALL TESTS PASSED" : "\(failures) TEST(S) FAILED")
 exit(failures == 0 ? 0 : 1)

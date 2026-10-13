@@ -289,16 +289,16 @@ func sampleSystem() -> [String: Any] {
 }
 
 func engineFootprint(_ pid: Int32) -> Int64? {
-    var t: task_t = task_t(MACH_PORT_NULL)
-    guard task_for_pid(mach_task_self_, pid, &t) == KERN_SUCCESS else { return nil }
-    defer { mach_port_deallocate(mach_task_self_, t) }
-    var info = task_vm_info_data_t()
-    var cnt = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
-    let kr = withUnsafeMutablePointer(to: &info) {
-        $0.withMemoryRebound(to: integer_t.self, capacity: Int(cnt)) { task_info(t, task_flavor_t(TASK_VM_INFO), $0, &cnt) }
-    }
-    guard kr == KERN_SUCCESS else { return nil }
-    return Int64(info.phys_footprint)
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/ps")
+    p.arguments = ["-o", "rss=", "-p", String(pid)]
+    let pipe = Pipe()
+    p.standardOutput = pipe
+    p.standardError = FileHandle.nullDevice
+    do { try p.run() } catch { return nil }
+    p.waitUntilExit()
+    guard p.terminationStatus == 0 else { return nil }
+    return rssBytesFromPsOutput(String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "")
 }
 
 // MARK: - Server log tail (Request / Done lines)
@@ -319,6 +319,8 @@ final class LogTail {
     private var realPath: String?
     private var offset: UInt64 = 0
     private var pending = ""
+    private var nextId = 0
+    private var seededIds = false
     var active: [Int: ActiveReq] = [:]
     private(set) var recent: [DoneReq] = []
 
@@ -331,7 +333,11 @@ final class LogTail {
         return min(1.0, Double(recent.reduce(0) { $0 + $1.cached }) / Double(ins))
     }
 
-    func poll() {
+    func poll(completed: Int, cancelled: Int) {
+        if !seededIds {
+            nextId = max(completed, cancelled)
+            seededIds = true
+        }
         guard let dest = try? FileManager.default.destinationOfSymbolicLink(atPath: Cfg.logLink) else { return }
         let size = (try? FileManager.default.attributesOfItem(atPath: dest))?[.size] as? UInt64 ?? 0
         if dest != realPath { realPath = dest; offset = 0; pending = "" }
@@ -380,7 +386,10 @@ final class LogTail {
                 else if let v = labeled(p, "TTFT") { d.ttft = Double(v.replacingOccurrences(of: "s", with: "") ) ?? 0 }
                 else if p.hasSuffix("tok/s") { d.tps = Double(p.replacingOccurrences(of: "tok/s", with: "").trimmingCharacters(in: .whitespaces)) }
             }
-            if let id = id { d.id = id; active.removeValue(forKey: id) }
+            let row = requestRowId(current: nextId, lineHasId: id)
+            d.id = row.id
+            nextId = row.next
+            if let id = id { active.removeValue(forKey: id) }
             recent.insert(d, at: 0)
             if recent.count > 8 { recent.removeLast() }
         }
@@ -422,6 +431,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     private var lastPrefillWall: Double?
     private var lastPrefillSample: (v: Double, t: Date)?
     private var lastPrefillPayload: (p: [String: Any], t: Date)?
+    private var synthesizedRequest: LogTail.ActiveReq?
+    private var wasPrefilling = false
     private var metrics: [String: Double] = [:]
     private var statusJSON: [String: Any]?
     private var lastServerSeen = Date.distantPast
@@ -590,7 +601,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             let l = line.trimmingCharacters(in: .whitespaces)
             guard let space = l.lastIndex(of: " ") else { continue }
             let namePart = l[l.startIndex..<space]
-            guard let v = Double(l[l.index(after: space)...]) else { continue }
+            guard let v = Double(l[l.index(after: space)...]), v.isFinite else { continue }
             let name: String
             if let b = namePart.firstIndex(of: "{") { name = String(namePart[namePart.startIndex..<b]) }
             else { name = String(namePart) }
@@ -622,7 +633,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             let j = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
             DispatchQueue.main.async {
                 guard let self = self else { return }
-                if let j = j { self.statusJSON = j; self.lastServerSeen = Date() }
+                if let j = j {
+                    self.statusJSON = j
+                    self.lastServerSeen = Date()
+                    if let completed = self.fld("requests", "completed"), let cancelled = self.fld("requests", "cancelled") {
+                        self.tail.poll(completed: telemetryInt(completed), cancelled: telemetryInt(cancelled))
+                    }
+                }
                 self.tickRender()
             }
         }
@@ -670,24 +687,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         // seconds, so the last real sample is held for up to 15 s.
         let prefillRate: Double? = prefillTps ?? lastPrefillSample.flatMap { now.timeIntervalSince($0.t) < 15 ? $0.v : nil }
 
-        let prefilling = (metrics["splash_scheduler_prefilling"] ?? 0) > 0
+        let prefillCount = telemetryInt(fld("scheduler", "prefilling") ?? metrics["splash_scheduler_prefilling"])
+        let decodeCount = telemetryInt(fld("scheduler", "decoding") ?? metrics["splash_scheduler_decoding"])
+        let frontendCount = telemetryInt(fld("frontend", "active") ?? metrics["splash_frontend_active"])
+        let prefilling = prefillCount > 0
         let decoding = (metrics["splash_scheduler_decoding"] ?? 0) > 0 || decodeRate != nil
         let queued = ((metrics["splash_scheduler_queued"] ?? 0) + (metrics["splash_scheduler_waiting_resources"] ?? 0)) > 0
 
         // ---- log tail
-        tail.poll()
         tail.active = tail.active.filter { Date().timeIntervalSince($0.value.start) < 3600 }
         // Cumulative tokens actually prefilled — moves live during prefill. (The
         // target_prefill_rows counter is a draft-context snapshot that does not move
         // per request, which is why the old readout sat at 0%.)
         let prefilledTotal = metrics["splash_prefill_input_tokens_total"]
+        if inFlight(prefilling: prefillCount, decoding: decodeCount, frontendActive: frontendCount) {
+            if synthesizedRequest == nil {
+                synthesizedRequest = LogTail.ActiveReq(id: 0, input: 0, start: now, prefillBase: nil, cacheBase: nil, resumeBase: nil)
+            }
+            let baseline = prefillBaseline(prefilling: prefilling, wasPrefilling: wasPrefilling,
+                current: synthesizedRequest?.prefillBase, prefilledTotal: prefilledTotal)
+            synthesizedRequest?.prefillBase = baseline
+        } else {
+            synthesizedRequest = nil
+        }
+        wasPrefilling = prefilling
         let cacheBlock = statusJSON?["cache"] as? [String: Any]
         let cacheTokensNow = ((cacheBlock?["kv_hit_tokens"] as? Double) ?? 0)
             + ((cacheBlock?["kv_disk_hit_tokens"] as? Double) ?? 0)
             + ((cacheBlock?["reused_tokens"] as? Double) ?? 0)
         let resumptionsNow = (cacheBlock?["resource_resumptions"] as? Double) ?? 0
         for (id, var req) in tail.active {
-            if req.prefillBase == nil { req.prefillBase = prefilledTotal ?? 0 }
+            if req.prefillBase == nil, let total = prefilledTotal, total.isFinite { req.prefillBase = total }
             if req.cacheBase == nil { req.cacheBase = cacheTokensNow }
             if req.resumeBase == nil { req.resumeBase = resumptionsNow }
             tail.active[id] = req
@@ -701,10 +731,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             let den = kt + pt
             if den > 0 { hitRate = min(1.0, kt / den) }
         }
-        let activeList = tail.active.values.map { req -> [String: Any] in
-            let workDone = max(0, (prefilledTotal ?? 0) - (req.prefillBase ?? 0))
-            var r: [String: Any] = ["id": req.id, "input": Double(req.input), "age_s": Date().timeIntervalSince(req.start)]
-            if req.input > 0 {
+        let requests = tail.active.isEmpty ? synthesizedRequest.map { [$0] } ?? [] : Array(tail.active.values)
+        let activeList = requests.map { req -> [String: Any] in
+            let workDone = prefilledTotal.flatMap { prefillProgress(prefilledTotal: $0, prefillBase: req.prefillBase) }
+            var r: [String: Any] = ["id": req.id, "input": Double(req.input), "age_s": now.timeIntervalSince(req.start),
+                                    "tokens": js(workDone), "tps": js(prefillRate)]
+            if req.input > 0, let workDone = workDone {
                 // The engine credits this request's cached tokens from three sources
                 // when its lookup resolves: resident KV (kv_hit_tokens), SSD restores
                 // (kv_disk_hit_tokens; the governor demotes idle pages to disk), and
@@ -737,7 +769,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 } else if let hr = hitRate, (est == nil || est! >= workDone) {
                     r["cached_pct"] = hr * 100
                 }
-            } else { r["pct"] = 0.0 }
+            }
             return r
         }.sorted { ($0["id"] as? Int) ?? 0 > ($1["id"] as? Int) ?? 0 }
         let recentList = tail.recent.map { r -> [String: Any] in
@@ -796,8 +828,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         case "restarting": updateTray(detail: "RESTART", color: .systemYellow, fill: 0.3)
         case "loading": updateTray(detail: "LOAD", color: .systemYellow, fill: 0.4)
         case "prefill":
-            let pct = (activeList.first?["pct"] as? Double) ?? 0
-            updateTray(detail: "PREF \(Int(pct))%", color: orange, fill: pct / 100)
+            if let pct = activeList.first?["pct"] as? Double, pct.isFinite {
+                updateTray(detail: String(format: "PREF %.0f%%", pct), color: orange, fill: pct / 100)
+            } else {
+                let tokens = activeList.first?["tokens"] as? Double
+                let count = tokens.map { String(format: "%.0f", $0) } ?? "…"
+                let rate = prefillRate.map { String(format: "%.0f", $0) } ?? "—"
+                updateTray(detail: "PREF \(count) tok · \(rate) t/s", color: orange, fill: 0.5)
+            }
         case "decode":
             let tps = decodeRate ?? gaugeDecode ?? 0
             updateTray(detail: String(format: "%.0f t/s", tps), color: teal, fill: 1)
@@ -860,7 +898,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         let pressure = statusJSON?["memory_pressure"] as? String
         if let pressure = pressure { j["pressure"] = pressure }
         if state == "prefill", let first = activeList.first {
-            var pf: [String: Any] = ["pct": first["pct"] as? Double ?? 0, "input": first["input"] as? Double ?? 0]
+            var pf: [String: Any] = ["pct": js(first["pct"]), "input": first["input"] as? Double ?? 0,
+                                     "tokens": js(first["tokens"]), "tps": js(first["tps"])]
             if let c = first["cached_pct"] as? Double { pf["cached_pct"] = c }
             lastPrefillPayload = (pf, now)
             j["prefill"] = pf
