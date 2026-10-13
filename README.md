@@ -89,12 +89,12 @@ Point any OpenAI-compatible client at `http://127.0.0.1:8123/v1` with the key ab
   WKWebView. The decode readout is the *committed* output rate: counter delta divided by
   the real elapsed time between samples. DFlash-2 draft tokens that fail verification do
   not count, so it matches the per-request tok/s in the completion log.
-- In-flight work comes from live scheduler/frontend counters even when the engine emits
-  no `Request` log line. Without a known prompt size, Prefill shows cumulative work
-  since prefill started (`N tok · R tok/s`), not a fabricated percentage; until the
-  metrics baseline arrives, the count is unknown (`…`). When a real
-  request log supplies the input size, the existing uncached-tail percentage remains
-  available. The last prefill sample is held for up to 15 s after prefill ends.
+  no `Request` log line. Prefill shows a percentage of the request's uncached tail plus a
+  completion ETA (`~12 s`) autoregressed from the prefill rate — the live per-prefill
+  sample, falling back to the 15 s latch, then the engine's session prefill rate — so it
+  climbs from the start even on a warm idle engine; tok/s stays a separate live readout.
+  The tray/pill read `NN%` once a percentage is available. The last prefill sample is
+  held for up to 15 s after prefill ends.
 - Recent request rows prefer an explicit log id; otherwise a single app-side sequence,
   seeded once from the engine's terminal counters, numbers both Done and Cancelled rows.
   These display ids are unique across terminal kinds and do not depend on status/log

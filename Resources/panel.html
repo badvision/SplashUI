@@ -123,8 +123,7 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
     <div class="col" style="flex:1" data-tip="Maximum context the model was loaded with (tokens)."><div class="k">Context</div><div class="mid" id="ctx">—</div></div>
     <div class="col" style="flex:1" data-tip="Engine main-loop tick time (ms) — the scheduler cycle; spikes mean a slow step."><div class="k">Loop max</div><div class="mid" id="loop">—</div></div>
     <div class="col" style="flex:1" data-tip="Decode lanes — concurrent sequences decoding / total scheduler states."><div class="k">Lanes</div><div class="mid" id="lanes">—</div></div>
-    <div class="col" style="flex:1" data-tip="KV cache quantization format (int8 = symmetric 8-bit)."><div class="k">KV fmt</div><div class="mid" id="kvfmt">—</div></div>
-    <div class="col" style="flex:1.2" data-tip="GPU/Neural-Engine prefill split (Splash 1.3.0) — share of the feed-forward layers the engine runs on the Neural Engine for this Mac and model; prompts smaller than the minimum chunk stay on the GPU. The split is calibrated once per Mac+model, remembered, and a chunk reverts to the GPU after a failed evaluation, a timeout, or when it loses to the GPU alone. Disable with SPLASH_ANE=off."><div class="k">ANE</div><div class="mid" id="ane">—</div></div>
+    <div class="col" style="flex:1" data-tip="GPU/Neural-Engine prefill split (Splash 1.3.0) — share of the feed-forward layers the engine runs on the Neural Engine for this Mac and model; prompts smaller than the minimum chunk stay on the GPU. The split is calibrated once per Mac+model, remembered, and a chunk reverts to the GPU after a failed evaluation, a timeout, or when it loses to the GPU alone. Disable with SPLASH_ANE=off."><div class="k">ANE</div><div class="mid" id="ane">—</div></div>
   </div>
 </section>
 
@@ -133,6 +132,7 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
   <div class="bar"><i id="kvBar" style="background:var(--teal)"></i></div>
   <div class="row" style="margin-top:4px">
     <div class="col" style="flex:1" data-tip="KV cache bytes in use."><div class="k">KV alloc</div><div class="mid" id="kvAlloc">—</div></div>
+    <div class="col" style="flex:1" data-tip="KV cache quantization format (int8 = symmetric 8-bit)."><div class="k">KV fmt</div><div class="mid" id="kvfmt">—</div></div>
     <div class="col" style="flex:1" data-tip="Active KV pages / parked cache pages (32 tokens per page). Parked pages hold context that can resume without re-prefill."><div class="k">Pages act/cache</div><div class="mid" id="kvPages">—</div></div>
     <div class="col" style="flex:1" data-tip="Scheduler state bytes — per-request runtime state (not model weights)."><div class="k">State mem</div><div class="mid" id="stateMem">—</div></div>
   </div>
@@ -140,7 +140,7 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
     <div class="col" style="flex:1" data-tip="Engine process physical footprint right now (weights + KV + state)."><div class="k">Eng mem</div><div class="mid" id="engMem">—</div></div>
     <div class="col" style="flex:1" data-tip="Engine peak footprint since model load."><div class="k">Peak</div><div class="mid" id="engPeak">—</div></div>
     <div class="col" style="flex:1" data-tip="Memory-governor headroom — how much more the engine may use before it starts shedding cache."><div class="k">Gov headroom</div><div class="mid" id="govHeadroom">—</div></div>
-    <div class="col" style="flex:1.4" data-tip="OS-reported available host memory."><div class="k">Host avail</div><div class="mid" id="hostAvail">—</div></div>
+    <div class="col" style="flex:1" data-tip="OS-reported available host memory."><div class="k">Host avail</div><div class="mid" id="hostAvail">—</div></div>
   </div>
   <div class="label" style="margin-top:6px" data-tip="SSD prefix cache — KV state persisted to disk and reused across requests (survives restarts with --persistent-cache)."><span>SSD cache (prefix) <span id="ssdNote"></span></span><b id="ssdSize">—</b></div>
   <div class="bar"><i id="ssdBar" style="background:#4455ff"></i></div>
@@ -260,7 +260,8 @@ function render(){
   // engine
   setT("engVer", S.engine && S.engine.version ? "v" + S.engine.version : "—");
   setT("engState", (S.ready?"READY":"NOT READY") + " · " + (S.server && S.server.up_seconds ? up(S.server.up_seconds) : "—"));
-  setT("metal", S.engine && S.engine.metal_healthy != null ? (S.engine.metal_healthy ? "OK" : "FAIL") : "—");
+  { const m = S.engine && S.engine.metal_healthy != null ? (S.engine.metal_healthy ? "OK" : "FAIL") : "—";
+    const mEl = $("metal"); mEl.textContent = m; mEl.style.color = m === "OK" ? "var(--green)" : m === "FAIL" ? "var(--red)" : ""; }
   setT("ctx", S.ctx ? (S.ctx/1024).toFixed(0)+"K" : "—");
   setT("loop", S.engine && S.engine.loop_tick_ms != null ? S.engine.loop_tick_ms.toFixed(1)+" ms" : "—");
   setT("lanes", S.state_mem && S.state_mem.active_lanes != null && S.state_mem.entries != null ? S.state_mem.active_lanes + " act / " + S.state_mem.entries : "—");
@@ -270,11 +271,9 @@ function render(){
     if (S.ane && S.ane.state != null) {
       const st = String(S.ane.state).toLowerCase();
       const off = st.includes("off") || st.includes("disabled") || st.includes("none") || st.includes("gpu");
-      if (off) { aneEl.textContent = "DISABLED"; aneEl.style.color = "var(--gray)"; }
-      else {
-        aneEl.textContent = (S.ane.share != null && S.ane.share > 0) ? "ON · " + (S.ane.share*100).toFixed(0) + "%" : "ON";
-        aneEl.style.color = "var(--green)";
-      }
+      if (off) { aneEl.textContent = "OFF"; aneEl.style.color = "var(--gray)"; }
+      else if (S.ane.share != null && S.ane.share > 0) { aneEl.textContent = (S.ane.share*100).toFixed(0) + "%"; aneEl.style.color = "var(--green)"; }
+      else { aneEl.textContent = "—"; aneEl.style.color = ""; }
     } else { aneEl.textContent = "—"; aneEl.style.color = ""; }
   }
 
@@ -323,7 +322,7 @@ function render(){
   setT("reqTotals", S.req ? "done "+nn(S.req.completed_total)+" · fail "+nn(S.req.failed_total)+" · cancel "+nn(S.req.cancelled_total) : "");
   $("activeList").innerHTML = act.map(r =>
     '<div class="row" style="margin-bottom:4px" data-tip="Active request. Bar = elapsed time. Chip = estimated share of the prompt served from the prefix cache — the rest is what prefill is actually working on."><div class="track" style="height:16px"><i style="width:'+Math.min(100,r.age_s*4)+'%;background:var(--lavender)"></i></div>'+
-    '<span style="padding:0 8px;color:var(--orange)">'+(r.id ? "#"+r.id : "LIVE")+"</span><span style='color:var(--gray)'>"+(r.input ? "in "+n(r.input) : "")+(r.cached_pct!=null?" · <span style='color:var(--teal)'>~"+r.cached_pct.toFixed(0)+"% cached</span>":(r.pct!=null?" · "+r.pct.toFixed(0)+"%":tokenProgress(r)))+" · "+r.age_s.toFixed(0)+"s</span></div>"
+    '<span style="padding:0 8px;color:var(--orange)">'+(r.id ? "#"+r.id : "LIVE")+"</span><span style='color:var(--gray)'>"+(r.input ? "in "+n(r.input) : "")+(r.cached_pct!=null?" · <span style='color:var(--teal)'>~"+r.cached_pct.toFixed(0)+"% cached</span>":(r.pct!=null?" · "+r.pct.toFixed(0)+"%":tokenProgress(r)))+(r.tps!=null?" · "+r.tps.toFixed(0)+" tok/s":"")+(r.eta!=null?" · ~"+r.eta:"")+" · "+r.age_s.toFixed(0)+"s</span></div>"
   ).join("");
   $("recentBody").innerHTML = (S.req ? S.req.recent : []).map(r =>
     "<tr><td>#"+r.id+'</td><td>'+n(r.input)+"</td><td>"+n(r.cached)+"</td><td>"+n(r.output)+"</td><td>"+(r.ttft_s?r.ttft_s.toFixed(1)+"s":"—")+"</td><td>"+(r.tps?r.tps.toFixed(1):"—")+"</td></tr>"

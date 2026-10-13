@@ -234,6 +234,76 @@ public func prefillProgress(prefilledTotal: Double, prefillBase: Double?) -> Dou
     return max(0, prefilledTotal - base)
 }
 
+// Prefill completion percentage: done_fresh ÷ estFresh, clamped to 0...100.
+// `done` is the request's fresh (uncached) prefill-token counter delta since it
+// started; `estFresh` is an estimate of the same fresh-tail quantity it will
+// total (numerator and denominator are commensurate). nil when estFresh is nil
+// or <= 0 (no honest estimate); a stale/under-sized estimate that the counter
+// runs past clamps to 100 — never >100, never NaN.
+public func prefillPct(done: Double, estFresh: Double?) -> Double? {
+    guard let est = estFresh, est.isFinite, est > 0 else { return nil }
+    return min(100, max(0, 100 * done / est))
+}
+
+// Session fallback for a synthesized in-flight row whose prompt size the Request
+// log has not logged yet: the mean fresh (uncached) tail over recent completions
+// as (input, cached) pairs. nil when the window is empty or nothing fresh was
+// ever observed.
+public func meanFreshTail(fresh: [(Int, Int)]) -> Double? {
+    let vals = fresh.map { p in max(0, p.0 - p.1) }
+    guard !vals.isEmpty, vals.contains(where: { $0 > 0 }) else { return nil }
+    return Double(vals.reduce(0) { $0 + $1 }) / Double(vals.count)
+}
+
+// Completion ETA from autoregression on the live prefill rate: the remaining
+// fresh tail ÷ the measured prefill rate, recomputed every tick so it naturally
+// shrinks as the rate updates. nil when the rate is nil or <= 0, or estFresh is
+// nil/<= 0 (no estimate); negative remaining clamps to 0.
+public func prefillEta(done: Double, estFresh: Double?, rate: Double?) -> Double? {
+    guard let est = estFresh, est.isFinite, est > 0,
+          let r = rate, r > 0, r.isFinite else { return nil }
+    return max(0, est - done) / r
+}
+
+// Rate extrapolation for a chunk-stepped prefill counter. The engine commits
+// splash_prefill_input_tokens_total in ~2048-token ANE-FFN steps (~8 s apart), so
+// the raw counter sits flat for most of a chunk. Rather than projecting the
+// fraction of the current chunk (which reads 0% until the first commit), we
+// autoregress the live prefill rate over the time since the counter last moved,
+// so the readout climbs from the start.
+//   proj = workDone + (age − ageAtLastCommit) × rate
+// clamped to [workDone, estFresh]: never below the counter (it is the truth) and
+// never above estFresh (→ 100%, never >100). ageAtLastCommit is the row's age when
+// the counter last moved (0 if it never moved). A nil rate returns the stepped
+// counter (honest fallback — unchanged behavior). Monotone in age for fixed
+// inputs; equals workDone at age == ageAtLastCommit.
+public func prefillProjectedDone(workDone: Double, ageAtLastCommit: Double,
+                                 age: Double, rate: Double?, estFresh: Double?) -> Double {
+    guard workDone.isFinite, age.isFinite, ageAtLastCommit.isFinite,
+          let r = rate, r > 0, r.isFinite else { return max(0, workDone) }
+    let elapsed = max(0, age - ageAtLastCommit)
+    var proj = max(0, workDone) + elapsed * r
+    if let est = estFresh, est.isFinite, est > 0 { proj = min(proj, est) }
+    return proj
+}
+
+// Three-rung rate for prefill extrapolation and ETA: the live per-prefill sample,
+// then the 15 s latch, then the engine's session-wide prefill rate. The displayed
+// tok/s readout is the live sample only (never this) — this only feeds the
+// projected done-value and the ETA, so a cold request on a warm idle engine
+// still climbs from the start.
+public func prefillProjRate(live: Double?, latch: Double?, engine: Double?) -> Double? {
+    func ok(_ v: Double?) -> Double? { v.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } }
+    return ok(live) ?? ok(latch) ?? ok(engine)
+}
+
+// "12 s" under a minute, "1m 23 s" at/above (seconds ceil'd). nil when no ETA.
+public func prefillEtaText(sec: Double?) -> String? {
+    guard let s = sec, s.isFinite, s >= 0 else { return nil }
+    let i = Int(ceil(s))
+    return i >= 60 ? "\(i / 60)m \(i % 60) s" : "\(i) s"
+}
+
 public func prefillBaseline(prefilling: Bool, wasPrefilling: Bool, current: Double?, prefilledTotal: Double?) -> Double? {
     guard prefilling else { return current }
     let validTotal = prefilledTotal.flatMap { $0.isFinite ? $0 : nil }

@@ -436,6 +436,79 @@ baseline = prefillBaseline(prefilling: true, wasPrefilling: true, current: basel
 check(prefillProgress(prefilledTotal: 125, prefillBase: baseline) == 25, "prefill: late metrics baseline makes progress")
 check(prefillBaseline(prefilling: true, wasPrefilling: true, current: baseline, prefilledTotal: 125) == 100, "prefill: established baseline remains stable")
 check(prefillProgress(prefilledTotal: .nan, prefillBase: 100) == nil, "prefill: invalid total is unknown")
+
+// ---- prefillPct / meanFreshTail / prefillEta / prefillEtaText -----------------
+check(prefillPct(done: 50, estFresh: nil) == nil, "pct: nil estFresh -> no estimate")
+check(prefillPct(done: 50, estFresh: 0) == nil, "pct: zero estFresh -> no estimate")
+check(prefillPct(done: 50, estFresh: -5) == nil, "pct: negative estFresh -> no estimate")
+check(prefillPct(done: 30, estFresh: 300) == 10, "pct: done/estFresh")
+check(prefillPct(done: 300, estFresh: 300) == 100, "pct: done == estFresh -> 100")
+check(prefillPct(done: 900, estFresh: 300) == 100, "pct: stale estimate clamps to 100")
+check(prefillPct(done: -50, estFresh: 300) == 0, "pct: negative done clamps to 0")
+check(prefillPct(done: .nan, estFresh: 300) == 0, "pct: NaN done is safe")
+check(meanFreshTail(fresh: []) == nil, "meanFresh: empty window -> nil")
+check(meanFreshTail(fresh: [(100, 100), (200, 200)]) == nil, "meanFresh: all-zero fresh -> nil")
+check(meanFreshTail(fresh: [(100, 0), (200, 50)]) == 125, "meanFresh: mean of (input-cached)")
+check(meanFreshTail(fresh: [(100, 0), (150, 160)]) == 50, "meanFresh: clamped negative pairs")
+check(prefillEta(done: 300, estFresh: nil, rate: 300) == nil, "eta: nil estFresh -> no estimate")
+check(prefillEta(done: 300, estFresh: 300, rate: nil) == nil, "eta: nil rate -> no estimate")
+check(prefillEta(done: 300, estFresh: 300, rate: 0) == nil, "eta: zero rate -> no estimate")
+check(prefillEta(done: 300, estFresh: 300, rate: -5) == nil, "eta: negative rate -> no estimate")
+check(prefillEta(done: 900, estFresh: 300, rate: 300) == 0, "eta: done past estimate -> 0 s")
+check(prefillEta(done: 0, estFresh: 300, rate: 300) == 1, "eta: estFresh - done / rate")
+check(abs(prefillEta(done: 30, estFresh: 330, rate: 30)! - 10) < 0.001, "eta: 300/30 = 10 s")
+check(prefillEtaText(sec: nil) == nil, "eta text: nil -> nil")
+check(prefillEtaText(sec: 11) == "11 s", "eta text: under a minute")
+check(prefillEtaText(sec: 0) == "0 s", "eta text: 0 s")
+check(prefillEtaText(sec: 60) == "1m 0 s", "eta text: 60 s boundary")
+check(prefillEtaText(sec: 73) == "1m 13 s", "eta text: 73 s -> 1m 13 s")
+check(prefillEtaText(sec: 59.4) == "1m 0 s", "eta text: ceil 59.4 -> 60 s -> minute form")
+check(prefillEtaText(sec: 65) == "1m 5 s", "eta text: 65 s -> 1m 5 s")
+check(prefillEtaText(sec: -1) == nil, "eta text: negative -> nil")
+// ---- prefillProjRate (three-rung precedence) ------------------------------
+check(prefillProjRate(live: 320, latch: 250, engine: 208) == 320, "projRate: live wins")
+check(prefillProjRate(live: nil, latch: 250, engine: 208) == 250, "projRate: latch when live nil")
+check(prefillProjRate(live: 0, latch: 250, engine: 208) == 250, "projRate: zero live falls to latch")
+check(prefillProjRate(live: nil, latch: 0, engine: 208) == 208, "projRate: zero latch falls to engine")
+check(prefillProjRate(live: nil, latch: nil, engine: 208) == 208, "projRate: engine as final rung")
+check(prefillProjRate(live: nil, latch: nil, engine: nil) == nil, "projRate: all nil -> nil")
+check(prefillProjRate(live: nil, latch: nil, engine: 0) == nil, "projRate: zero engine -> nil")
+check(prefillProjRate(live: .nan, latch: nil, engine: 208) == 208, "projRate: NaN live ignored")
+check(prefillProjRate(live: .infinity, latch: nil, engine: 208) == 208, "projRate: nonfinite live ignored")
+// ---- prefillProjectedDone (rate extrapolation) ------------------------------
+// First-chunk, before any commit: workDone 0, age 2 s, rate 250, estFresh 4900
+// -> proj 500 -> pct ~= 10.2% (the readout climbs from the start).
+check(prefillProjectedDone(workDone: 0, ageAtLastCommit: 0, age: 2, rate: 250, estFresh: 4900) == 500, "proj: first chunk t=2s -> 500")
+if let p = prefillPct(done: 500, estFresh: 4900) { check(abs(p - 10.204) < 0.01, "proj: first chunk pct ~= 10.2%") }
+check(prefillProjectedDone(workDone: 0, ageAtLastCommit: 0, age: 6, rate: 250, estFresh: 4900) == 1500, "proj: age 6s before any commit -> 1500")
+// After a commit at age 7 (workDone 2048), at age 10 s: 2048 + 3*250, clamped by estFresh.
+check(prefillProjectedDone(workDone: 2048, ageAtLastCommit: 7, age: 10, rate: 250, estFresh: 4900) == 2798, "proj: after commit, extrapolated -> min(2048+750, estFresh)")
+check(prefillProjectedDone(workDone: 2048, ageAtLastCommit: 7, age: 10, rate: 250, estFresh: 2500) == 2500, "proj: extrapolation clamped to estFresh")
+// Equals workDone exactly at age == ageAtLastCommit (no extrapolation yet).
+check(prefillProjectedDone(workDone: 2048, ageAtLastCommit: 7, age: 7, rate: 250, estFresh: 4900) == 2048, "proj: at age==ageAtLastCommit -> workDone")
+// Never exceeds estFresh even over a long elapsed time.
+check(prefillProjectedDone(workDone: 0, ageAtLastCommit: 0, age: 100, rate: 250, estFresh: 4900) == 4900, "proj: clamped, never exceeds estFresh")
+// Never below workDone (the counter is the truth), even if age < ageAtLastCommit.
+check(prefillProjectedDone(workDone: 2048, ageAtLastCommit: 10, age: 5, rate: 250, estFresh: 4900) == 2048, "proj: age < ageAtLastCommit -> not below workDone")
+// Nil rate -> stepped counter (honest fallback, unchanged behavior).
+check(prefillProjectedDone(workDone: 2048, ageAtLastCommit: 7, age: 10, rate: nil, estFresh: 4900) == 2048, "proj: nil rate -> workDone")
+check(prefillProjectedDone(workDone: 2048, ageAtLastCommit: 7, age: 10, rate: 0, estFresh: 4900) == 2048, "proj: zero rate -> workDone")
+// NaN safety: a nonfinite input yields a finite (safe) result, not NaN.
+check(prefillProjectedDone(workDone: .nan, ageAtLastCommit: 0, age: 10, rate: 250, estFresh: 4900).isFinite, "proj: NaN workDone -> finite")
+check(prefillProjectedDone(workDone: 2048, ageAtLastCommit: .nan, age: 10, rate: 250, estFresh: 4900).isFinite, "proj: NaN ageAtLastCommit -> finite")
+do { // monotone non-decreasing over a sweep of age
+    var last = -Double.greatestFiniteMagnitude
+    var mono = true
+    for t in stride(from: 0.0, through: 30.0, by: 0.5) {
+        let v = prefillProjectedDone(workDone: 2048, ageAtLastCommit: 7, age: t, rate: 250, estFresh: 4900)
+        if v < last { mono = false; break }
+        last = v
+    }
+    check(mono, "proj: monotone in age")
+}
+// done == estFresh -> pct 100 / eta 0
+if let p = prefillPct(done: 4900, estFresh: 4900) { check(p == 100, "eta: done==estFresh -> pct 100") }
+check(prefillEta(done: 4900, estFresh: 4900, rate: 250) == 0, "eta: done==estFresh -> eta 0")
 check(telemetryInt(12) == 12 && telemetryInt(12.5) == 12, "telemetry: representable integers")
 check(telemetryInt(nil) == 0 && telemetryInt(.nan) == 0 && telemetryInt(.infinity) == 0, "telemetry: missing and nonfinite are safe")
 check(telemetryInt(Double(Int.max)) == 0 && telemetryInt(-Double.greatestFiniteMagnitude) == 0, "telemetry: out-of-range values are safe")

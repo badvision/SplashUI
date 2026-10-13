@@ -307,6 +307,8 @@ final class LogTail {
         var prefillBase: Double?
         var cacheBase: Double?
         var resumeBase: Double?
+        var lastDone: Double = 0
+        var ageAtLastCommit: Double = 0
     }
     struct DoneReq {
         var id: Int; var input: Int; var cached: Int; var output: Int
@@ -680,8 +682,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         lastPrefillWall = metrics["splash_prefill_wall_milliseconds_total"]
         if let p = prefillTps { lastPrefillSample = (p, now) }
         // Latch like the decode rate: prefill on a cached session lasts only a few
-        // seconds, so the last real sample is held for up to 15 s.
-        let prefillRate: Double? = prefillTps ?? lastPrefillSample.flatMap { now.timeIntervalSince($0.t) < 15 ? $0.v : nil }
+        // seconds, so the last real per-prefill sample is held for up to 15 s.
+        let prefillLatch = lastPrefillSample.flatMap { now.timeIntervalSince($0.t) < 15 ? $0.v : nil }
+        // Displayed tok/s = the LIVE per-prefill measurement (live sample, held up to
+        // 15 s) — never the session average.
+        let prefillRate: Double? = prefillTps ?? prefillLatch
+        // Extrapolation/ETA rate: three rungs — live per-prefill sample → 15 s latch
+        // → the engine's session-wide splash_prefill_tokens_per_second (a stable
+        // average the engine publishes even at idle, so a cold request on a warm
+        // engine still climbs from the start). This feeds only the projected
+        // done-value and the ETA, never the displayed tok/s.
+        let engineRate = metrics["splash_prefill_tokens_per_second"]
+        let projRate = prefillProjRate(live: prefillTps, latch: prefillLatch, engine: engineRate)
 
         let prefillCount = telemetryInt(fld("scheduler", "prefilling") ?? metrics["splash_scheduler_prefilling"])
         let decodeCount = telemetryInt(fld("scheduler", "decoding") ?? metrics["splash_scheduler_decoding"])
@@ -696,31 +708,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         // target_prefill_rows counter is a draft-context snapshot that does not move
         // per request, which is why the old readout sat at 0%.)
         let prefilledTotal = metrics["splash_prefill_input_tokens_total"]
-        if inFlight(prefilling: prefillCount, decoding: decodeCount, frontendActive: frontendCount) {
-            if synthesizedRequest == nil {
-                synthesizedRequest = LogTail.ActiveReq(id: 0, input: 0, start: now, prefillBase: nil, cacheBase: nil, resumeBase: nil)
-            }
-            let baseline = prefillBaseline(prefilling: prefilling, wasPrefilling: wasPrefilling,
-                current: synthesizedRequest?.prefillBase, prefilledTotal: prefilledTotal)
-            synthesizedRequest?.prefillBase = baseline
-        } else {
-            synthesizedRequest = nil
-        }
-        wasPrefilling = prefilling
         let cacheBlock = statusJSON?["cache"] as? [String: Any]
         let cacheTokensNow = ((cacheBlock?["kv_hit_tokens"] as? Double) ?? 0)
             + ((cacheBlock?["kv_disk_hit_tokens"] as? Double) ?? 0)
             + ((cacheBlock?["reused_tokens"] as? Double) ?? 0)
         let resumptionsNow = (cacheBlock?["resource_resumptions"] as? Double) ?? 0
+        // Track when the counter last moved per in-flight request so pct/eta can
+        // extrapolate from the live prefill rate over the time since then. The
+        // engine commits splash_prefill_input_tokens_total in ~2048-token ANE-FFN
+        // steps, so the counter sits flat most of a chunk; lastDone detects the
+        // commit edge and ageAtLastCommit stamps it with the row's age.
+        func recordCommit(_ req: inout LogTail.ActiveReq) {
+            if let wd = prefilledTotal.flatMap({ prefillProgress(prefilledTotal: $0, prefillBase: req.prefillBase) }),
+               wd > 0, wd > req.lastDone {
+                req.lastDone = wd
+                req.ageAtLastCommit = now.timeIntervalSince(req.start)
+            }
+        }
+        if inFlight(prefilling: prefillCount, decoding: decodeCount, frontendActive: frontendCount) {
+            if synthesizedRequest == nil {
+                synthesizedRequest = LogTail.ActiveReq(id: 0, input: 0, start: now, prefillBase: nil,
+                    cacheBase: cacheTokensNow, resumeBase: resumptionsNow)
+            }
+            let baseline = prefillBaseline(prefilling: prefilling, wasPrefilling: wasPrefilling,
+                current: synthesizedRequest?.prefillBase, prefilledTotal: prefilledTotal)
+            synthesizedRequest?.prefillBase = baseline
+            if var syn = synthesizedRequest {
+                recordCommit(&syn)
+                synthesizedRequest = syn
+            }
+        } else {
+            synthesizedRequest = nil
+        }
+        wasPrefilling = prefilling
         for (id, var req) in tail.active {
             if req.prefillBase == nil, let total = prefilledTotal, total.isFinite { req.prefillBase = total }
             if req.cacheBase == nil { req.cacheBase = cacheTokensNow }
             if req.resumeBase == nil { req.resumeBase = resumptionsNow }
+            recordCommit(&req)
             tail.active[id] = req
         }
         // Prefix-cache hit rate: token-weighted over the last 8 completions, falling
         // back to session counters (cached vs prefilled tokens) until the window fills.
         var hitRate = tail.recentHitRate
+        // Session fallback for a synthesized row (prompt size not yet logged): the
+        // mean fresh (uncached) tail over the last 8 completions.
+        let meanFresh = meanFreshTail(fresh: tail.recent.map { ($0.input, $0.cached) })
         if hitRate == nil,
            let kt = (statusJSON?["cache"] as? [String: Any])?["kv_hit_tokens"] as? Double,
            let pt = metrics["splash_prefill_input_tokens_total"] {
@@ -732,23 +765,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             let workDone = prefilledTotal.flatMap { prefillProgress(prefilledTotal: $0, prefillBase: req.prefillBase) }
             var r: [String: Any] = ["id": req.id, "input": Double(req.input), "age_s": now.timeIntervalSince(req.start),
                                     "tokens": js(workDone), "tps": js(prefillRate)]
-            if req.input > 0, let workDone = workDone {
-                // The engine credits this request's cached tokens from three sources
-                // when its lookup resolves: resident KV (kv_hit_tokens), SSD restores
-                // (kv_disk_hit_tokens; the governor demotes idle pages to disk), and
-                // state resumption (reused_tokens; ongoing conversations resume the
-                // prior turn's state). So the uncached tail is a measurement, not a
-                // guess from other requests' hit rates (which sits flat when the
-                // recent mix varies). A cold request reads 0 and falls back to the
-                // window estimate / whole-input sweep.
+            let resumed = (req.resumeBase.flatMap { resumptionsNow - $0 } ?? 0) >= 1
+            // Completion % (pill, tray, and this row all read it) = 100 × done /
+            // estFresh, where done is the fresh (uncached) prefill counter delta
+            // since the request started and estFresh estimates that same fresh
+            // tail. The request's total input is not observable in-flight by a
+            // passive monitor, so estFresh is an estimate: a real row (input > 0,
+            // from the Request log) uses the measured cache delta when the engine
+            // has credited this request's hits (resident KV + SSD restores + state
+            // resumption; the full-resume path returns before token accounting, so
+            // its counters stay silent → whole prompt resumed), else a
+            // token-weighted hit-rate guess, else the whole input (cold). A
+            // synthesized row (input 0 — the log hasn't arrived) falls back to the
+            // session mean fresh tail; an empty window → nil → no honest
+            // percentage, the tok/tok/s fallback shows instead.
+            var estFresh: Double?
+            if req.input > 0 {
                 let cacheTokens = ((cacheBlock?["kv_hit_tokens"] as? Double) ?? 0)
                     + ((cacheBlock?["kv_disk_hit_tokens"] as? Double) ?? 0)
                     + ((cacheBlock?["reused_tokens"] as? Double) ?? 0)
                 var cachedNow = min(Double(req.input), max(0, cacheTokens - (req.cacheBase ?? 0)))
-                if let rb = req.resumeBase, resumptionsNow - rb >= 1 {
+                if resumed { cachedNow = Double(req.input) }
+                if cachedNow > 0 {
+                    estFresh = max(0, Double(req.input) - cachedNow)
+                } else if let hr = hitRate {
+                    estFresh = Double(req.input) * (1 - hr)
+                } else {
+                    estFresh = Double(req.input)
+                }
+            } else {
+                estFresh = meanFresh
+            }
+            // The counter commits in chunks, so extrapolate the done value from the
+            // extrapolation rate (live sample → 15 s latch → engine session rate) over
+            // the time since the counter last moved → pct and ETA rise smoothly from
+            // the start instead of sitting flat until the first commit. The tok readout
+            // (r["tokens"]) stays the REAL counter delta, never projected, and the tps
+            // readout stays the LIVE per-prefill rate, never the session average.
+            let age = now.timeIntervalSince(req.start)
+            let proj = workDone.map {
+                prefillProjectedDone(workDone: $0, ageAtLastCommit: req.ageAtLastCommit,
+                                     age: age, rate: projRate, estFresh: estFresh)
+            }
+            if let p = proj, let pct = prefillPct(done: p, estFresh: estFresh) {
+                r["pct"] = pct
+            }
+            // ETA autoregresses the same extrapolation rate over the remaining fresh
+            // tail; nil (no estimate) → nothing rendered.
+            if let p = proj {
+                r["eta"] = js(prefillEtaText(sec: prefillEta(done: p, estFresh: estFresh, rate: projRate)))
+            }
+            // cached_pct (real rows only): the measured cached share of the prompt.
+            if req.input > 0, let workDone = workDone {
+                let cacheTokens = ((cacheBlock?["kv_hit_tokens"] as? Double) ?? 0)
+                    + ((cacheBlock?["kv_disk_hit_tokens"] as? Double) ?? 0)
+                    + ((cacheBlock?["reused_tokens"] as? Double) ?? 0)
+                var cachedNow = min(Double(req.input), max(0, cacheTokens - (req.cacheBase ?? 0)))
+                if resumed {
                     // The full-resume path (e.g. an exact duplicate) returns before
                     // token accounting runs, so the counters stay silent — treat the
-                    // whole prompt as resumed: nothing to prefill, reads 100%.
+                    // whole prompt as resumed.
                     cachedNow = Double(req.input)
                 }
                 var est: Double?
@@ -757,9 +833,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 } else if let hr = hitRate {
                     est = Double(req.input) * (1 - hr)
                 }
-                let denom: Double
-                if let est = est, est >= workDone { denom = est } else { denom = Double(req.input) }
-                r["pct"] = min(100, max(0, workDone * 100.0 / max(1, denom)))
                 if cachedNow > 0 {
                     r["cached_pct"] = cachedNow * 100.0 / Double(req.input)
                 } else if let hr = hitRate, (est == nil || est! >= workDone) {
