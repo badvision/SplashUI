@@ -573,9 +573,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
     private func updateTray(detail: String, color: NSColor, fill: Double) {
         statusItem.button?.image = trayImage(color: color, fill: fill)
+        // Drop shadow so the colored badge text stays legible on both light and
+        // dark menu bars (macOS doesn't tint status-item text to contrast).
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.85)
+        shadow.shadowBlurRadius = 3
+        shadow.shadowOffset = NSSize(width: 0, height: -1)
         statusItem.button?.attributedTitle = NSAttributedString(string: " " + detail, attributes: [
             .foregroundColor: color,
             .font: NSFont.systemFont(ofSize: 11, weight: .bold),
+            .shadow: shadow,
         ])
     }
 
@@ -909,13 +916,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         case "restarting": updateTray(detail: "RESTART", color: .systemYellow, fill: 0.3)
         case "loading": updateTray(detail: "LOAD", color: .systemYellow, fill: 0.4)
         case "prefill":
+            // Append the prefill ETA ("· 12 s" / "· 1m 23 s") when available so the
+            // badge shows both progress and time-remaining; nil until the estimate lands.
+            let etaSfx = (activeList.first?["eta"] as? String).map { " · \($0)" } ?? ""
             if let pct = activeList.first?["pct"] as? Double, pct.isFinite {
-                updateTray(detail: String(format: "PREF %.0f%%", pct), color: orange, fill: pct / 100)
+                updateTray(detail: String(format: "PREF %.0f%%", pct) + etaSfx, color: orange, fill: pct / 100)
             } else {
                 let tokens = activeList.first?["tokens"] as? Double
                 let count = tokens.map { String(format: "%.0f", $0) } ?? "…"
                 let rate = prefillRate.map { String(format: "%.0f", $0) } ?? "—"
-                updateTray(detail: "PREF \(count) tok · \(rate) t/s", color: orange, fill: 0.5)
+                updateTray(detail: "PREF \(count) tok · \(rate) t/s" + etaSfx, color: orange, fill: 0.5)
             }
         case "decode":
             let tps = decodeRate ?? gaugeDecode ?? 0
