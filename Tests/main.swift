@@ -475,6 +475,45 @@ check(prefillProjRate(live: nil, latch: nil, engine: nil) == nil, "projRate: all
 check(prefillProjRate(live: nil, latch: nil, engine: 0) == nil, "projRate: zero engine -> nil")
 check(prefillProjRate(live: .nan, latch: nil, engine: 208) == 208, "projRate: NaN live ignored")
 check(prefillProjRate(live: .infinity, latch: nil, engine: 208) == 208, "projRate: nonfinite live ignored")
+
+// ---- prefillPct cap (the pill no longer flashes 100% mid-prefill) -------------
+check(prefillPct(done: 500, estFresh: 4900, cap: 99) == 100 * 500 / 4900, "pct cap: under the cap, unchanged")
+check(prefillPct(done: 4900, estFresh: 4900, cap: 99) == 99, "pct cap: at 100 but capped -> 99")
+check(prefillPct(done: 4900, estFresh: 4900, cap: nil) == 100, "pct cap: nil cap still reaches 100")
+check(prefillPct(done: 6000, estFresh: 4900, cap: 99) == 99, "pct cap: overshoot clamped to cap, not 100")
+check(prefillPct(done: 500, estFresh: 4900, cap: 150) == 100 * 500 / 4900, "pct cap: cap above 100 is a no-op")
+check(prefillPct(done: 4900, estFresh: 4900, cap: -1) == 100, "pct cap: invalid cap falls back to 100")
+
+// ---- prefillCumulativeRate (chunk-edge spike guard) ----------------------------
+check(prefillCumulativeRate(workDone: 0, age: 2) == nil, "cumrate: below first chunk -> nil")
+check(prefillCumulativeRate(workDone: 2047, age: 2) == nil, "cumrate: just under minCommitted -> nil")
+check(prefillCumulativeRate(workDone: 2048, age: 16) == 128, "cumrate: 2048 over 16s -> 128")
+check(prefillCumulativeRate(workDone: 4096, age: 32) == 128, "cumrate: 4096 over 32s -> 128")
+check(prefillCumulativeRate(workDone: 2048, age: 0.4) == nil, "cumrate: age below floor -> nil")
+check(prefillCumulativeRate(workDone: 2048, age: .nan) == nil, "cumrate: NaN age -> nil")
+check(prefillCumulativeRate(workDone: .infinity, age: 16) == nil, "cumrate: nonfinite workDone -> nil")
+
+// ---- calibratePrefillRate (spike clamp) ----------------------------------------
+check(calibratePrefillRate(raw: 2048, cumulative: 128) == 128, "cal: spike over cumulative clamped down")
+check(calibratePrefillRate(raw: 128, cumulative: 128) == 128, "cal: raw == cumulative kept")
+check(calibratePrefillRate(raw: 100, cumulative: 128) == 100, "cal: legit low sample (mid-chunk) kept")
+check(calibratePrefillRate(raw: 2048, cumulative: nil) == 2048, "cal: no cumulative (pre-first-commit) keeps raw")
+check(calibratePrefillRate(raw: nil, cumulative: 128) == nil, "cal: nil raw -> nil")
+check(calibratePrefillRate(raw: 0, cumulative: 128) == nil, "cal: zero raw -> nil")
+// Never RAISES the rate: raw below cumulative is never bumped up.
+check(calibratePrefillRate(raw: 50, cumulative: 128) == 50, "cal: never raises raw to cumulative")
+
+// ---- ageAtPctCross (diagnostic: when does a formula claim 100%?) ---------------
+func xcross(_ s: [(Double, Double)], _ p: Double) -> Double? {
+    ageAtPctCross(samples: s.map { (age: $0.0, pct: $0.1) }, pct: p)
+}
+check(xcross([], 100) == nil, "xcross: empty -> nil")
+check(xcross([(1, 10), (2, 20)], 100) == nil, "xcross: never reached -> nil")
+check(xcross([(1, 100)], 100) == 1, "xcross: single sample already at 100 -> its age")
+check(xcross([(1, 90), (2, 100)], 100) == 2, "xcross: first hit at second sample -> its age")
+check(xcross([(1, 90), (2, 100)], 95) == 1.5, "xcross: linear interpolation between samples")
+check(xcross([(1, 0), (2, 0), (3, 100)], 100) == 3, "xcross: hit after flat stretch -> its age")
+check(xcross([(1, 50)], 99) == nil, "xcross: single sample below target -> nil")
 // ---- prefillProjectedDone (rate extrapolation) ------------------------------
 // First-chunk, before any commit: workDone 0, age 2 s, rate 250, estFresh 4900
 // -> proj 500 -> pct ~= 10.2% (the readout climbs from the start).

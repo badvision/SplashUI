@@ -803,17 +803,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             // (r["tokens"]) stays the REAL counter delta, never projected, and the tps
             // readout stays the LIVE per-prefill rate, never the session average.
             let age = now.timeIntervalSince(req.start)
+            // Request-cumulative rate (committed fresh tokens ÷ real elapsed time):
+            // self-averaged over the request's life, so it is free of the chunk-edge
+            // spike a 1 s-delta sample reads when a ~2048-token commit lands inside
+            // the poll window. Used only to guard the extrapolation rung below — the
+            // displayed tok/s (r["tps"]) stays the LIVE per-prefill measurement.
+            let cumRate = workDone.flatMap { prefillCumulativeRate(workDone: $0, age: age) }
+            let reqProjRate = calibratePrefillRate(raw: projRate, cumulative: cumRate)
             let proj = workDone.map {
                 prefillProjectedDone(workDone: $0, ageAtLastCommit: req.ageAtLastCommit,
-                                     age: age, rate: projRate, estFresh: estFresh)
+                                     age: age, rate: reqProjRate, estFresh: estFresh)
             }
-            if let p = proj, let pct = prefillPct(done: p, estFresh: estFresh) {
+            // Hold the completion % below 100 while the engine still reports an
+            // in-flight prefill: the extrapolated pct can otherwise flash 100% a few
+            // seconds before the first token. The scheduler flip (prefilling → 0)
+            // lifts the cap, so the last 1% comes from the exact prefill→decode
+            // signal, not the estimate.
+            if let p = proj, let pct = prefillPct(done: p, estFresh: estFresh, cap: prefilling ? 99 : nil) {
                 r["pct"] = pct
             }
-            // ETA autoregresses the same extrapolation rate over the remaining fresh
-            // tail; nil (no estimate) → nothing rendered.
+            // ETA autoregresses the same (spike-guarded) extrapolation rate over the
+            // remaining fresh tail; nil (no estimate) → nothing rendered.
             if let p = proj {
-                r["eta"] = js(prefillEtaText(sec: prefillEta(done: p, estFresh: estFresh, rate: projRate)))
+                r["eta"] = js(prefillEtaText(sec: prefillEta(done: p, estFresh: estFresh, rate: reqProjRate)))
             }
             // cached_pct (real rows only): the measured cached share of the prompt.
             if req.input > 0, let workDone = workDone {

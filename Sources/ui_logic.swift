@@ -234,15 +234,19 @@ public func prefillProgress(prefilledTotal: Double, prefillBase: Double?) -> Dou
     return max(0, prefilledTotal - base)
 }
 
-// Prefill completion percentage: done_fresh ÷ estFresh, clamped to 0...100.
-// `done` is the request's fresh (uncached) prefill-token counter delta since it
-// started; `estFresh` is an estimate of the same fresh-tail quantity it will
-// total (numerator and denominator are commensurate). nil when estFresh is nil
-// or <= 0 (no honest estimate); a stale/under-sized estimate that the counter
-// runs past clamps to 100 — never >100, never NaN.
-public func prefillPct(done: Double, estFresh: Double?) -> Double? {
+// Prefill completion percentage: done_fresh ÷ estFresh, clamped to 0...100 (or
+// 0...cap). `done` is the request's fresh (uncached) prefill-token counter delta
+// since it started; `estFresh` is an estimate of the same fresh-tail quantity it
+// will total (numerator and denominator are commensurate). nil when estFresh is
+// nil or <= 0 (no honest estimate); a stale/under-sized estimate that the counter
+// runs past clamps to the ceiling — never > the ceiling, never NaN.
+// `cap` holds the readout below 100 while the engine still reports an in-flight
+// prefill (the scheduler is the only trustworthy prefill→decode signal; the
+// extrapolated pct can otherwise flash 100% seconds before the first token).
+public func prefillPct(done: Double, estFresh: Double?, cap: Double? = nil) -> Double? {
     guard let est = estFresh, est.isFinite, est > 0 else { return nil }
-    return min(100, max(0, 100 * done / est))
+    let ceiling = cap.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? 100
+    return min(ceiling, max(0, 100 * done / est))
 }
 
 // Session fallback for a synthesized in-flight row whose prompt size the Request
@@ -295,6 +299,49 @@ public func prefillProjectedDone(workDone: Double, ageAtLastCommit: Double,
 public func prefillProjRate(live: Double?, latch: Double?, engine: Double?) -> Double? {
     func ok(_ v: Double?) -> Double? { v.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } }
     return ok(live) ?? ok(latch) ?? ok(engine)
+}
+
+// The prefill counter commits in ~2048-token steps, so a 1 s-delta rate sample that
+// straddles a commit edge reads the whole chunk over the poll interval (~2000 tok/s
+// against a ~128 tok/s sustained rate). The request-cumulative rate (tokens actually
+// committed ÷ real elapsed time) self-averages over the request's life and is the one
+// rate free of that edge spike — until the first commit lands, it under-reads (age
+// includes pre-commit queue/wait time), so it is only trusted once it has seen at
+// least one full chunk (minCommitted, ~2048 tokens).
+public func prefillCumulativeRate(workDone: Double, age: Double, minCommitted: Double = 2048) -> Double? {
+    guard workDone.isFinite, workDone >= minCommitted, age.isFinite, age > 0.5 else { return nil }
+    let r = workDone / age
+    return r.isFinite && r > 0 ? r : nil
+}
+
+// Extrapolation-rate guard against the chunk-edge spike. `raw` is the three-rung
+// instantaneous rate; `cumulative` is the request-cumulative rate (nil until the
+// first full chunk commits). A live spike over-runs the cumulative (raw > cumulative)
+// → clamp to the cumulative; a legitimate low instantaneous sample (raw < cumulative,
+// a mid-chunk flat window) is kept. Never raises the rate, never lowers it below a
+// genuine measurement.
+public func calibratePrefillRate(raw: Double?, cumulative: Double?) -> Double? {
+    guard let r = raw, r.isFinite, r > 0 else { return nil }
+    if let c = cumulative, c.isFinite, c > 0, r > c { return c }
+    return r
+}
+
+// Diagnostic: the age (s) at which a time-series of (age, pct) samples first
+// crosses `pct` (100, or a cap like 99), linearly interpolated between samples.
+// nil when the series never reached that level (e.g. it was capped and the
+// scheduler never flipped).
+public func ageAtPctCross(samples: [(age: Double, pct: Double)], pct: Double) -> Double? {
+    guard let first = samples.first, first.pct >= pct else {
+        for i in samples.indices.dropFirst() {
+            let a = samples[i - 1], b = samples[i]
+            guard b.pct >= pct else { continue }
+            let span = b.pct - a.pct
+            let f = span > 0 ? (pct - a.pct) / span : 1
+            return a.age + f * (b.age - a.age)
+        }
+        return nil
+    }
+    return first.age
 }
 
 // "12 s" under a minute, "1m 23 s" at/above (seconds ceil'd). nil when no ETA.
