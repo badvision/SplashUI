@@ -41,7 +41,7 @@ body {
 #header::before { content: ""; position: absolute; top: 0; left: 0; width: 64px; height: 62px; border-left: 42px solid #4455ff; border-top: 28px solid #4455ff; border-top-left-radius: 58px 48px; pointer-events: none; }
 #header .title { grid-column: 1 / -1; background: #4455ff; color: var(--bg); display: flex; align-items: center; padding: 5px 14px 0; font-family: var(--display); font-size: 25px; font-weight: 700; letter-spacing: .12em; line-height: 1; border-radius: 0 14px 14px 0; }
 #header .model { background: var(--peach); color: var(--bg); display: flex; align-items: center; padding: 2px 8px 0; font-size: 11px; line-height: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
-#statusPill { border-radius: 0 14px 14px 0; display: flex; justify-content: center; align-items: center; padding: 3px 6px 0; line-height: 1; }
+#statusPill { border-radius: 0 14px 14px 0; display: flex; justify-content: center; align-items: center; padding: 3px 6px 0; line-height: 1; white-space: pre-line; text-align: center; }
 section { --accent: var(--lavender); position: relative; padding: 0 0 8px 64px; margin-bottom: 6px; }
 section::before { content: attr(data-channel); position: absolute; left: 0; top: 0; bottom: 0; width: 42px; background: var(--accent); color: var(--bg); display: flex; align-items: flex-end; justify-content: flex-end; padding: 8px 6px; font-family: var(--display); font-size: 23px; font-weight: 700; }
 section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 0; height: 4px; border-radius: 0 2px 2px 0; background: linear-gradient(to right, var(--accent) 0 58%, var(--bg) 58% 60%, var(--accent) 60% 82%, var(--bg) 82% 84%, var(--accent) 84% 100%); }
@@ -98,7 +98,7 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 <div id="header">
   <div class="title" id="hName">Splash interface control</div>
   <div class="model" id="hModel">—</div>
-  <div class="pill g" id="statusPill" data-tip="Engine state — DOWN: no server · LOADING: model loading · PREFILL: prompt being processed · DECODE: generating output · QUEUED: waiting for resources · IDLE: no work · RESTART: app is restarting the server">WAITING</div>
+  <div class="pill g" id="statusPill" data-tip="Engine state — DOWN: no server · LAUNCH FAIL: engine could not start (see error below, auto-retries) · LOADING: model loading · PREFILL: prompt being processed · DECODE: generating output · QUEUED: waiting for resources · IDLE: no work · RESTART: app is restarting the server">WAITING</div>
 </div>
 
 <section class="performance" data-channel="01" aria-label="Performance">
@@ -107,7 +107,7 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
     <div class="col" style="flex:1.2" data-tip="Committed output tokens per second — only tokens that survived the target model's verification. The DFlash-2 draft proposes extra tokens each step; rejected ones don't count, so this matches the tok/s in the completion log. The last real sample is kept for up to 15 s."><div class="k">Decode</div><div class="big" style="color:var(--teal)"><span id="toks">—</span><span class="unit"> tok/s</span></div></div>
     <div class="col" style="flex:1" data-tip="Median time-to-first-token per request. For reasoning models this includes the entire thinking phase — the first output token arrives after thinking completes."><div class="k">TTFT p50</div><div class="mid" id="ttft50">—</div></div>
     <div class="col" style="flex:1" data-tip="Median inter-token latency during decode (lower = faster); 1 / ITL ≈ decode speed."><div class="k">ITL p50</div><div class="mid" id="itl50">—</div></div>
-    <div class="col" style="flex:1.2" data-tip="Progress of the prefill work: tokens prefilled ÷ this request's uncached tail. The tail is measured from the engine's cache for this request — resident KV, SSD restores, and resumed context (falls back to the recent requests' hit rates until the lookup resolves). For a fully uncached prompt it reads 100% from the start. The last sample is kept for up to 15 s after prefill ends."><div class="k">Prefill</div><div class="mid" style="color:#33cc99"><span id="prefill">—</span><span class="unit"> %</span></div><div class="k" id="prefillSub" style="color:var(--teal)"></div></div>
+    <div class="col" style="flex:1.2" data-tip="Prefill work since the current prefill started, with its measured token rate. When a request supplies a known input size, a percentage of its uncached tail is shown instead. No prompt total is inferred from chunk sizes. The last sample is kept for up to 15 s after prefill ends."><div class="k">Prefill</div><div class="mid" style="color:#33cc99"><span id="prefill">—</span><span class="unit" id="prefillUnit"></span></div><div class="k" id="prefillSub" style="color:var(--teal)"></div></div>
     <div class="col" style="flex:1.2" data-tip="The engine's own memory-pressure verdict (normal / warning / critical) — KV cache and state against the memory plan."><div class="k">Pressure</div><div class="mid" id="pressure">—</div></div>
   </div>
   <div class="row" style="margin-top:6px">
@@ -117,14 +117,13 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 </section>
 
 <section class="engine-panel" data-channel="02" aria-label="Engine">
-  <div class="label" data-tip="Engine readiness and server uptime."><span>Engine</span><b id="engState">—</b></div>
+  <div class="label" data-tip="Engine readiness and server uptime."><span>Engine</span><b id="engVer" data-tip="The engine kit version (release.json) actually running — it determines the launch contract (1.3.0 module form vs 1.3.1 id form).">—</b><b id="engState">—</b></div>
   <div class="row">
     <div class="col" style="flex:1" data-tip="GPU backend health — whether the Metal device reports healthy."><div class="k">Metal</div><div class="mid" id="metal">—</div></div>
     <div class="col" style="flex:1" data-tip="Maximum context the model was loaded with (tokens)."><div class="k">Context</div><div class="mid" id="ctx">—</div></div>
     <div class="col" style="flex:1" data-tip="Engine main-loop tick time (ms) — the scheduler cycle; spikes mean a slow step."><div class="k">Loop max</div><div class="mid" id="loop">—</div></div>
     <div class="col" style="flex:1" data-tip="Decode lanes — concurrent sequences decoding / total scheduler states."><div class="k">Lanes</div><div class="mid" id="lanes">—</div></div>
-    <div class="col" style="flex:1" data-tip="KV cache quantization format (int8 = symmetric 8-bit)."><div class="k">KV fmt</div><div class="mid" id="kvfmt">—</div></div>
-    <div class="col" style="flex:1.2" data-tip="GPU/Neural-Engine prefill split (Splash 1.3.0) — share of the feed-forward layers the engine runs on the Neural Engine for this Mac and model; prompts smaller than the minimum chunk stay on the GPU. The split is calibrated once per Mac+model, remembered, and a chunk reverts to the GPU after a failed evaluation, a timeout, or when it loses to the GPU alone. Disable with SPLASH_ANE=off."><div class="k">ANE</div><div class="mid" id="ane">—</div></div>
+    <div class="col" style="flex:1" data-tip="GPU/Neural-Engine prefill split (Splash 1.3.0) — share of the feed-forward layers the engine runs on the Neural Engine for this Mac and model; prompts smaller than the minimum chunk stay on the GPU. The split is calibrated once per Mac+model, remembered, and a chunk reverts to the GPU after a failed evaluation, a timeout, or when it loses to the GPU alone. Disable with SPLASH_ANE=off."><div class="k">ANE</div><div class="mid" id="ane">—</div></div>
   </div>
 </section>
 
@@ -133,6 +132,7 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
   <div class="bar"><i id="kvBar" style="background:var(--teal)"></i></div>
   <div class="row" style="margin-top:4px">
     <div class="col" style="flex:1" data-tip="KV cache bytes in use."><div class="k">KV alloc</div><div class="mid" id="kvAlloc">—</div></div>
+    <div class="col" style="flex:1" data-tip="KV cache quantization format (int8 = symmetric 8-bit)."><div class="k">KV fmt</div><div class="mid" id="kvfmt">—</div></div>
     <div class="col" style="flex:1" data-tip="Active KV pages / parked cache pages (32 tokens per page). Parked pages hold context that can resume without re-prefill."><div class="k">Pages act/cache</div><div class="mid" id="kvPages">—</div></div>
     <div class="col" style="flex:1" data-tip="Scheduler state bytes — per-request runtime state (not model weights)."><div class="k">State mem</div><div class="mid" id="stateMem">—</div></div>
   </div>
@@ -140,7 +140,7 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
     <div class="col" style="flex:1" data-tip="Engine process physical footprint right now (weights + KV + state)."><div class="k">Eng mem</div><div class="mid" id="engMem">—</div></div>
     <div class="col" style="flex:1" data-tip="Engine peak footprint since model load."><div class="k">Peak</div><div class="mid" id="engPeak">—</div></div>
     <div class="col" style="flex:1" data-tip="Memory-governor headroom — how much more the engine may use before it starts shedding cache."><div class="k">Gov headroom</div><div class="mid" id="govHeadroom">—</div></div>
-    <div class="col" style="flex:1.4" data-tip="OS-reported available host memory."><div class="k">Host avail</div><div class="mid" id="hostAvail">—</div></div>
+    <div class="col" style="flex:1" data-tip="OS-reported available host memory."><div class="k">Host avail</div><div class="mid" id="hostAvail">—</div></div>
   </div>
   <div class="label" style="margin-top:6px" data-tip="SSD prefix cache — KV state persisted to disk and reused across requests (survives restarts with --persistent-cache)."><span>SSD cache (prefix) <span id="ssdNote"></span></span><b id="ssdSize">—</b></div>
   <div class="bar"><i id="ssdBar" style="background:#4455ff"></i></div>
@@ -227,11 +227,20 @@ function render(){
   if(!S) return;
   const st = S.state || "wait";
   const pill = $("statusPill");
-  const map = {down:["DOWN","r"], loading:["LOADING","y"], prefill:["PREFILL","o"], decode:["DECODE","t"], queue:["QUEUED","y"], idle:["IDLE","g"], wait:["WAITING","g"], restarting:["RESTART","y"]};
+  const map = {down:["DOWN","r"], launchfailed:["LAUNCH FAIL","r"], loading:["LOADING","y"], prefill:["PREFILL","o"], decode:["DECODE","t"], queue:["QUEUED","y"], idle:["IDLE","g"], wait:["WAITING","g"], restarting:["RESTART","y"]};
   const [txt, cls] = map[st] || ["?","g"];
-  pill.textContent = txt + (st==="prefill" && S.prefill && S.prefill.pct != null ? " "+S.prefill.pct.toFixed(0)+"%" : "");
+  const tokenCount = p => p.tokens != null ? n(p.tokens)+" tok" : "…";
+  const tokenProgress = p => tokenCount(p)+" · "+(p.tps != null ? p.tps.toFixed(0) : "—")+" tok/s";
+  pill.textContent = txt + (st==="prefill" && S.prefill ? (S.prefill.pct != null ? " "+S.prefill.pct.toFixed(0)+"%" : "\n"+tokenProgress(S.prefill)) : "");
+  pill.style.fontSize = st==="prefill" && S.prefill && S.prefill.pct == null ? "10px" : "";
   pill.className = "pill " + cls;
-  setT("hModel", S.model ? S.model.replace("incoai/","") + " · 1.3.0" : "—");
+  let m = S.model ? S.model.split("/").pop() : "—";
+  if (S.server && S.server.launch_error) {
+    const lm = $("hModel");
+    lm.textContent = S.server.launch_error;
+    lm.style.color = "var(--red)";
+    lm.setAttribute("data-tip", "Engine could not start (auto-retry every 30 s, up to 10 attempts):\n" + S.server.launch_error);
+  } else { setT("hModel", m); }
 
   // decode + prefill
   const tps = S.rates && S.rates.decode_tps;
@@ -242,14 +251,17 @@ function render(){
   const pr = S.engine && S.engine.pressure;
   setT("pressure", pr || "—");
   $("pressure").style.color = pr==="normal" ? "var(--green)" : pr==="warning" ? "var(--yellow)" : "var(--red)";
-  setT("prefill", S.prefill ? S.prefill.pct.toFixed(0) : (st==="prefill" ? "…" : "—"));
-  $("prefillSub").textContent = (S.prefill && S.prefill.cached_pct != null) ? "~"+S.prefill.cached_pct.toFixed(0)+"% cached" : "";
+  setT("prefill", S.prefill ? (S.prefill.pct != null ? S.prefill.pct.toFixed(0) : tokenCount(S.prefill)) : (st==="prefill" ? "…" : "—"));
+  $("prefillUnit").textContent = S.prefill && S.prefill.pct != null ? " %" : "";
+  $("prefillSub").textContent = (S.prefill && S.prefill.cached_pct != null) ? "~"+S.prefill.cached_pct.toFixed(0)+"% cached" : (S.prefill && S.prefill.pct == null ? (S.prefill.tps != null ? S.prefill.tps.toFixed(0) : "—")+" tok/s" : "");
   setT("prefillRate", S.rates && S.rates.prefill_tps ? S.rates.prefill_tps.toFixed(0) : "—");
   drawSpark();
 
   // engine
+  setT("engVer", S.engine && S.engine.version ? "v" + S.engine.version : "—");
   setT("engState", (S.ready?"READY":"NOT READY") + " · " + (S.server && S.server.up_seconds ? up(S.server.up_seconds) : "—"));
-  setT("metal", S.engine && S.engine.metal_healthy != null ? (S.engine.metal_healthy ? "OK" : "FAIL") : "—");
+  { const m = S.engine && S.engine.metal_healthy != null ? (S.engine.metal_healthy ? "OK" : "FAIL") : "—";
+    const mEl = $("metal"); mEl.textContent = m; mEl.style.color = m === "OK" ? "var(--green)" : m === "FAIL" ? "var(--red)" : ""; }
   setT("ctx", S.ctx ? (S.ctx/1024).toFixed(0)+"K" : "—");
   setT("loop", S.engine && S.engine.loop_tick_ms != null ? S.engine.loop_tick_ms.toFixed(1)+" ms" : "—");
   setT("lanes", S.state_mem && S.state_mem.active_lanes != null && S.state_mem.entries != null ? S.state_mem.active_lanes + " act / " + S.state_mem.entries : "—");
@@ -259,11 +271,9 @@ function render(){
     if (S.ane && S.ane.state != null) {
       const st = String(S.ane.state).toLowerCase();
       const off = st.includes("off") || st.includes("disabled") || st.includes("none") || st.includes("gpu");
-      if (off) { aneEl.textContent = "DISABLED"; aneEl.style.color = "var(--gray)"; }
-      else {
-        aneEl.textContent = (S.ane.share != null && S.ane.share > 0) ? "ON · " + (S.ane.share*100).toFixed(0) + "%" : "ON";
-        aneEl.style.color = "var(--green)";
-      }
+      if (off) { aneEl.textContent = "OFF"; aneEl.style.color = "var(--gray)"; }
+      else if (S.ane.share != null && S.ane.share > 0) { aneEl.textContent = (S.ane.share*100).toFixed(0) + "%"; aneEl.style.color = "var(--green)"; }
+      else { aneEl.textContent = "—"; aneEl.style.color = ""; }
     } else { aneEl.textContent = "—"; aneEl.style.color = ""; }
   }
 
@@ -312,7 +322,7 @@ function render(){
   setT("reqTotals", S.req ? "done "+nn(S.req.completed_total)+" · fail "+nn(S.req.failed_total)+" · cancel "+nn(S.req.cancelled_total) : "");
   $("activeList").innerHTML = act.map(r =>
     '<div class="row" style="margin-bottom:4px" data-tip="Active request. Bar = elapsed time. Chip = estimated share of the prompt served from the prefix cache — the rest is what prefill is actually working on."><div class="track" style="height:16px"><i style="width:'+Math.min(100,r.age_s*4)+'%;background:var(--lavender)"></i></div>'+
-    '<span style="padding:0 8px;color:var(--orange)">#'+r.id+"</span><span style='color:var(--gray)'>in "+n(r.input)+(r.cached_pct!=null?" · <span style='color:var(--teal)'>~"+r.cached_pct.toFixed(0)+"% cached</span>":(r.pct!=null?" · "+r.pct.toFixed(0)+"%":""))+" · "+r.age_s.toFixed(0)+"s</span></div>"
+    '<span style="padding:0 8px;color:var(--orange)">'+(r.id ? "#"+r.id : "LIVE")+"</span><span style='color:var(--gray)'>"+(r.input ? "in "+n(r.input) : "")+(r.cached_pct!=null?" · <span style='color:var(--teal)'>~"+r.cached_pct.toFixed(0)+"% cached</span>":(r.pct!=null?" · "+r.pct.toFixed(0)+"%":tokenProgress(r)))+(r.tps!=null?" · "+r.tps.toFixed(0)+" tok/s":"")+(r.eta!=null?" · ~"+r.eta:"")+" · "+r.age_s.toFixed(0)+"s</span></div>"
   ).join("");
   $("recentBody").innerHTML = (S.req ? S.req.recent : []).map(r =>
     "<tr><td>#"+r.id+'</td><td>'+n(r.input)+"</td><td>"+n(r.cached)+"</td><td>"+n(r.output)+"</td><td>"+(r.ttft_s?r.ttft_s.toFixed(1)+"s":"—")+"</td><td>"+(r.tps?r.tps.toFixed(1):"—")+"</td></tr>"

@@ -34,7 +34,7 @@ ANE_ARGS=()
 if [ "$SPLASH_ANE" != "on" ]; then ANE_ARGS=(--disable-ane); fi
 
 APP="$PKG/build/SplashUI.app"
-UI_BIN="$APP/Contents/MacOS/splash-ui"
+UI_BIN="$APP/Contents/MacOS/splash-launcher"
 
 echo "stopping UI (current + legacy)..."
 pkill -f 'MacOS/splash-ui' 2>/dev/null || true

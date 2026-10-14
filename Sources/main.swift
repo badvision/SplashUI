@@ -3,43 +3,67 @@ import WebKit
 import Foundation
 import Darwin
 
-// MARK: - Configuration (mirrors start.sh)
+// MARK: - Configuration
 
 enum Cfg {
     static let host = "127.0.0.1"
-    static let port = 8123
-    static let apiKey = "splash-standalone-1"
-    static let kitDir = NSHomeDirectory() + "/Documents/code/splash-standalone/splash-1.3.0-arm64-macos26"
-    static let python = kitDir + "/python/bin/python"
-    static let modelRoot = NSHomeDirectory() + "/.lmstudio/models/incoai/Qwen3.8-27B-Splash"
-    static let modelId = "incoai/Qwen3.8-27B-Splash"
-    static let maxCacheDisk = "100g"
-    static let idleRelease = "240m"
-    // GPU/Neural-Engine prefill split (1.3.0): on by default; SPLASH_ANE=off
-    // adds --disable-ane for a GPU-only path.
-    static let ane = (ProcessInfo.processInfo.environment["SPLASH_ANE"] ?? "on").lowercased()
     static let logLink = "/tmp/splash-standalone.log"
-    static var base: String { "http://\(host):\(port)" }
-    static var engineArgs: [String] {
-        var a = ["-u", "-m", "server.server", modelRoot,
-                 "--tokenizer", modelRoot + "/tokenizer",
-                 "--model", modelId, "--binary", "./engine/splash",
-                 "--host", host, "--port", String(port), "--api-key", apiKey,
-                 "--persistent-cache", "--max-cache-disk", maxCacheDisk,
-                 "--idle-release", idleRelease]
-        if ane != "on" { a.append("--disable-ane") }
-        return a
+}
+
+// Resolve the engine paths + engine argv from the documented env contract
+// (README "Configuration (environment)"). Re-resolved on every launch attempt so a
+// user fixing the install while the app is running takes effect on the next try.
+func isDir(_ path: String) -> Bool {
+    var values = [FileAttributeKey: Any]()
+    do { try values = FileManager.default.attributesOfItem(atPath: path) } catch { return false }
+    return values[.type] as? FileAttributeType == .typeDirectory
+}
+
+// The README ./install.sh default install root (SPLASHUI_HOME).
+let defaultRoot = NSHomeDirectory() + "/SplashUI"
+
+// The Homebrew keg of the splash formula, if installed. The formula versions
+// its Cellar path per release, so the newest version dir is picked.
+func findBrewKeg() -> String? {
+    for base in ["/opt/homebrew", "/usr/local"] {
+        let cellar = base + "/Cellar/splash"
+        let versions = (try? FileManager.default.contentsOfDirectory(atPath: cellar)) ?? []
+        if let v = versions.sorted().last {
+            let keg = cellar + "/" + v
+            if access(keg + "/bin/splash", X_OK) == 0 { return keg }
+        }
     }
+    return nil
+}
+
+// A kit's on-disk engine version, from its release.json — the flavor
+// discriminator the launch contract is keyed to. nil when absent (the test
+// harness injects its own).
+func kitVersion(_ kit: String) -> String? {
+    guard let data = FileManager.default.contents(atPath: kit + "/release.json") else { return nil }
+    guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+    return obj["version"] as? String
+}
+
+func resolve() -> SplashPaths {
+    resolveSplashPaths(
+        env: ProcessInfo.processInfo.environment,
+        defaultRoot: defaultRoot,
+        home: NSHomeDirectory(),
+        isDir: isDir,
+        isExecutable: { access($0, X_OK) == 0 },
+        brewKeg: findBrewKeg,
+        kitVersion: kitVersion)
 }
 
 // MARK: - Process helpers
 
-func serverPids() -> [Int32] {
+func serverPids(port: Int) -> [Int32] {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
     // Bracket, not dot: a dot would also match a *concurrent pgrep's own argv* (the
     // pattern text appears there verbatim), which looks like a phantom server.
-    p.arguments = ["-f", "server[.]server.*--port " + String(Cfg.port)]
+    p.arguments = ["-f", "server[.]server.*--port " + String(port)]
     let pipe = Pipe()
     p.standardOutput = pipe
     p.standardError = FileHandle.nullDevice
@@ -52,10 +76,10 @@ func serverPids() -> [Int32] {
 
 // Is anything listening on the engine port? Ground truth for "a server exists" —
 // a raw socket connect: no child process, no pgrep, immune to spawn flakiness.
-func portAlive() -> Bool {
+func portAlive(port: Int) -> Bool {
     var addr = sockaddr_in()
     addr.sin_family = sa_family_t(AF_INET)
-    addr.sin_port = UInt16(Cfg.port).bigEndian
+    addr.sin_port = UInt16(port).bigEndian
     addr.sin_addr = in_addr(s_addr: inet_addr(Cfg.host))
     let fd = socket(AF_INET, SOCK_STREAM, 0)
     guard fd >= 0 else { return false }
@@ -87,13 +111,25 @@ final class ServerProc {
     private(set) var userStopped = false
     private(set) var pendingRestart = false
     private(set) var restartsExhausted = false
+    // Launch-failure record (surfaced in the panel + engine log) and retry bookkeeping.
+    private(set) var lastLaunchError: LaunchError?
+    private(set) var launchFailRetries = 0
+    // True once the app has started (or adopted) a server that is serving: the
+    // auto-quit policy only applies to a service that actually ran.
+    private(set) var everUp = false
     private var launchDate = Date()
     private var restartDates: [Date] = []
     private var outHandle: FileHandle?
 
+    // Resolved engine paths/config. Re-resolved on every launch attempt so a fixed
+    // install takes effect; also read each tick for the poll endpoint's port.
+    var slash: SplashPaths
+
+    init() { slash = resolve() }
+
     var pid: Int32? {
         if let p = process, p.isRunning { return p.processIdentifier }
-        return serverPids().first
+        return serverPids(port: slash.port).first
     }
 
     func upSeconds() -> Double {
@@ -102,8 +138,20 @@ final class ServerProc {
         return processUptime(pid)
     }
 
+    // App-side adoption of an already-serving engine (e.g. one started by start.sh).
+    func adopt() { everUp = true }
+
+    // Clear the error state so a user-pressed Start/Restart begins a fresh attempt.
+    func clearLaunchError() {
+        lastLaunchError = nil
+        launchFailRetries = 0
+    }
+
     func launch() {
-        guard pid == nil, !portAlive() else { return }
+        slash = resolve()
+        guard pid == nil, !portAlive(port: slash.port) else { return }
+        // Fresh engine log + tail symlink on every attempt, before the pre-flight,
+        // so even a missing-install failure lands in /tmp (the panel + `tail -f`).
         let stamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: "-", with: "").replacingOccurrences(of: ":", with: "")
         let logPath = "/tmp/splash-standalone-\(stamp).log"
@@ -113,11 +161,18 @@ final class ServerProc {
         try? FileManager.default.removeItem(atPath: Cfg.logLink)
         try? FileManager.default.createSymbolicLink(atPath: Cfg.logLink, withDestinationPath: logPath)
 
+        // Pre-flight: if the install is missing/broken, record it and stop —
+        // no process is touched, and the app stays up showing the actionable error.
+        if let e = slash.error { recordLaunchFailure(e, logPath: logPath); return }
+        guard let executable = slash.executable else { return }
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: Cfg.python)
-        p.currentDirectoryURL = URL(fileURLWithPath: Cfg.kitDir)
-        p.arguments = Cfg.engineArgs
-        guard let out = FileHandle(forWritingAtPath: logPath) else { return }
+        p.executableURL = URL(fileURLWithPath: executable)
+        if let dir = slash.workDir { p.currentDirectoryURL = URL(fileURLWithPath: dir) }
+        p.arguments = slash.engineArgs
+        guard let out = FileHandle(forWritingAtPath: logPath) else {
+            recordLaunchFailure("cannot write engine log: \(logPath)", logPath: logPath)
+            return
+        }
         p.standardOutput = out
         p.standardError = out
         p.terminationHandler = { [weak self] proc in
@@ -127,29 +182,53 @@ final class ServerProc {
                 self?.terminated(proc)
             }
         }
-        do { try p.run() } catch { out.closeFile(); return }
+        do { try p.run() } catch {
+            out.closeFile()
+            recordLaunchFailure(error.localizedDescription, logPath: logPath)
+            return
+        }
         // Keep the parent-side copy alive while the child runs: Foundation's async
         // task-launch references the fd after run() returns; closing it early throws
         // NSFileHandleOperationException -> uncaught ObjC exception -> SIGABRT.
         outHandle = out
         process = p
         launchedByApp = true
+        everUp = true
         userStopped = false
         pendingRestart = false
         restartsExhausted = false
+        lastLaunchError = nil
+        launchFailRetries = 0
         launchDate = Date()
+    }
+
+    // One line to NSLog (Console.app) and an append to the engine log stream, so
+    // `tail -f /tmp/splashui.log` shows launch failures alongside engine output.
+    private func recordLaunchFailure(_ message: String, logPath: String) {
+        lastLaunchError = LaunchError(message: message, attempt: Date())
+        launchFailRetries += 1
+        let line = "SplashUI launch failed (attempt \(launchFailRetries)): \(message)\n"
+        NSLog("%@", line)
+        if let h = FileHandle(forWritingAtPath: logPath) {
+            h.seekToEndOfFile()
+            if let d = line.data(using: .utf8) { h.write(d) }
+            h.closeFile()
+        }
     }
 
     func stop() {
         userStopped = true
         pendingRestart = false
+        everUp = false
+        lastLaunchError = nil
+        launchFailRetries = 0
         if let p = process, p.isRunning {
             p.terminationHandler = nil
             kill(p.processIdentifier, SIGTERM)
         }
         outHandle?.closeFile()
         outHandle = nil
-        for pid in serverPids() { kill(pid, SIGTERM) }
+        for pid in serverPids(port: slash.port) { kill(pid, SIGTERM) }
         process = nil
     }
 
@@ -170,6 +249,8 @@ final class ServerProc {
         }
     }
 }
+
+struct LaunchError { let message: String; let attempt: Date }
 
 // MARK: - System memory
 // vm.swapusage ABI on this macOS: 32 bytes = {i64 total, i64 avail, i64 used, u32 pagesize, u32 flags}, values in bytes
@@ -204,16 +285,16 @@ func sampleSystem() -> [String: Any] {
 }
 
 func engineFootprint(_ pid: Int32) -> Int64? {
-    var t: task_t = task_t(MACH_PORT_NULL)
-    guard task_for_pid(mach_task_self_, pid, &t) == KERN_SUCCESS else { return nil }
-    defer { mach_port_deallocate(mach_task_self_, t) }
-    var info = task_vm_info_data_t()
-    var cnt = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
-    let kr = withUnsafeMutablePointer(to: &info) {
-        $0.withMemoryRebound(to: integer_t.self, capacity: Int(cnt)) { task_info(t, task_flavor_t(TASK_VM_INFO), $0, &cnt) }
-    }
-    guard kr == KERN_SUCCESS else { return nil }
-    return Int64(info.phys_footprint)
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/ps")
+    p.arguments = ["-o", "rss=", "-p", String(pid)]
+    let pipe = Pipe()
+    p.standardOutput = pipe
+    p.standardError = FileHandle.nullDevice
+    do { try p.run() } catch { return nil }
+    p.waitUntilExit()
+    guard p.terminationStatus == 0 else { return nil }
+    return rssBytesFromPsOutput(String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "")
 }
 
 // MARK: - Server log tail (Request / Done lines)
@@ -226,6 +307,8 @@ final class LogTail {
         var prefillBase: Double?
         var cacheBase: Double?
         var resumeBase: Double?
+        var lastDone: Double = 0
+        var ageAtLastCommit: Double = 0
     }
     struct DoneReq {
         var id: Int; var input: Int; var cached: Int; var output: Int
@@ -234,6 +317,8 @@ final class LogTail {
     private var realPath: String?
     private var offset: UInt64 = 0
     private var pending = ""
+    private var nextId = 0
+    private var seededIds = false
     var active: [Int: ActiveReq] = [:]
     private(set) var recent: [DoneReq] = []
 
@@ -246,7 +331,11 @@ final class LogTail {
         return min(1.0, Double(recent.reduce(0) { $0 + $1.cached }) / Double(ins))
     }
 
-    func poll() {
+    func poll(completed: Int, cancelled: Int) {
+        if !seededIds {
+            nextId = max(completed, cancelled)
+            seededIds = true
+        }
         guard let dest = try? FileManager.default.destinationOfSymbolicLink(atPath: Cfg.logLink) else { return }
         let size = (try? FileManager.default.attributesOfItem(atPath: dest))?[.size] as? UInt64 ?? 0
         if dest != realPath { realPath = dest; offset = 0; pending = "" }
@@ -295,7 +384,10 @@ final class LogTail {
                 else if let v = labeled(p, "TTFT") { d.ttft = Double(v.replacingOccurrences(of: "s", with: "") ) ?? 0 }
                 else if p.hasSuffix("tok/s") { d.tps = Double(p.replacingOccurrences(of: "tok/s", with: "").trimmingCharacters(in: .whitespaces)) }
             }
-            if let id = id { d.id = id; active.removeValue(forKey: id) }
+            let row = requestRowId(current: nextId, lineHasId: id)
+            d.id = row.id
+            nextId = row.next
+            if let id = id { active.removeValue(forKey: id) }
             recent.insert(d, at: 0)
             if recent.count > 8 { recent.removeLast() }
         }
@@ -337,6 +429,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     private var lastPrefillWall: Double?
     private var lastPrefillSample: (v: Double, t: Date)?
     private var lastPrefillPayload: (p: [String: Any], t: Date)?
+    private var synthesizedRequest: LogTail.ActiveReq?
+    private var wasPrefilling = false
     private var metrics: [String: Double] = [:]
     private var statusJSON: [String: Any]?
     private var lastServerSeen = Date.distantPast
@@ -353,8 +447,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             // launch a server when the port is actually not serving (otherwise adopt).
             get("/status") { [weak self] data in
                 guard let self = self else { return }
-                if data == nil { self.server.launch() }
+                if data == nil { self.server.launch() } else { self.server.adopt() }
             }
+        } else {
+            // An engine is already running (e.g. started by start.sh): it is as much a
+            // service "in charge" as one we launched, so it counts as up — 0.3 quit 10 s
+            // after such a server died, and this must stay true.
+            server.adopt()
         }
         let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(t, forMode: .common)
@@ -426,11 +525,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         }
         guard let cmd = message.body as? String else { return }
         switch cmd {
-        case "start": server.launch()
+        case "start": server.clearLaunchError(); server.launch()
         case "stop":
             server.stop()
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.quitApp() }
         case "restart":
+            // stop() clears the failure record + retry count, so a fresh attempt
+            // starts at attempt 1 with no stale error in the UI.
             server.stop()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.server.launch() }
         default: break
@@ -472,19 +573,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
     private func updateTray(detail: String, color: NSColor, fill: Double) {
         statusItem.button?.image = trayImage(color: color, fill: fill)
+        // Drop shadow so the colored badge text stays legible on both light and
+        // dark menu bars (macOS doesn't tint status-item text to contrast).
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.85)
+        shadow.shadowBlurRadius = 3
+        shadow.shadowOffset = NSSize(width: 0, height: -1)
         statusItem.button?.attributedTitle = NSAttributedString(string: " " + detail, attributes: [
             .foregroundColor: color,
             .font: NSFont.systemFont(ofSize: 11, weight: .bold),
+            .shadow: shadow,
         ])
     }
 
     // MARK: Polling
 
     private func get(_ path: String, _ done: @escaping (Data?) -> Void) {
-        guard let url = URL(string: Cfg.base + path) else { done(nil); return }
+        guard let url = URL(string: server.slash.base + path) else { done(nil); return }
         var req = URLRequest(url: url)
         req.timeoutInterval = 2.5
-        req.setValue(Cfg.apiKey, forHTTPHeaderField: "x-api-key")
+        req.setValue(server.slash.apiKey, forHTTPHeaderField: "x-api-key")
         URLSession.shared.dataTask(with: req) { data, resp, _ in
             let ok = (resp as? HTTPURLResponse)?.statusCode == 200
             DispatchQueue.main.async { done(ok ? data : nil) }
@@ -498,7 +606,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             let l = line.trimmingCharacters(in: .whitespaces)
             guard let space = l.lastIndex(of: " ") else { continue }
             let namePart = l[l.startIndex..<space]
-            guard let v = Double(l[l.index(after: space)...]) else { continue }
+            guard let v = Double(l[l.index(after: space)...]), v.isFinite else { continue }
             let name: String
             if let b = namePart.firstIndex(of: "{") { name = String(namePart[namePart.startIndex..<b]) }
             else { name = String(namePart) }
@@ -524,11 +632,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     }
 
     private func tick() {
+        // Keep the resolved port/key fresh (env changes + user fixing the install).
+        server.slash = resolve()
         get("/status") { [weak self] data in
             let j = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
             DispatchQueue.main.async {
                 guard let self = self else { return }
-                if let j = j { self.statusJSON = j; self.lastServerSeen = Date() }
+                if let j = j {
+                    self.statusJSON = j
+                    self.lastServerSeen = Date()
+                    if let completed = self.fld("requests", "completed"), let cancelled = self.fld("requests", "cancelled") {
+                        self.tail.poll(completed: telemetryInt(completed), cancelled: telemetryInt(cancelled))
+                    }
+                }
                 self.tickRender()
             }
         }
@@ -573,15 +689,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         lastPrefillWall = metrics["splash_prefill_wall_milliseconds_total"]
         if let p = prefillTps { lastPrefillSample = (p, now) }
         // Latch like the decode rate: prefill on a cached session lasts only a few
-        // seconds, so the last real sample is held for up to 15 s.
-        let prefillRate: Double? = prefillTps ?? lastPrefillSample.flatMap { now.timeIntervalSince($0.t) < 15 ? $0.v : nil }
+        // seconds, so the last real per-prefill sample is held for up to 15 s.
+        let prefillLatch = lastPrefillSample.flatMap { now.timeIntervalSince($0.t) < 15 ? $0.v : nil }
+        // Displayed tok/s = the LIVE per-prefill measurement (live sample, held up to
+        // 15 s) — never the session average.
+        let prefillRate: Double? = prefillTps ?? prefillLatch
+        // Extrapolation/ETA rate: three rungs — live per-prefill sample → 15 s latch
+        // → the engine's session-wide splash_prefill_tokens_per_second (a stable
+        // average the engine publishes even at idle, so a cold request on a warm
+        // engine still climbs from the start). This feeds only the projected
+        // done-value and the ETA, never the displayed tok/s.
+        let engineRate = metrics["splash_prefill_tokens_per_second"]
+        let projRate = prefillProjRate(live: prefillTps, latch: prefillLatch, engine: engineRate)
 
-        let prefilling = (metrics["splash_scheduler_prefilling"] ?? 0) > 0
+        let prefillCount = telemetryInt(fld("scheduler", "prefilling") ?? metrics["splash_scheduler_prefilling"])
+        let decodeCount = telemetryInt(fld("scheduler", "decoding") ?? metrics["splash_scheduler_decoding"])
+        let frontendCount = telemetryInt(fld("frontend", "active") ?? metrics["splash_frontend_active"])
+        let prefilling = prefillCount > 0
         let decoding = (metrics["splash_scheduler_decoding"] ?? 0) > 0 || decodeRate != nil
         let queued = ((metrics["splash_scheduler_queued"] ?? 0) + (metrics["splash_scheduler_waiting_resources"] ?? 0)) > 0
 
         // ---- log tail
-        tail.poll()
         tail.active = tail.active.filter { Date().timeIntervalSince($0.value.start) < 3600 }
         // Cumulative tokens actually prefilled — moves live during prefill. (The
         // target_prefill_rows counter is a draft-context snapshot that does not move
@@ -592,41 +720,130 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             + ((cacheBlock?["kv_disk_hit_tokens"] as? Double) ?? 0)
             + ((cacheBlock?["reused_tokens"] as? Double) ?? 0)
         let resumptionsNow = (cacheBlock?["resource_resumptions"] as? Double) ?? 0
+        // Track when the counter last moved per in-flight request so pct/eta can
+        // extrapolate from the live prefill rate over the time since then. The
+        // engine commits splash_prefill_input_tokens_total in ~2048-token ANE-FFN
+        // steps, so the counter sits flat most of a chunk; lastDone detects the
+        // commit edge and ageAtLastCommit stamps it with the row's age.
+        func recordCommit(_ req: inout LogTail.ActiveReq) {
+            if let wd = prefilledTotal.flatMap({ prefillProgress(prefilledTotal: $0, prefillBase: req.prefillBase) }),
+               wd > 0, wd > req.lastDone {
+                req.lastDone = wd
+                req.ageAtLastCommit = now.timeIntervalSince(req.start)
+            }
+        }
+        if inFlight(prefilling: prefillCount, decoding: decodeCount, frontendActive: frontendCount) {
+            if synthesizedRequest == nil {
+                synthesizedRequest = LogTail.ActiveReq(id: 0, input: 0, start: now, prefillBase: nil,
+                    cacheBase: cacheTokensNow, resumeBase: resumptionsNow)
+            }
+            let baseline = prefillBaseline(prefilling: prefilling, wasPrefilling: wasPrefilling,
+                current: synthesizedRequest?.prefillBase, prefilledTotal: prefilledTotal)
+            synthesizedRequest?.prefillBase = baseline
+            if var syn = synthesizedRequest {
+                recordCommit(&syn)
+                synthesizedRequest = syn
+            }
+        } else {
+            synthesizedRequest = nil
+        }
+        wasPrefilling = prefilling
         for (id, var req) in tail.active {
-            if req.prefillBase == nil { req.prefillBase = prefilledTotal ?? 0 }
+            if req.prefillBase == nil, let total = prefilledTotal, total.isFinite { req.prefillBase = total }
             if req.cacheBase == nil { req.cacheBase = cacheTokensNow }
             if req.resumeBase == nil { req.resumeBase = resumptionsNow }
+            recordCommit(&req)
             tail.active[id] = req
         }
         // Prefix-cache hit rate: token-weighted over the last 8 completions, falling
         // back to session counters (cached vs prefilled tokens) until the window fills.
         var hitRate = tail.recentHitRate
+        // Session fallback for a synthesized row (prompt size not yet logged): the
+        // mean fresh (uncached) tail over the last 8 completions.
+        let meanFresh = meanFreshTail(fresh: tail.recent.map { ($0.input, $0.cached) })
         if hitRate == nil,
            let kt = (statusJSON?["cache"] as? [String: Any])?["kv_hit_tokens"] as? Double,
            let pt = metrics["splash_prefill_input_tokens_total"] {
             let den = kt + pt
             if den > 0 { hitRate = min(1.0, kt / den) }
         }
-        let activeList = tail.active.values.map { req -> [String: Any] in
-            let workDone = max(0, (prefilledTotal ?? 0) - (req.prefillBase ?? 0))
-            var r: [String: Any] = ["id": req.id, "input": Double(req.input), "age_s": Date().timeIntervalSince(req.start)]
+        let requests = tail.active.isEmpty ? synthesizedRequest.map { [$0] } ?? [] : Array(tail.active.values)
+        let activeList = requests.map { req -> [String: Any] in
+            let workDone = prefilledTotal.flatMap { prefillProgress(prefilledTotal: $0, prefillBase: req.prefillBase) }
+            var r: [String: Any] = ["id": req.id, "input": Double(req.input), "age_s": now.timeIntervalSince(req.start),
+                                    "tokens": js(workDone), "tps": js(prefillRate)]
+            let resumed = (req.resumeBase.flatMap { resumptionsNow - $0 } ?? 0) >= 1
+            // Completion % (pill, tray, and this row all read it) = 100 × done /
+            // estFresh, where done is the fresh (uncached) prefill counter delta
+            // since the request started and estFresh estimates that same fresh
+            // tail. The request's total input is not observable in-flight by a
+            // passive monitor, so estFresh is an estimate: a real row (input > 0,
+            // from the Request log) uses the measured cache delta when the engine
+            // has credited this request's hits (resident KV + SSD restores + state
+            // resumption; the full-resume path returns before token accounting, so
+            // its counters stay silent → whole prompt resumed), else a
+            // token-weighted hit-rate guess, else the whole input (cold). A
+            // synthesized row (input 0 — the log hasn't arrived) falls back to the
+            // session mean fresh tail; an empty window → nil → no honest
+            // percentage, the tok/tok/s fallback shows instead.
+            var estFresh: Double?
             if req.input > 0 {
-                // The engine credits this request's cached tokens from three sources
-                // when its lookup resolves: resident KV (kv_hit_tokens), SSD restores
-                // (kv_disk_hit_tokens; the governor demotes idle pages to disk), and
-                // state resumption (reused_tokens; ongoing conversations resume the
-                // prior turn's state). So the uncached tail is a measurement, not a
-                // guess from other requests' hit rates (which sits flat when the
-                // recent mix varies). A cold request reads 0 and falls back to the
-                // window estimate / whole-input sweep.
                 let cacheTokens = ((cacheBlock?["kv_hit_tokens"] as? Double) ?? 0)
                     + ((cacheBlock?["kv_disk_hit_tokens"] as? Double) ?? 0)
                     + ((cacheBlock?["reused_tokens"] as? Double) ?? 0)
                 var cachedNow = min(Double(req.input), max(0, cacheTokens - (req.cacheBase ?? 0)))
-                if let rb = req.resumeBase, resumptionsNow - rb >= 1 {
+                if resumed { cachedNow = Double(req.input) }
+                if cachedNow > 0 {
+                    estFresh = max(0, Double(req.input) - cachedNow)
+                } else if let hr = hitRate {
+                    estFresh = Double(req.input) * (1 - hr)
+                } else {
+                    estFresh = Double(req.input)
+                }
+            } else {
+                estFresh = meanFresh
+            }
+            // The counter commits in chunks, so extrapolate the done value from the
+            // extrapolation rate (live sample → 15 s latch → engine session rate) over
+            // the time since the counter last moved → pct and ETA rise smoothly from
+            // the start instead of sitting flat until the first commit. The tok readout
+            // (r["tokens"]) stays the REAL counter delta, never projected, and the tps
+            // readout stays the LIVE per-prefill rate, never the session average.
+            let age = now.timeIntervalSince(req.start)
+            // Request-cumulative rate (committed fresh tokens ÷ real elapsed time):
+            // self-averaged over the request's life, so it is free of the chunk-edge
+            // spike a 1 s-delta sample reads when a ~2048-token commit lands inside
+            // the poll window. Used only to guard the extrapolation rung below — the
+            // displayed tok/s (r["tps"]) stays the LIVE per-prefill measurement.
+            let cumRate = workDone.flatMap { prefillCumulativeRate(workDone: $0, age: age) }
+            let reqProjRate = calibratePrefillRate(raw: projRate, cumulative: cumRate)
+            let proj = workDone.map {
+                prefillProjectedDone(workDone: $0, ageAtLastCommit: req.ageAtLastCommit,
+                                     age: age, rate: reqProjRate, estFresh: estFresh)
+            }
+            // Hold the completion % below 100 while the engine still reports an
+            // in-flight prefill: the extrapolated pct can otherwise flash 100% a few
+            // seconds before the first token. The scheduler flip (prefilling → 0)
+            // lifts the cap, so the last 1% comes from the exact prefill→decode
+            // signal, not the estimate.
+            if let p = proj, let pct = prefillPct(done: p, estFresh: estFresh, cap: prefilling ? 99 : nil) {
+                r["pct"] = pct
+            }
+            // ETA autoregresses the same (spike-guarded) extrapolation rate over the
+            // remaining fresh tail; nil (no estimate) → nothing rendered.
+            if let p = proj {
+                r["eta"] = js(prefillEtaText(sec: prefillEta(done: p, estFresh: estFresh, rate: reqProjRate)))
+            }
+            // cached_pct (real rows only): the measured cached share of the prompt.
+            if req.input > 0, let workDone = workDone {
+                let cacheTokens = ((cacheBlock?["kv_hit_tokens"] as? Double) ?? 0)
+                    + ((cacheBlock?["kv_disk_hit_tokens"] as? Double) ?? 0)
+                    + ((cacheBlock?["reused_tokens"] as? Double) ?? 0)
+                var cachedNow = min(Double(req.input), max(0, cacheTokens - (req.cacheBase ?? 0)))
+                if resumed {
                     // The full-resume path (e.g. an exact duplicate) returns before
                     // token accounting runs, so the counters stay silent — treat the
-                    // whole prompt as resumed: nothing to prefill, reads 100%.
+                    // whole prompt as resumed.
                     cachedNow = Double(req.input)
                 }
                 var est: Double?
@@ -635,15 +852,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 } else if let hr = hitRate {
                     est = Double(req.input) * (1 - hr)
                 }
-                let denom: Double
-                if let est = est, est >= workDone { denom = est } else { denom = Double(req.input) }
-                r["pct"] = min(100, max(0, workDone * 100.0 / max(1, denom)))
                 if cachedNow > 0 {
                     r["cached_pct"] = cachedNow * 100.0 / Double(req.input)
                 } else if let hr = hitRate, (est == nil || est! >= workDone) {
                     r["cached_pct"] = hr * 100
                 }
-            } else { r["pct"] = 0.0 }
+            }
             return r
         }.sorted { ($0["id"] as? Int) ?? 0 > ($1["id"] as? Int) ?? 0 }
         let recentList = tail.recent.map { r -> [String: Any] in
@@ -660,7 +874,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         let procGone = server.pid == nil && !server.userStopped && Date().timeIntervalSince(lastServerSeen) > 5
         var state = "idle"
         if procGone {
-            state = server.launchedByApp && server.pendingRestart && !server.restartsExhausted ? "restarting" : "down"
+            // pendingRestart means the engine *ran* and just died (crash path, 3×/10 min
+            // backoff), so it wins over a launch-failure record.
+            if server.launchedByApp && server.pendingRestart && !server.restartsExhausted { state = "restarting" }
+            else if server.lastLaunchError != nil { state = "launchfailed" }
+            else { state = "down" }
         }
         else if down { state = server.launchedByApp && server.pid != nil ? "loading" : "down" }
         else if !ready { state = "loading" }
@@ -668,24 +886,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         else if decoding || !tail.active.isEmpty { state = "decode" }
         else if queued { state = "queue" }
 
-        // ---- the UI never outlives the service: quit 10 s after the service is gone
+        // ---- the UI never outlives the *service*: quit 10 s after a server that was
+        // observed up goes away (crash, or an adopted external server dying). A launch
+        // that never came up (everUp == false) must NOT quit — the menu bar stays
+        // available with the actionable error on display; Stop is always the exit.
         if procGone {
             if downSince == nil { downSince = Date() }
-            else if let ds = downSince, Date().timeIntervalSince(ds) > 10 {
+            else if let ds = downSince,
+                    autoQuitDecision(procGone: procGone, everUp: server.everUp,
+                                     downFor: Date().timeIntervalSince(ds), userStopped: server.userStopped) {
                 NSApplication.shared.terminate(nil)
             }
         } else {
             downSince = nil
         }
 
+        // ---- auto-retry a failed launch: every 30 s, up to 10 total attempts. The
+        // user may have installed/fixed the kit meanwhile; launch() re-resolves
+        // paths fresh and clears the error on success, re-records on failure.
+        if server.lastLaunchError != nil && !server.userStopped &&
+            launchRetryDue(error: server.lastLaunchError?.attempt,
+                           retries: server.launchFailRetries, now: Date()) {
+            server.launch()
+        }
         // ---- tray
         switch state {
         case "down": updateTray(detail: "DOWN", color: .systemRed, fill: 0)
+        case "launchfailed": updateTray(detail: "ERR", color: .systemRed, fill: 0)
         case "restarting": updateTray(detail: "RESTART", color: .systemYellow, fill: 0.3)
         case "loading": updateTray(detail: "LOAD", color: .systemYellow, fill: 0.4)
         case "prefill":
-            let pct = (activeList.first?["pct"] as? Double) ?? 0
-            updateTray(detail: "PREF \(Int(pct))%", color: orange, fill: pct / 100)
+            // Append the prefill ETA ("· 12 s" / "· 1m 23 s") when available so the
+            // badge shows both progress and time-remaining; nil until the estimate lands.
+            let etaSfx = (activeList.first?["eta"] as? String).map { " · \($0)" } ?? ""
+            if let pct = activeList.first?["pct"] as? Double, pct.isFinite {
+                updateTray(detail: String(format: "PREF %.0f%%", pct) + etaSfx, color: orange, fill: pct / 100)
+            } else {
+                let tokens = activeList.first?["tokens"] as? Double
+                let count = tokens.map { String(format: "%.0f", $0) } ?? "…"
+                let rate = prefillRate.map { String(format: "%.0f", $0) } ?? "—"
+                updateTray(detail: "PREF \(count) tok · \(rate) t/s" + etaSfx, color: orange, fill: 0.5)
+            }
         case "decode":
             let tps = decodeRate ?? gaugeDecode ?? 0
             updateTray(detail: String(format: "%.0f t/s", tps), color: teal, fill: 1)
@@ -702,10 +943,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             "t": now.timeIntervalSince1970,
             "state": state,
             "ready": ready,
-            "model": Cfg.modelId,
+            "model": js(server.slash.modelId),
             "ctx": js(fld("maximum_context_tokens")),
         ]
         j["engine"] = [
+            "version": js(server.slash.version),
             "metal_healthy": js(metrics["splash_metal_healthy"]),
             "pressure": js(statusJSON?["memory_pressure"]),
             "loop_tick_ms": js(fld("loop", "max_tick_ms")),
@@ -747,7 +989,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         let pressure = statusJSON?["memory_pressure"] as? String
         if let pressure = pressure { j["pressure"] = pressure }
         if state == "prefill", let first = activeList.first {
-            var pf: [String: Any] = ["pct": first["pct"] as? Double ?? 0, "input": first["input"] as? Double ?? 0]
+            var pf: [String: Any] = ["pct": js(first["pct"]), "input": first["input"] as? Double ?? 0,
+                                     "tokens": js(first["tokens"]), "tps": js(first["tps"])]
             if let c = first["cached_pct"] as? Double { pf["cached_pct"] = c }
             lastPrefillPayload = (pf, now)
             j["prefill"] = pf
@@ -808,6 +1051,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             "pid": Int(server.pid ?? 0),
             "launched_by_app": server.launchedByApp && server.pid != nil,
             "up_seconds": server.upSeconds(),
+            "launch_error": js(server.lastLaunchError?.message),
+            "kit_dir": js(server.slash.workDir),
         ]
 
         if let data = try? JSONSerialization.data(withJSONObject: j),
