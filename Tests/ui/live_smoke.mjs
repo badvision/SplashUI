@@ -84,14 +84,18 @@ try {
       SPLASHUI_SMOKE_JS: hookPath, SPLASHUI_SMOKE_OUT: output }, stdio: ['ignore', log, log] });
   } finally { closeSync(log); }
   const deadline = Date.now() + 45000;
-  let changedPortAt = null, nextHealthAt = 0, samples = 0;
+  let changedPortAt = null, maxAlternatePortMS = 0, nextHealthAt = 0, samples = 0;
   while (!existsSync(output)) {
     assert.ok(!interrupted, 'interrupted');
     assert.equal(app.exitCode, null, 'app exited before producing assertions');
     assert.ok(Date.now() < deadline, `timed out; app log: ${join(directory, 'app.log')}`);
     const savedPort = JSON.parse(readFileSync(configPath, 'utf8')).globals.port;
-    if (savedPort === 8199) changedPortAt ??= Date.now(); else changedPortAt = null;
-    assert.ok(changedPortAt === null || Date.now() - changedPortAt < 4500, '8199 window exceeded 4.5s watchdog');
+    if (savedPort === 8199) changedPortAt ??= Date.now();
+    if (changedPortAt !== null) {
+      maxAlternatePortMS = Math.max(maxAlternatePortMS, Date.now() - changedPortAt);
+      assert.ok(maxAlternatePortMS < 4500, '8199 window exceeded 4.5s watchdog');
+      if (savedPort !== 8199) changedPortAt = null;
+    }
     if (Date.now() >= nextHealthAt) { await engineHealth(); samples++; nextHealthAt = Date.now() + 400; }
     await sleep(50);
   }
@@ -109,7 +113,8 @@ try {
   const finalHealth = await engineHealth();
   const summary = { suite: result.suite, assertions: result.assertions, failed: 0,
     engine_samples: samples, initialHealth, finalHealth, config_sha256: originalHash,
-    config_restored: true, evidence, output, app_processes: [] };
+    config_restored: true, port_8199_window_ms: maxAlternatePortMS,
+    ignored_physical_events: result.ignoredInput.length, evidence, output, app_processes: [] };
   writeFileSync(join(directory, 'summary.json'), JSON.stringify(summary, null, 2) + '\n');
   console.log(JSON.stringify(summary));
 } catch (error) {

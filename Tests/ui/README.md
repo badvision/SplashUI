@@ -47,7 +47,15 @@ ANE enabled. It launches the built binary **once** using the opt-in `SPLASHUI_SM
 hooks, awaits `live_assertions.js`, and asserts actual DOM/CF draft/Swift tick state:
 form population, manual path, external-engine PID, engine resolution, masked key,
 completed folder rows and at least one PRESENT folder. Polling waits for predicates,
-not arbitrary delays. Round trips additionally await each actual save response and
+not arbitrary delays.
+
+The smoke-only JS captures and ignores trusted physical keyboard/click events so
+typing elsewhere cannot contaminate the key panel; synthetic test events still
+exercise its actual handlers. Ignored event types/targets (never typed text) are
+recorded in result JSON. Both manual-path reads and the persisted ANE tick value
+are checked at every save, not only at initialization.
+
+Round trips additionally await each actual save response and
 computed `restart_required`: **false -> true -> false -> true -> false**. No Start,
 Stop or Restart command is sent. A 4.5-second watchdog bounds the 8199 window; the
 original port is continuously probed for 200-with-key / 401-without-key during the

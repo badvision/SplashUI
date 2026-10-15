@@ -1,6 +1,17 @@
 (async () => {
   const expected = /* EXPECTED */;
   const checks = [], steps = [], started = Date.now();
+  // The panel becomes key on show. Ignore unrelated physical typing/clicks
+  // while this automated transaction runs; programmatic events remain real.
+  const ignoredInput = [];
+  for (const type of ['keydown', 'beforeinput', 'mousedown', 'click']) {
+    document.addEventListener(type, event => {
+      if (!event.isTrusted) return;
+      ignoredInput.push({ type, target: event.target.id || event.target.tagName,
+        elapsed_ms: Date.now() - started });
+      event.preventDefault(); event.stopImmediatePropagation();
+    }, true);
+  }
   const $ = id => document.getElementById(id);
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   function check(assertion, pass, actual) { checks.push({ assertion, pass: !!pass, actual }); }
@@ -16,7 +27,8 @@
       step, elapsed_ms: Date.now() - started,
       port: $('cfgPort').value, draftPort: CF.draft.port,
       manualPath: $('manualPath').value, draftManualPath: CF.draft.manualPath,
-      ane: CF.draft.ane, restart_required: S.cfg.restart_required,
+      ane: CF.draft.ane, savedAne: S.cfg.profiles[0].options.ane,
+      restart_required: S.cfg.restart_required,
       footer: $('btnRestart').textContent, message: $('cfgMsg').textContent,
       enginePID: S.server && S.server.pid, launchedByApp: S.server && S.server.launched_by_app
     };
@@ -60,10 +72,13 @@
         if (CF.validateTimer) { clearTimeout(CF.validateTimer); CF.validateTimer = null; }
         $('btnCfgSave').click();
         // Wait for the actual save result + computed tick state, never a fixed sleep.
-        await until(() => !cfDirty() && S.cfg.port === port && S.cfg.restart_required === restart &&
-          $('cfgMsg').textContent.startsWith('Saved'), step, port === 8199 ? 3500 : 6000);
+        await until(() => !cfDirty() && S.cfg.port === port && S.cfg.profiles[0].options.ane === ane &&
+          S.cfg.restart_required === restart && $('cfgMsg').textContent.startsWith('Saved'),
+          step, port === 8199 ? 3500 : 6000);
         const actual = snapshot(step);
-        check(step, actual.draftPort === port && actual.ane === ane && actual.restart_required === restart &&
+        check(step, actual.draftPort === port && actual.ane === ane && actual.savedAne === ane &&
+          actual.restart_required === restart && actual.manualPath === expected.manualPath &&
+          actual.draftManualPath === expected.manualPath &&
           actual.footer === (restart ? 'RESTART TO APPLY' : 'Restart'), actual);
       }
       try {
@@ -82,6 +97,6 @@
     }
   } catch (error) { check('live hook completed', false, error.message); }
   const failed = checks.filter(item => !item.pass).length;
-  return JSON.stringify({ suite: 'panel-live', checks, steps, assertions: checks.length,
+  return JSON.stringify({ suite: 'panel-live', checks, steps, ignoredInput, assertions: checks.length,
     passed: checks.length - failed, failed });
 })()
