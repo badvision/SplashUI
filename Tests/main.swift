@@ -2500,5 +2500,706 @@ do {
     check(plan.version == "1.9.9", "planLaunch: version = what release.json said (not the fallback's)")
 }
 
+
+// S2b fixtures: verbatim copies of the SERVE_OPTIONS table of the real kits'
+// server/serve_options.py. The 1.3.1 keg's file is byte-identical to the 1.3.0
+// kit's (verified in S2a), so one fixture covers both; the 1.3.2 table is the
+// github.com/incoai/splash tag 1.3.2 copy.
+let fixtureServeOptions130 = #"""
+SERVE_OPTIONS = (
+    ServeOption(
+        "--host",
+        "network",
+        dict(
+            default="127.0.0.1",
+            metavar="ADDRESS",
+            help="HTTP bind address (default: 127.0.0.1; 0.0.0.0 for all IPv4 "
+            "interfaces); clients use an IP address, localhost or a name given "
+            "with --allowed-host",
+        ),
+    ),
+    ServeOption(
+        "--allowed-host",
+        "network",
+        dict(
+            action="append",
+            default=[],
+            metavar="HOST",
+            help="additional HTTP Host name to accept, e.g. mymac.local; does not "
+            "change the bind address (repeatable)",
+        ),
+    ),
+    ServeOption(
+        "--allowed-origin",
+        "network",
+        dict(
+            action="append",
+            default=[],
+            type=parse_allowed_origin,
+            metavar="ORIGIN",
+            help="origin whose pages may call the API from a browser or webview, "
+            "e.g. tauri://localhost; '*' for any (repeatable)",
+        ),
+        text=_origin_text,
+    ),
+    ServeOption(
+        "--api-key",
+        "network",
+        dict(
+            type=parse_api_key,
+            metavar="KEY",
+            help="require this key as a bearer token or x-api-key on every route "
+            "but the chat page, /health and /ready (default: SPLASH_API_KEY)",
+        ),
+        environment="SPLASH_API_KEY",
+        secret=True,
+    ),
+    ServeOption(
+        "--no-webui",
+        "network",
+        dict(action="store_true", default=False, help="disable the chat page"),
+    ),
+    ServeOption(
+        "--max-memory",
+        "memory",
+        dict(
+            type=parse_max_memory,
+            default=None,
+            metavar="SIZE",
+            help="Metal memory budget, e.g. 28G; it can only lower the automatic "
+            "budget (default: auto)",
+        ),
+    ),
+    ServeOption(
+        "--max-context",
+        "memory",
+        dict(
+            type=parse_max_context,
+            default=None,
+            metavar="TOKENS",
+            help="context token limit, e.g. 100K (K = 1024 tokens); it can only "
+            "lower the automatic limit, the model's native window when memory "
+            "holds it (default: auto)",
+        ),
+    ),
+    ServeOption(
+        "--kv-format",
+        "memory",
+        dict(
+            choices=("int8", "bf16"),
+            default="int8",
+            help="target KV cache storage (default: int8); bf16 uses more memory",
+        ),
+    ),
+    ServeOption(
+        "--idle-release",
+        "memory",
+        dict(
+            type=parse_idle_release,
+            default=None,
+            metavar="DURATION",
+            help="time without a request before the engine unwires its memory and "
+            "frees the weights: seconds, or with an s, m or h suffix, e.g. 30m "
+            "(default: 10m); off keeps both",
+        ),
+        text=idle_release_text,
+    ),
+    ServeOption(
+        "--max-cache-disk",
+        "cache",
+        dict(
+            type=parse_max_cache_disk,
+            default=0,
+            metavar="SIZE",
+            help="SSD quota for cached KV pages and states, e.g. 5G (default: 0, "
+            "disabled)",
+        ),
+    ),
+    ServeOption(
+        "--persistent-cache",
+        "cache",
+        dict(
+            action="store_true",
+            default=False,
+            help="keep the SSD cache across restarts (needs --max-cache-disk)",
+        ),
+    ),
+    ServeOption(
+        "--cache-dir",
+        "cache",
+        dict(
+            type=parse_cache_dir,
+            default=None,
+            metavar="DIRECTORY",
+            help="where --persistent-cache keeps its files; needs "
+            "--persistent-cache (default: ~/Library/Caches/Splash/prefix-cache)",
+        ),
+    ),
+    ServeOption(
+        "--served-model-name",
+        "api",
+        dict(
+            action="append",
+            default=[],
+            type=parse_served_model_name,
+            metavar="NAME",
+            help="additional API model name (repeatable); responses report the "
+            "loaded model ID unless --announce-served-name",
+        ),
+    ),
+    ServeOption(
+        "--announce-served-name",
+        "api",
+        dict(
+            action="store_true",
+            default=False,
+            help="report the first --served-model-name in API responses and list "
+            "it first in /v1/models; /status keeps the loaded model ID (needs "
+            "--served-model-name)",
+        ),
+    ),
+    ServeOption(
+        "--default-reasoning-effort",
+        "api",
+        dict(
+            type=parse_reasoning_effort,
+            metavar="EFFORT",
+            help="effort of Chat and Responses requests that set none: "
+            + ", ".join(REASONING_EFFORTS[:-1])
+            + f" or {REASONING_EFFORTS[-1]} (default: "
+            "SPLASH_DEFAULT_REASONING_EFFORT, else the model template's)",
+        ),
+        environment="SPLASH_DEFAULT_REASONING_EFFORT",
+    ),
+    ServeOption(
+        "--max-request-size",
+        "requests",
+        dict(
+            type=parse_request_size,
+            default=DEFAULT_MAX_REQUEST_BYTES,
+            metavar="SIZE",
+            help="maximum HTTP request body size, e.g. 128M (default: 128M); "
+            "shared input budget is max(512M, twice this limit)",
+        ),
+    ),
+    ServeOption(
+        "--max-image-pixels",
+        "requests",
+        dict(
+            type=parse_max_image_pixels,
+            default=images.MAX_PIXELS,
+            metavar="PIXELS",
+            help=f"maximum resized pixels per image, {images.MIN_PIXELS}–"
+            f"{images.MAX_PIXELS} (default: {images.MAX_PIXELS}); bounds the "
+            "vision scratch one image needs",
+        ),
+    ),
+    ServeOption(
+        "--request-timeout",
+        "requests",
+        dict(
+            type=parse_request_timeout,
+            default=None,
+            metavar="DURATION",
+            help="time before a queued or in-flight request expires with 504: "
+            "seconds, or with an s, m or h suffix, e.g. 30m (default: none)",
+        ),
+    ),
+    ServeOption(
+        "--queue-size",
+        "requests",
+        dict(
+            type=parse_queue_size,
+            default=DEFAULT_QUEUE_SIZE,
+            metavar="REQUESTS",
+            help="requests admitted at once, running or waiting; more get 503 "
+            f"(default: {DEFAULT_QUEUE_SIZE})",
+        ),
+    ),
+    ServeOption(
+        "--decode-share",
+        "requests",
+        dict(
+            type=parse_decode_share,
+            default=None,
+            metavar="SHARE",
+            help="decode time owed per unit of prefill time while other requests "
+            "decode (default: 0.5; 0 alternates one command each)",
+        ),
+    ),
+    ServeOption(
+        "--disable-ane",
+        "requests",
+        dict(
+            action="store_true",
+            default=False,
+            help="prefill on the GPU alone (default: a dense model's long "
+            "prompts also use the Neural Engine when that is faster)",
+        ),
+    ),
+    ServeOption(
+        "--allow-idle-sleep",
+        "requests",
+        dict(
+            action="store_true",
+            default=False,
+            help="let the Mac sleep automatically while requests run (default: it "
+            "stays awake until they finish; the display may still sleep)",
+        ),
+    ),
+)
+"""#
+let fixtureServeOptions132 = #"""
+SERVE_OPTIONS = (
+    ServeOption(
+        "--host",
+        "network",
+        dict(
+            default="127.0.0.1",
+            metavar="ADDRESS",
+            help="HTTP bind address (default: 127.0.0.1; 0.0.0.0 for all IPv4 "
+            "interfaces); clients use an IP address, localhost or a name given "
+            "with --allowed-host",
+        ),
+    ),
+    ServeOption(
+        "--allowed-host",
+        "network",
+        dict(
+            action="append",
+            default=[],
+            metavar="HOST",
+            help="additional HTTP Host name to accept, e.g. mymac.local; does not "
+            "change the bind address (repeatable)",
+        ),
+    ),
+    ServeOption(
+        "--allowed-origin",
+        "network",
+        dict(
+            action="append",
+            default=[],
+            type=parse_allowed_origin,
+            metavar="ORIGIN",
+            help="origin whose pages may call the API from a browser or webview, "
+            "e.g. tauri://localhost; '*' for any (repeatable)",
+        ),
+        text=_origin_text,
+    ),
+    ServeOption(
+        "--api-key",
+        "network",
+        dict(
+            type=parse_api_key,
+            metavar="KEY",
+            help="require this key as a bearer token or x-api-key on every route "
+            "but the chat page, /health and /ready (default: SPLASH_API_KEY)",
+        ),
+        environment="SPLASH_API_KEY",
+        secret=True,
+    ),
+    ServeOption(
+        "--no-webui",
+        "network",
+        dict(action="store_true", default=False, help="disable the chat page"),
+    ),
+    ServeOption(
+        "--max-memory",
+        "memory",
+        dict(
+            type=parse_max_memory,
+            default=None,
+            metavar="SIZE",
+            help="Metal memory budget, e.g. 28G; it can only lower the automatic "
+            "budget (default: auto)",
+        ),
+    ),
+    ServeOption(
+        "--max-context",
+        "memory",
+        dict(
+            type=parse_max_context,
+            default=None,
+            metavar="TOKENS",
+            help="context token limit, e.g. 100K (K = 1024 tokens); it can only "
+            "lower the automatic limit, the model's native window when memory "
+            "holds it (default: auto)",
+        ),
+    ),
+    ServeOption(
+        "--kv-format",
+        "memory",
+        dict(
+            choices=("int8", "bf16"),
+            default="int8",
+            help="target KV cache storage (default: int8); bf16 uses more memory",
+        ),
+    ),
+    ServeOption(
+        "--state-format",
+        "memory",
+        dict(
+            choices=("fp32", "bf16"),
+            default="fp32",
+            help="recurrent state storage (default: fp32); bf16 halves each "
+            "state, so memory and the SSD cache hold about twice as many",
+        ),
+    ),
+    ServeOption(
+        "--idle-release",
+        "memory",
+        dict(
+            type=parse_idle_release,
+            default=None,
+            metavar="DURATION",
+            help="time without a request before the engine unwires its memory and "
+            "frees the weights: seconds, or with an s, m or h suffix, e.g. 30m "
+            "(default: 10m); off keeps both, though POST /v1/memory/release "
+            "still frees the weights",
+        ),
+        text=idle_release_text,
+    ),
+    ServeOption(
+        "--max-cache-disk",
+        "cache",
+        dict(
+            type=parse_max_cache_disk,
+            default=None,
+            metavar="SIZE",
+            help="SSD quota for cached KV pages and states: auto follows the "
+            "volume's free space up to 32G, 0 disables, or a size such as 16G "
+            "(default: auto)",
+        ),
+    ),
+    ServeOption(
+        "--max-cache-disk-writes",
+        "cache",
+        dict(
+            type=parse_max_cache_disk_writes,
+            default=0,
+            metavar="SIZE",
+            help="the most the SSD cache writes a day, e.g. 200G; the state a "
+            "conversation resumes from and KV pages pass it (default: 0, no "
+            "limit)",
+        ),
+    ),
+    ServeOption(
+        "--persistent-cache",
+        "cache",
+        dict(
+            action="store_true",
+            default=False,
+            help="keep the SSD cache across restarts",
+        ),
+    ),
+    ServeOption(
+        "--cache-dir",
+        "cache",
+        dict(
+            type=parse_cache_dir,
+            default=None,
+            metavar="DIRECTORY",
+            help="where --persistent-cache keeps its files; needs "
+            "--persistent-cache (default: ~/Library/Caches/Splash/prefix-cache)",
+        ),
+    ),
+    ServeOption(
+        "--served-model-name",
+        "api",
+        dict(
+            action="append",
+            default=[],
+            type=parse_served_model_name,
+            metavar="NAME",
+            help="additional API model name (repeatable); responses report the "
+            "loaded model ID unless --announce-served-name",
+        ),
+    ),
+    ServeOption(
+        "--announce-served-name",
+        "api",
+        dict(
+            action="store_true",
+            default=False,
+            help="report the first --served-model-name in API responses and list "
+            "it first in /v1/models; /status keeps the loaded model ID (needs "
+            "--served-model-name)",
+        ),
+    ),
+    ServeOption(
+        "--default-reasoning-effort",
+        "api",
+        dict(
+            type=parse_reasoning_effort,
+            metavar="EFFORT",
+            help="effort of Chat and Responses requests that set none: "
+            + ", ".join(REASONING_EFFORTS[:-1])
+            + f" or {REASONING_EFFORTS[-1]} (default: "
+            "SPLASH_DEFAULT_REASONING_EFFORT, else the model template's)",
+        ),
+        environment="SPLASH_DEFAULT_REASONING_EFFORT",
+    ),
+    ServeOption(
+        "--thinking-token-budget",
+        "api",
+        dict(
+            type=parse_thinking_token_budget,
+            metavar="N",
+            help="thinking tokens of a thinking request that sets no "
+            "thinking_token_budget, after which its thinking closes (default: "
+            "SPLASH_THINKING_TOKEN_BUDGET, else no cap)",
+        ),
+        environment="SPLASH_THINKING_TOKEN_BUDGET",
+    ),
+    ServeOption(
+        "--thinking-end-text",
+        "api",
+        dict(
+            metavar="TEXT",
+            help="text that ends thinking where a thinking budget runs out, such "
+            "as a sentence that turns to the answer, then </think> as its last "
+            f"token; at most {MAX_THINKING_END_TOKENS} tokens (default: "
+            "SPLASH_THINKING_END_TEXT, else </think> alone)",
+        ),
+        environment="SPLASH_THINKING_END_TEXT",
+    ),
+    ServeOption(
+        "--max-request-size",
+        "requests",
+        dict(
+            type=parse_request_size,
+            default=DEFAULT_MAX_REQUEST_BYTES,
+            metavar="SIZE",
+            help="maximum HTTP request body size, e.g. 128M (default: 128M); "
+            "shared input budget is max(512M, twice this limit)",
+        ),
+    ),
+    ServeOption(
+        "--max-image-pixels",
+        "requests",
+        dict(
+            type=parse_max_image_pixels,
+            default=images.MAX_PIXELS,
+            metavar="PIXELS",
+            help=f"maximum resized pixels per image, {images.MIN_PIXELS}–"
+            f"{images.MAX_PIXELS} (default: {images.MAX_PIXELS}); bounds the "
+            "vision scratch one image needs",
+        ),
+    ),
+    ServeOption(
+        "--request-timeout",
+        "requests",
+        dict(
+            type=parse_request_timeout,
+            default=None,
+            metavar="DURATION",
+            help="time before a queued or in-flight request expires with 504: "
+            "seconds, or with an s, m or h suffix, e.g. 30m (default: none)",
+        ),
+    ),
+    ServeOption(
+        "--queue-size",
+        "requests",
+        dict(
+            type=parse_queue_size,
+            default=DEFAULT_QUEUE_SIZE,
+            metavar="REQUESTS",
+            help="requests admitted at once, running or waiting; more get 503 "
+            f"(default: {DEFAULT_QUEUE_SIZE})",
+        ),
+    ),
+    ServeOption(
+        "--decode-share",
+        "requests",
+        dict(
+            type=parse_decode_share,
+            default=None,
+            metavar="SHARE",
+            help="decode time owed per unit of prefill time while other requests "
+            "decode (default: 0.5; 0 alternates one command each)",
+        ),
+    ),
+    ServeOption(
+        "--disable-ane",
+        "requests",
+        dict(
+            action="store_true",
+            default=False,
+            help="prefill on the GPU alone (default: a dense model's long "
+            "prompts also use the Neural Engine when that is faster)",
+        ),
+    ),
+    ServeOption(
+        "--allow-idle-sleep",
+        "requests",
+        dict(
+            action="store_true",
+            default=False,
+            help="let the Mac sleep automatically while requests run (default: it "
+            "stays awake until they finish; the display may still sleep)",
+        ),
+    ),
+)
+"""#
+
+// 75. S2b: parseServeOptions — the read-only view of the kit's shared table.
+do {
+    let r130 = parseServeOptions(fixtureServeOptions130)
+    check(r130.options.count == 22, "s2b parse: the real 1.3.0 table yields the 22 shared options")
+    check(r130.unrecognized.isEmpty, "s2b parse: no unrecognized blocks in the real table")
+    check(r130.options.map(\.flag) == [
+        "--host", "--allowed-host", "--allowed-origin", "--api-key", "--no-webui",
+        "--max-memory", "--max-context", "--kv-format", "--idle-release",
+        "--max-cache-disk", "--persistent-cache", "--cache-dir", "--served-model-name",
+        "--announce-served-name", "--default-reasoning-effort", "--max-request-size",
+        "--max-image-pixels", "--request-timeout", "--queue-size", "--decode-share",
+        "--disable-ane", "--allow-idle-sleep",
+    ], "s2b parse: file order preserved")
+    func entry130(_ f: String) -> ServeOptionEntry? { r130.options.first { $0.flag == f } }
+    check(entry130("--host") == ServeOptionEntry(flag: "--host", group: "network",
+                                                  defaultText: "127.0.0.1"),
+          "s2b parse: --host (network, 127.0.0.1)")
+    check(entry130("--api-key") == ServeOptionEntry(flag: "--api-key", group: "network",
+                                                    env: "SPLASH_API_KEY", secret: true),
+          "s2b parse: --api-key (env SPLASH_API_KEY, secret)")
+    check(entry130("--kv-format") == ServeOptionEntry(flag: "--kv-format", group: "memory",
+                                                      choices: ["int8", "bf16"], defaultText: "int8"),
+          "s2b parse: --kv-format (choices int8/bf16, default int8)")
+    check(entry130("--allowed-host") == ServeOptionEntry(flag: "--allowed-host", group: "network", action: "append"),
+          "s2b parse: --allowed-host (append)")
+    check(entry130("--no-webui") == ServeOptionEntry(flag: "--no-webui", group: "network",
+                                                     action: "store_true", defaultText: "false"),
+          "s2b parse: --no-webui (store_true, false)")
+    check(entry130("--max-request-size")?.defaultText == "DEFAULT_MAX_REQUEST_BYTES",
+          "s2b parse: symbolic defaults stay verbatim (DEFAULT_MAX_REQUEST_BYTES)")
+    check(entry130("--queue-size")?.defaultText == "DEFAULT_QUEUE_SIZE",
+          "s2b parse: symbolic defaults stay verbatim (DEFAULT_QUEUE_SIZE)")
+    check(entry130("--max-image-pixels")?.defaultText == "images.MAX_PIXELS",
+          "s2b parse: dotted symbolic default stays verbatim (images.MAX_PIXELS)")
+    check(entry130("--max-cache-disk")?.defaultText == "0", "s2b parse: --max-cache-disk default 0")
+    check(entry130("--idle-release")?.defaultText == nil, "s2b parse: None default -> nil")
+    check(entry130("--default-reasoning-effort")?.env == "SPLASH_DEFAULT_REASONING_EFFORT"
+          && entry130("--default-reasoning-effort")?.defaultText == nil,
+          "s2b parse: --default-reasoning-effort env, no default")
+
+    let r132 = parseServeOptions(fixtureServeOptions132)
+    check(r132.options.count == 26, "s2b parse: the 1.3.2 table yields 26 options")
+    check(r132.unrecognized.isEmpty, "s2b parse: no unrecognized blocks in the 1.3.2 table")
+    check(r132.options.map(\.flag) == [
+        "--host", "--allowed-host", "--allowed-origin", "--api-key", "--no-webui",
+        "--max-memory", "--max-context", "--kv-format", "--state-format", "--idle-release",
+        "--max-cache-disk", "--max-cache-disk-writes", "--persistent-cache", "--cache-dir",
+        "--served-model-name", "--announce-served-name", "--default-reasoning-effort",
+        "--thinking-token-budget", "--thinking-end-text", "--max-request-size",
+        "--max-image-pixels", "--request-timeout", "--queue-size", "--decode-share",
+        "--disable-ane", "--allow-idle-sleep",
+    ], "s2b parse: the 1.3.2 file order (the 4 new flags beside their relatives)")
+    func entry132(_ f: String) -> ServeOptionEntry? { r132.options.first { $0.flag == f } }
+    check(entry132("--state-format") == ServeOptionEntry(flag: "--state-format", group: "memory",
+                                                         choices: ["fp32", "bf16"], defaultText: "fp32"),
+          "s2b parse 1.3.2: --state-format (fp32/bf16, default fp32, memory)")
+    check(entry132("--max-cache-disk")?.defaultText == nil, "s2b parse 1.3.2: --max-cache-disk default None (auto)")
+    check(entry132("--max-cache-disk-writes") == ServeOptionEntry(flag: "--max-cache-disk-writes",
+                                                                  group: "cache", defaultText: "0"),
+          "s2b parse 1.3.2: --max-cache-disk-writes (cache, 0)")
+    check(entry132("--thinking-token-budget") == ServeOptionEntry(flag: "--thinking-token-budget",
+                                                                  group: "api",
+                                                                  env: "SPLASH_THINKING_TOKEN_BUDGET"),
+          "s2b parse 1.3.2: --thinking-token-budget env")
+    check(entry132("--thinking-end-text") == ServeOptionEntry(flag: "--thinking-end-text",
+                                                              group: "api",
+                                                              env: "SPLASH_THINKING_END_TEXT"),
+          "s2b parse 1.3.2: --thinking-end-text env")
+
+    // A mangled block (non-string first arg): the good blocks parse, the bad
+    // one is reported, not fatal.
+    let mangled = """
+    SERVE_OPTIONS = (
+        ServeOption(
+            42,
+            "cache",
+            dict(),
+        ),
+        ServeOption(
+            "--ok-flag",
+            "cache",
+            dict(default="1"),
+        ),
+    )
+    """
+    let rm = parseServeOptions(mangled)
+    check(rm.options.map(\.flag) == ["--ok-flag"] && rm.options[0].defaultText == "1",
+          "s2b parse: a mangled table keeps the parseable blocks")
+    check(rm.unrecognized.count == 1 && rm.unrecognized[0].contains("42"),
+          "s2b parse: the mangled block is reported with its bad token")
+
+    check(parseServeOptions("").options.isEmpty && parseServeOptions("").unrecognized.isEmpty,
+          "s2b parse: empty text -> empty report, no error")
+    check(parseServeOptions("def f(): pass\n").options.isEmpty
+          && parseServeOptions("def f(): pass\n").unrecognized.isEmpty,
+          "s2b parse: non-table text -> empty report, no error")
+    check(parseServeOptions("SERVE_OPTIONS = (\n").options.isEmpty,
+          "s2b parse: an unbalanced table -> empty report, no crash")
+}
+
+// 76. S2b: registryDiff (the D3 shared-scope diff) + registry_report on the tick.
+do {
+    let r130 = parseServeOptions(fixtureServeOptions130)
+    let r132 = parseServeOptions(fixtureServeOptions132)
+    let d130_130 = registryDiff(r130, contract: contract130, version: "1.3.0")
+    check(d130_130.inSync, "s2b diff: the 1.3.0 table matches the 1.3.0 contract (inSync)")
+    check(d130_130.version == "1.3.0", "s2b diff: the report carries the kit version")
+    let d130_131 = registryDiff(r130, contract: contract131, version: "1.3.1")
+    check(d130_131.inSync, "s2b diff: the shared table is 1.3.1-identical (inSync)")
+    let fourNew = ["--max-cache-disk-writes", "--state-format", "--thinking-end-text",
+                   "--thinking-token-budget"]
+    let d132_131 = registryDiff(r132, contract: contract131, version: "1.3.2")
+    check(!d132_131.inSync && d132_131.missingInContract == fourNew
+          && d132_131.missingInKit.isEmpty && d132_131.envSecretMismatches.isEmpty,
+          "s2b diff: 1.3.2 table vs the 1.3.1 contract -> exactly the 4 new flags, amber only")
+    let d130_132 = registryDiff(r130, contract: contract132, version: "1.3.0")
+    check(!d130_132.inSync && d130_132.missingInKit == fourNew
+          && d130_132.missingInContract.isEmpty,
+          "s2b diff: 1.3.0 table vs the 1.3.2 contract -> exactly the 4 flags missingInKit")
+    // Synthetic env drift: the registry stays the source of truth (silent correction).
+    let drifted = ServeOptionsReport(options: r130.options.map {
+        $0.flag == "--api-key"
+            ? ServeOptionEntry(flag: $0.flag, group: $0.group, env: "SPLASH_KEK",
+                               secret: $0.secret, action: $0.action, choices: $0.choices,
+                               defaultText: $0.defaultText)
+            : $0
+    })
+    let dDrift = registryDiff(drifted, contract: contract131, version: "1.3.1")
+    check(!dDrift.inSync && dDrift.envSecretMismatches.count == 1
+          && dDrift.envSecretMismatches[0].contains("--api-key")
+          && dDrift.envSecretMismatches[0].contains("SPLASH_KEK")
+          && dDrift.envSecretMismatches[0].contains("SPLASH_API_KEY"),
+          "s2b diff: an env drift is named (actual vs expected), !inSync")
+
+    // The tick: null when quiet, a condensed dict when out of sync, gate-stable.
+    let d = defaultConfig(home: "/home", now: now)
+    let pNil = configTickPayload(doc: d, loadError: nil, versionTooNew: false, activeInvalid: false,
+                                 firstRun: false, inFlight: 0, result: nil)
+    check(pNil["registry_report"] is NSNull, "s2b tick: nil report -> registry_report null")
+    let pSync = configTickPayload(doc: d, loadError: nil, versionTooNew: false, activeInvalid: false,
+                                  firstRun: false, inFlight: 0, result: nil, registryReport: d130_131)
+    check(pSync["registry_report"] is NSNull, "s2b tick: an inSync report -> null (known-good kits stay quiet)")
+    let pDrift = configTickPayload(doc: d, loadError: nil, versionTooNew: false, activeInvalid: false,
+                                   firstRun: false, inFlight: 0, result: nil, registryReport: d132_131)
+    let dd = pDrift["registry_report"] as? [String: Any]
+    check(dd != nil, "s2b tick: an out-of-sync report -> a condensed dict")
+    check(dd?["version"] as? String == "1.3.2", "s2b tick: the dict carries the kit version")
+    check((dd?["missing_in_contract"] as? [String]) == fourNew,
+          "s2b tick: missing_in_contract rides the tick")
+    check(dd?["missing_in_kit"] == nil && dd?["env_secret_mismatches"] == nil && dd?["unrecognized"] == nil,
+          "s2b tick: empty classifications are omitted")
+    let pDrift2 = configTickPayload(doc: d, loadError: nil, versionTooNew: false, activeInvalid: false,
+                                    firstRun: false, inFlight: 0, result: nil, registryReport: d132_131)
+    check(canonicalJSONString(JSONValue(any: pDrift)) == canonicalJSONString(JSONValue(any: pDrift2)),
+          "s2b tick change-gate: identical drift report -> identical canonical form")
+    check(canonicalJSONString(JSONValue(any: pDrift)) != canonicalJSONString(JSONValue(any: pNil)),
+          "s2b tick change-gate: drift vs null flips the gate")
+}
+
 print(failures == 0 ? "ALL TESTS PASSED" : "\(failures) TEST(S) FAILED")
 exit(failures == 0 ? 0 : 1)

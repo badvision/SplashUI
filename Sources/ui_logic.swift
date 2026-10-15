@@ -588,7 +588,8 @@ private let sharedOptions130_131: [OptionDef] = [
     OptionDef(flag: "--announce-served-name", key: "announce_served_name", kind: .bool, group: "api",
               defValue: "false", requires: ["served_model_name"]),
     OptionDef(flag: "--default-reasoning-effort", key: "reasoning_effort", kind: .value, group: "api",
-              choices: ["none", "minimal", "low", "medium", "high", "xhigh", "max"]),
+              choices: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+              envVar: "SPLASH_DEFAULT_REASONING_EFFORT"),
     OptionDef(flag: "--max-request-size", key: "max_request_size", kind: .value, group: "requests",
               defValue: "128M"),
     OptionDef(flag: "--max-image-pixels", key: "max_image_pixels", kind: .value, group: "requests",
@@ -639,9 +640,12 @@ private let sharedOptions132: [OptionDef] = [
     OptionDef(flag: "--announce-served-name", key: "announce_served_name", kind: .bool, group: "api",
               defValue: "false", requires: ["served_model_name"]),
     OptionDef(flag: "--default-reasoning-effort", key: "reasoning_effort", kind: .value, group: "api",
-              choices: ["none", "minimal", "low", "medium", "high", "xhigh", "max"]),
-    OptionDef(flag: "--thinking-token-budget", key: "thinking_token_budget", kind: .value, group: "api"),
-    OptionDef(flag: "--thinking-end-text", key: "thinking_end_text", kind: .value, group: "api"),
+              choices: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+              envVar: "SPLASH_DEFAULT_REASONING_EFFORT"),
+    OptionDef(flag: "--thinking-token-budget", key: "thinking_token_budget", kind: .value, group: "api",
+              envVar: "SPLASH_THINKING_TOKEN_BUDGET"),
+    OptionDef(flag: "--thinking-end-text", key: "thinking_end_text", kind: .value, group: "api",
+              envVar: "SPLASH_THINKING_END_TEXT"),
     OptionDef(flag: "--max-request-size", key: "max_request_size", kind: .value, group: "requests",
               defValue: "128M"),
     OptionDef(flag: "--max-image-pixels", key: "max_image_pixels", kind: .value, group: "requests",
@@ -740,6 +744,368 @@ public func contractFor(_ version: String?, registry: LaunchRegistry) -> (contra
     precondition(latest != nil, "a launch registry must carry at least one contract")
     return (latest!, true)
 }
+
+// MARK: - serve_options.py assist (D3, S2b)
+
+/// One `ServeOption` of a kit's server/serve_options.py, as written in the
+/// file. The assist is READ-ONLY (D3: the registry stays the source of truth):
+/// this type and `ServeOptionsReport` carry no argv and never emit one, and
+/// nothing here mutates a `VersionContract`.
+public struct ServeOptionEntry: Equatable {
+    public let flag: String        // "--api-key"
+    public let group: String?      // the help group key ("network")
+    public let env: String?        // the `environment=` kwarg (SPLASH_API_KEY)
+    public let secret: Bool        // the `secret=` kwarg
+    public let action: String?     // "append" | "store_true" | nil (takes a value)
+    public let choices: [String]?  // the dict's choices, as written (strings)
+    /// The dict's `default` as written: a string literal unwrapped, a symbolic
+    /// expression (DEFAULT_QUEUE_SIZE, images.MAX_PIXELS) verbatim, nil = None
+    /// / absent. No interpreter — the diff compares env/secret, not defaults.
+    public let defaultText: String?
+    public init(flag: String, group: String? = nil, env: String? = nil,
+                secret: Bool = false, action: String? = nil,
+                choices: [String]? = nil, defaultText: String? = nil) {
+        self.flag = flag
+        self.group = group
+        self.env = env
+        self.secret = secret
+        self.action = action
+        self.choices = choices
+        self.defaultText = defaultText
+    }
+}
+
+/// The parsed SERVE_OPTIONS table of one serve_options.py (file order).
+/// `unrecognized` = the text of a `ServeOption(` block that does not parse
+/// (a mangled first argument): reported, never fatal — the fallback rule of
+/// the design degrades to a read-only raw flag list, unaffected.
+public struct ServeOptionsReport: Equatable {
+    public let options: [ServeOptionEntry]
+    public let unrecognized: [String]
+    public init(options: [ServeOptionEntry], unrecognized: [String] = []) {
+        self.options = options
+        self.unrecognized = unrecognized
+    }
+}
+
+/// The read-only diff of a kit's SERVE_OPTIONS table against the registry's
+/// shared-scope flags for its contract (D3 validation):
+/// - `missingInContract`: flags the file declares that the contract has no
+///   mapping for — the amber "new flag detected" (NEVER auto-emitted to argv;
+///   a human authors the next contract, S7 shows the report).
+/// - `missingInKit`: flags the contract maps that the file lacks — the red
+///   validation warning (the kit drifts from what the app would pass).
+/// - `envSecretMismatches`: per-flag env/secret divergence — a SILENT
+///   correction: the registry stays the source of truth and the launch
+///   proceeds on its env/secret mapping.
+/// - `unrecognized`: the parse report's mangled blocks, carried through.
+public struct RegistryReport: Equatable {
+    public let version: String?
+    public let missingInContract: [String]
+    public let missingInKit: [String]
+    public let envSecretMismatches: [String]
+    public let unrecognized: [String]
+    public init(version: String? = nil, missingInContract: [String] = [],
+                missingInKit: [String] = [], envSecretMismatches: [String] = [],
+                unrecognized: [String] = []) {
+        self.version = version
+        self.missingInContract = missingInContract
+        self.missingInKit = missingInKit
+        self.envSecretMismatches = envSecretMismatches
+        self.unrecognized = unrecognized
+    }
+    public var inSync: Bool {
+        missingInContract.isEmpty && missingInKit.isEmpty
+            && envSecretMismatches.isEmpty && unrecognized.isEmpty
+    }
+}
+
+// MARK: - the small Python lexer (strings, comments, brackets)
+
+/// The index just past the string literal opening at `s[i]` (a quote).
+/// Skips triple-quoted variants and backslash escapes; an unterminated
+/// single-quoted line string stops at the newline (Python itself rejects it).
+private func skipString(_ s: [Character], from i: Int) -> Int {
+    let q = s[i]
+    if i + 2 < s.count, s[i+1] == q, s[i+2] == q {
+        var j = i + 3
+        while j < s.count {
+            if s[j] == "\\" { j += 2; continue }
+            if s[j] == q, j + 2 < s.count, s[j+1] == q, s[j+2] == q { return j + 3 }
+            j += 1
+        }
+        return s.count
+    }
+    var j = i + 1
+    while j < s.count {
+        if s[j] == "\\" { j += 2; continue }
+        if s[j] == q { return j + 1 }
+        if s[j] == "\n" { return j }
+        j += 1
+    }
+    return s.count
+}
+
+/// The index of the bracket closing the one opening at `s[open]` (a `(`),
+/// skipping string literals and `#` line comments; nil when unbalanced.
+/// O(n) — fine for a ~20KB file read once per resolution.
+private func matchBracket(_ s: [Character], open: Int) -> Int? {
+    let openC = s[open]
+    let closeC: Character = openC == "(" ? ")" : (openC == "[" ? "]" : "}")
+    var depth = 0
+    var i = open
+    while i < s.count {
+        let c = s[i]
+        if c == "\"" || c == "'" { i = skipString(s, from: i); continue }
+        if c == "#" { while i < s.count && s[i] != "\n" { i += 1 }; continue }
+        if c == "(" || c == "[" || c == "{" { depth += 1 }
+        else if c == ")" || c == "]" || c == "}" {
+            depth -= 1
+            if depth == 0 { return c == closeC ? i : nil }
+            if depth < 0 { return nil }
+        }
+        i += 1
+    }
+    return nil
+}
+
+/// The top-level comma-separated parts of `s` (strings/brackets/comments
+/// respected), trimmed; trailing-comma empty parts are dropped.
+private func topLevelParts(_ s: [Character]) -> [String] {
+    var parts: [String] = []
+    var depth = 0
+    var start = 0
+    var i = 0
+    while i < s.count {
+        let c = s[i]
+        if c == "\"" || c == "'" { i = skipString(s, from: i); continue }
+        if c == "#" { while i < s.count && s[i] != "\n" { i += 1 }; continue }
+        if c == "(" || c == "[" || c == "{" { depth += 1 }
+        else if c == ")" || c == "]" || c == "}" { depth -= 1 }
+        else if c == "," && depth == 0 {
+            parts.append(String(s[start..<i]).trimmingCharacters(in: .whitespacesAndNewlines))
+            start = i + 1
+        }
+        i += 1
+    }
+    let tail = String(s[start...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    if !tail.isEmpty { parts.append(tail) }
+    return parts
+}
+
+/// A single- or double-quoted Python string literal, unwrapped (basic
+/// backslash escapes resolved); nil when the text is not a string literal.
+private func pyStringLiteral(_ text: String) -> String? {
+    guard let first = text.first, first == "\"" || first == "'",
+          text.count >= 2 else { return nil }
+    let q = first
+    let body = Array(text)
+    var j = 1
+    while j < body.count {
+        if body[j] == "\\" { j += 2; continue }
+        if body[j] == q { break }
+        if body[j] == "\n" { return nil }
+        j += 1
+    }
+    guard j < body.count, body[j] == q else { return nil }
+    var out = ""
+    var k = 1
+    while k < j {
+        if body[k] == "\\" && k + 1 < j {
+            let esc = body[k+1]
+            switch esc {
+            case "n": out.append("\n")
+            case "t": out.append("\t")
+            case "\\": out.append("\\")
+            case "\"": out.append("\"")
+            case "'": out.append("'")
+            default: out.append(esc)
+            }
+            k += 2
+        } else {
+            out.append(body[k])
+            k += 1
+        }
+    }
+    return out
+}
+
+/// A tuple/list of string literals, unwrapped; nil when it is not such a
+/// literal (e.g. a symbolic expression — left as no choices).
+private func pyStringTuple(_ text: String) -> [String]? {
+    guard text.first == "(" || text.first == "[" else { return nil }
+    let parts = topLevelParts(Array(text.dropFirst().dropLast()))
+    var values: [String] = []
+    for p in parts {
+        guard let v = pyStringLiteral(p) else { return nil }
+        values.append(v)
+    }
+    return values
+}
+
+/// The top-level `key=value` pairs of a Python `dict(...)` call: the inner
+/// paren pair is bracketed, and each part splits on its first top-level '='
+/// (values may hold ':' inside strings). Empty pairs are skipped.
+private func pyDictPairs(_ text: String) -> [(key: String, value: String)] {
+    var pairs: [(key: String, value: String)] = []
+    guard text.hasPrefix("dict(") else { return pairs }
+    let s = Array(text)
+    guard let close = matchBracket(s, open: 4) else { return pairs }
+    for part in topLevelParts(Array(s[5..<close])) {
+        let p = Array(part)
+        var depth = 0
+        var cut = -1
+        var i = 0
+        while i < p.count {
+            let c = p[i]
+            if c == "\"" || c == "'" { i = skipString(p, from: i); continue }
+            if c == "(" || c == "[" || c == "{" { depth += 1 }
+            else if c == ")" || c == "]" || c == "}" { depth -= 1 }
+            else if c == "=" && depth == 0 { cut = i; break }
+            i += 1
+        }
+        guard cut > 0 else { continue }
+        let key = String(p[0..<cut]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = String(p[(cut+1)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !key.isEmpty { pairs.append((key, value)) }
+    }
+    return pairs
+}
+
+/// The dict's `default` as written: a string literal unwrapped, `None`/empty
+/// as nil, anything else (DEFAULT_QUEUE_SIZE, images.MAX_PIXELS, 0) verbatim.
+private func pyDefaultText(_ value: String) -> String? {
+    let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    if v.isEmpty || v == "None" || v == "[]" || v == "()" { return nil }
+    if v == "True" { return "true" }
+    if v == "False" { return "false" }
+    if let s = pyStringLiteral(v) { return s }
+    return v
+}
+
+/// One `ServeOption(...)` argument list (between the parens): the flag string
+/// first, the group string second, the `dict(...)` fields, and the top-level
+/// `environment=` / `secret=` kwargs. nil when the first argument is not a
+/// string literal (a mangled block — the caller reports it).
+private func parseServeOptionBlock(_ args: String) -> ServeOptionEntry? {
+    let parts = topLevelParts(Array(args))
+    guard !parts.isEmpty, let flag = pyStringLiteral(parts[0]) else { return nil }
+    var group: String?
+    var env: String?
+    var secret = false
+    var action: String?
+    var choices: [String]?
+    var defaultText: String?
+    for (idx, part) in parts.enumerated() {
+        if idx == 1 { group = pyStringLiteral(part); continue }
+        if part.hasPrefix("dict(") {
+            for (key, value) in pyDictPairs(part) {
+                switch key {
+                case "default": defaultText = pyDefaultText(value)
+                case "choices": choices = pyStringTuple(value)
+                case "action": action = pyStringLiteral(value)
+                default: break   // type/metavar/help: not needed by the diff
+                }
+            }
+        } else if part.hasPrefix("environment=") {
+            env = pyStringLiteral(String(part.dropFirst("environment=".count)))
+        } else if part.hasPrefix("secret=") {
+            secret = String(part.dropFirst("secret=".count)) == "True"
+        }
+    }
+    return ServeOptionEntry(flag: flag, group: group, env: env, secret: secret,
+                            action: action, choices: choices, defaultText: defaultText)
+}
+
+/// The index of `needle` in `s[from..<until]` (a plain manual scan — O(n·m),
+/// fine for a ~20KB file read once per resolution); nil when absent.
+private func indexOfNeedle(_ s: [Character], _ needle: [Character],
+                           from: Int, until: Int) -> Int? {
+    guard needle.count <= until else { return nil }
+    var i = from
+    while i + needle.count <= until {
+        var ok = true
+        var k = 0
+        while k < needle.count {
+            if s[i + k] != needle[k] { ok = false; break }
+            k += 1
+        }
+        if ok { return i }
+        i += 1
+    }
+    return nil
+}
+
+/// Parse a kit's server/serve_options.py for its shared SERVE_OPTIONS table.
+/// Finds the `"SERVE_OPTIONS = ("` marker (manual scan — O(n·m) is fine for
+/// one ~20KB read per resolution), brackets its tuple, and reads each
+/// `ServeOption(` block. No marker / empty / non-table text -> an empty
+/// report, never an error (the assist must not take the panel down).
+public func parseServeOptions(_ text: String) -> ServeOptionsReport {
+    let s = Array(text)
+    let marker = Array("SERVE_OPTIONS = (")
+    guard let m = indexOfNeedle(s, marker, from: 0, until: s.count) else {
+        return ServeOptionsReport(options: [])
+    }
+    let open = m + marker.count - 1            // the "("
+    guard let close = matchBracket(s, open: open), close > open else {
+        return ServeOptionsReport(options: [])
+    }
+    var options: [ServeOptionEntry] = []
+    var unrecognized: [String] = []
+    let blockName = Array("ServeOption(")
+    var i = open + 1
+    while i < close {
+        guard let found = indexOfNeedle(s, blockName, from: i, until: close) else { break }
+        let paren = found + blockName.count - 1   // the block's "("
+        guard let blockClose = matchBracket(s, open: paren), blockClose > paren,
+              blockClose <= close else { break }
+        let inner = String(s[(paren + 1)..<blockClose])
+        if let entry = parseServeOptionBlock(inner) {
+            options.append(entry)
+        } else {
+            // The mangled block's first top-level argument (its bad token),
+            // so the report names WHAT was not understood.
+            let firstArg = topLevelParts(Array(s[(paren + 1)..<blockClose])).first ?? "ServeOption"
+            unrecognized.append(firstArg)
+        }
+        i = blockClose + 1
+    }
+    return ServeOptionsReport(options: options, unrecognized: unrecognized)
+}
+
+/// The D3 shared-scope diff: the file's table against the contract's shared
+/// flags — ALL `OptionDef`s EXCEPT group "model" (declared by the
+/// launcher/module parsers, not the shared table) EXCEPT `--port` (each
+/// command's own parser). The model-axis and `--port` flags are intentionally
+/// outside the diff's scope; a real table (22 entries) vs a real contract
+/// (23 shared) is therefore `inSync`, and a 1.3.2 table vs the 1.3.1 contract
+/// is exactly the 4 new flags in `missingInContract`. Read-only; the result
+/// carries no argv and never mutates the contract.
+public func registryDiff(_ report: ServeOptionsReport,
+                         contract: VersionContract,
+                         version: String?) -> RegistryReport {
+    let shared = contract.options.filter { $0.group != "model" && $0.flag != "--port" }
+    var inFile: [String: ServeOptionEntry] = [:]
+    for e in report.options { if inFile[e.flag] == nil { inFile[e.flag] = e } }
+    let sharedFlags = Set(shared.map(\.flag))
+    let missingInContract = Set(inFile.keys).subtracting(sharedFlags).sorted()
+    let missingInKit = sharedFlags.subtracting(Set(inFile.keys)).sorted()
+    var mismatches: [String] = []
+    for opt in shared.sorted(by: { $0.flag < $1.flag }) {
+        guard let entry = inFile[opt.flag] else { continue }
+        if entry.env != opt.envVar {
+            mismatches.append("\(opt.flag): env \(entry.env ?? "none") expected \(opt.envVar ?? "none")")
+        }
+        if entry.secret != opt.secret {
+            mismatches.append("\(opt.flag): secret \(entry.secret ? "true" : "false") expected \(opt.secret ? "true" : "false")")
+        }
+    }
+    return RegistryReport(version: version, missingInContract: missingInContract,
+                          missingInKit: missingInKit, envSecretMismatches: mismatches,
+                          unrecognized: report.unrecognized)
+}
+
 
 /// A buildArgv diagnostic. `.warning` = an option was dropped for a `requires`
 /// violation (D4: warn, never block — the launch proceeds; the engine would
@@ -2090,7 +2456,8 @@ public func maskSecret(_ s: String) -> String {
 /// the config store (not yet the launch plan); the fields later stories own ride
 /// along as nulls so the change-gate stays stable until they fill in:
 /// engine.resolved/version/tried/valid/error (S3), mapping_fallback/mapping_used
-/// (S2a), registry_report (S2b/S4), first_run (S1b), restart_required/reason (S3/S4),
+/// (S2a), registry_report (S2b: null while the kit is inSync, a condensed
+/// dict when it drifts), first_run (S1b), restart_required/reason (S3/S4),
 /// picked (S5). The raw api_key never appears — only its mask (D6).
 public func configTickPayload(
     doc: ConfigDoc,
@@ -2099,7 +2466,8 @@ public func configTickPayload(
     activeInvalid: Bool,
     firstRun: Bool,
     inFlight: Int,
-    result: ConfigSaveResult?
+    result: ConfigSaveResult?,
+    registryReport: RegistryReport? = nil
 ) -> [String: Any] {
     let engine: [String: Any] = [
         "mode": doc.globals.engine.mode,
@@ -2136,7 +2504,7 @@ public func configTickPayload(
         "active_invalid": activeInvalid,
         "mapping_fallback": NSNull(),
         "mapping_used": NSNull(),
-        "registry_report": NSNull(),
+        "registry_report": registryTickValue(registryReport),
         "first_run": firstRun,
         "restart_required": NSNull(),
         "restart_reason": NSNull(),
@@ -2150,6 +2518,20 @@ public func configTickPayload(
         out["reserved"] = doc.reserved.mapValues { $0.any }
     }
     return out
+}
+
+/// The tick's `registry_report` value (S2b): NSNull when there is no report or
+/// the kit is inSync (known-good kits stay quiet — no churn on the change
+/// gate); otherwise the condensed dict, with EMPTY classifications omitted,
+/// so a given report always renders identically (the gate is stable).
+private func registryTickValue(_ report: RegistryReport?) -> Any {
+    guard let r = report, !r.inSync else { return NSNull() }
+    var d: [String: Any] = ["version": r.version ?? NSNull()]
+    if !r.missingInContract.isEmpty { d["missing_in_contract"] = r.missingInContract as Any }
+    if !r.missingInKit.isEmpty { d["missing_in_kit"] = r.missingInKit as Any }
+    if !r.envSecretMismatches.isEmpty { d["env_secret_mismatches"] = r.envSecretMismatches as Any }
+    if !r.unrecognized.isEmpty { d["unrecognized"] = r.unrecognized as Any }
+    return d
 }
 // MARK: - Real-FS runtime detection (moved from main.swift)
 
