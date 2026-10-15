@@ -27,8 +27,8 @@ const fixture = {
 };
 
 // This bridge fixture models D13; Swift tests + live smoke prove the real producer.
-const signature = doc => JSON.stringify([doc.globals.engine, doc.globals.port,
-  doc.globals.api_key, doc.profiles[0].model, doc.profiles[0].options]);
+const signature = doc => { const p = doc.profiles.find(p => p.id === doc.active_profile) || doc.profiles[0]; return JSON.stringify([doc.globals.engine, doc.globals.port,
+  doc.globals.api_key, p?.id, p?.model, p?.options]); };
 const results = [];
 function check(name, body) {
   try { body(); results.push({ assertion: name, pass: true }); }
@@ -60,6 +60,8 @@ function panel({ firstRun = false } = {}) {
         scanning: false, models: f.id === 'lmstudio' ? [{ id: 'org/model', source: f.id, dir: '/fixture/models/org/model', kind: 'package', eligibility: 'runnable', drafter: 'PACKAGE — baked in' }, { id: 'org/assembly', source: f.id, dir: '/fixture/models/org/assembly', kind: 'assembly', eligibility: 'unrunnable', eligibility_reason: 'missing draft/config.json', drafter: 'MISSING — draft/config.json required' }] : [] })),
       api_key_masked: 'ui••••••me', first_run: firstRun && !doc.first_run_shown,
       profiles: doc.profiles.map(p => ({ ...p, eligibility: p.model.source === 'none' ? 'unrunnable' : 'runnable', drafter: 'PACKAGE — baked in' })), active_profile: doc.active_profile,
+      in_flight: 3,
+      option_defs: [{ key: 'kv_format', flag: '--kv-format', kind: 'value', group: 'memory', default: 'int8', choices: ['int8', 'bf16'], requires: [] }, { key: 'cache_dir', flag: '--cache-dir', kind: 'value', group: 'cache', default: null, requires: ['persistent_cache'] }],
       restart_required: signature(doc) !== baseline, result: null, ...overrides
     }, ...extra
   });
@@ -69,12 +71,15 @@ function panel({ firstRun = false } = {}) {
       const m = clone(message); commands.push(m);
       replies.push(() => {
         if (m.cmd === 'config.get') w.__cfgGet(clone(doc));
-        if (m.cmd === 'config.validate') w.__cfgValidate({ ok: true, errors: [], warnings: [] });
-        if (m.cmd === 'config.save') {
+        if (m.cmd === 'config.validate') {
+          const invalid = m.doc.profiles.find(p => p.options.kv_format && !['int8', 'bf16'].includes(p.options.kv_format));
+          w.__cfgValidate({ ok: !invalid, errors: invalid ? [`profile ${invalid.id} option kv_format: invalid syntax`] : [], warnings: [], validation_id: m.validation_id });
+        }
+        if (m.cmd === 'config.save' || m.cmd === 'config.activate') {
           const names = m.doc.profiles.map(p => p.name);
           const duplicate = new Set(names).size !== names.length;
           const result = { ok: !rejectSave && !duplicate, errors: rejectSave ? ['rejected fixture'] : duplicate ? ['duplicate profile name(s)'] : [], warnings: [] };
-          if (result.ok) doc = clone(m.doc);
+          if (result.ok) { doc = clone(m.doc); if (m.cmd === 'config.activate') { doc.active_profile = m.profileId; doc.profiles.find(p => p.id === m.profileId).meta.last_used_at = new Date().toISOString(); } }
           w.__cfgSave(result); tick({ result });
         }
         if (m.cmd === 'config.firstRunDone') doc.first_run_shown = true;
@@ -287,6 +292,39 @@ try {
   while (w.__test.doc().profiles.length) { action('edit', w.__test.doc().profiles[0].id); $('btnProfileRemove').click(); }
   check('empty list retains Add and hides profile editor', () => assert.ok($('btnProfileAdd') && $('profileEditor').hidden && rows().length === 0));
 } finally { profiles.close(); }
+
+const optionsPanel = panel();
+try {
+  const { w, $, change, flushTimers, drain, tick } = optionsPanel;
+  w.document.querySelector('[data-profile-act="edit"][data-id="p2"]').click();
+  check('versioned KV cache option renders', () => assert.ok($('option-kv_format')));
+  check('all option groups initially collapsed', () => assert.ok([...w.document.querySelectorAll('.option-group')].length > 0 && [...w.document.querySelectorAll('.option-group')].every(g => !g.classList.contains('open'))));
+  check('absent version option hidden', () => assert.equal($('option-state_format'), null));
+  check('requires unmet is disabled with actionable tip', () => assert.ok($('option-cache_dir').disabled && $('option-cache_dir').closest('[data-tip]').dataset.tip.includes('persistent_cache')));
+  const bars = [...w.document.querySelectorAll('.option-bar')]; bars[0].click();
+  check('option group toggles independently with transition', () => assert.ok(bars[0].parentElement.classList.contains('open') && !bars[1].parentElement.classList.contains('open') && html.includes('transition:max-height .45s')));
+  change('option-kv_format', 'invalid'); flushTimers();
+  check('invalid syntax blocks commit and marks field', () => assert.ok($('btnProfilesSave').disabled && $('option-kv_format').getAttribute('aria-invalid') === 'true'));
+  change('option-kv_format', 'bf16');
+  check('option edit reflected in full commit candidate', () => assert.equal(w.__test.doc().profiles[1].options.kv_format, 'bf16'));
+  check('group summary counts non-default edited values', () => assert.equal($('option-kv_format').closest('.option-group').querySelector('.option-count').textContent, '1 SET'));
+  check('commit disabled until debounce validation', () => assert.equal($('btnProfilesSave').disabled, true));
+  flushTimers();
+  check('valid dirty commit enabled', () => assert.equal($('btnProfilesSave').disabled, false));
+  $('btnProfileActivate').click(); drain();
+  check('activation commits draft and active id together', () => assert.ok(optionsPanel.doc().active_profile === 'p2' && optionsPanel.doc().profiles[1].options.kv_format === 'bf16'));
+  check('activation stamps last used and moves ACTIVE cap', () => assert.ok(optionsPanel.doc().profiles[1].meta.last_used_at && w.document.querySelectorAll('#profileList .profile-row')[1].textContent.includes('ACTIVE')));
+  check('activation immediately prompts with in-flight count', () => assert.ok(!$('profileRestartPrompt').hidden && $('profileRestartPrompt').textContent.includes('3 in-flight')));
+  check('activation changed plan requires restart without restarting', () => assert.ok($('btnRestart').textContent === 'RESTART TO APPLY' && !optionsPanel.commands.some(c => c.cmd === 'restart')));
+  $('btnProfileRestart').click();
+  check('explicit restart confirmation uses existing bridge', () => assert.equal(optionsPanel.commands.at(-1).cmd, 'restart'));
+  w.document.querySelector('[data-profile-act="edit"][data-id="p1"]').click();
+  $('btnProfileActivate').click(); drain();
+  check('reverting activation clears restart prompt', () => assert.ok(optionsPanel.doc().active_profile === 'p1' && $('profileRestartPrompt').hidden && $('btnRestart').textContent === 'Restart'));
+  tick({ option_defs: [{ key: 'state_format', flag: '--state-format', kind: 'value', group: 'memory', default: 'fp32', choices: ['fp32', 'bf16'], requires: [] }] });
+  check('runtime contract change refreshes visible options', () => assert.ok($('option-state_format') && !$('option-kv_format')));
+  check('downgrade visibility never drops saved option values', () => assert.equal(w.__test.doc().profiles[1].options.kv_format, 'bf16'));
+} finally { optionsPanel.close(); }
 
 const native = readFileSync(new URL('../../Sources/main.swift', import.meta.url), 'utf8');
 check('native menu exposes ordered status/settings/separator/quit actions', () => {

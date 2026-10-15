@@ -133,6 +133,16 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 #pidPill { display: inline-flex; }
 #pidPill .h, #envPill { background: #888; color: #000; font-family: var(--display); letter-spacing: .08em; min-height: 28px; padding: 6px 10px 2px; font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; text-transform: uppercase; }
 #pidLabel { border-radius: 14px 0 0 14px; }
+.option-bar { display:flex; justify-content:space-between; width:100%; background:#4455ff; color:var(--white); border-radius:14px 0 0 14px; padding:4px 10px; font-size:14px; }
+.option-group { margin:8px 0; }
+.option-body { max-height:0; overflow:hidden; transition:max-height .45s ease; }
+.option-group.open > .option-body { max-height:1600px; }
+.option-body .frow { margin:6px 0; }
+.option-body label { flex:1; font-size:11px; }
+.option-body input { width:140px; }
+.option-body input[aria-invalid="true"] { border-bottom:1px solid var(--red); }
+.option-body [disabled], .option-body .unmet { color:var(--gray-dim); }
+#profileRestartPrompt { margin:8px 0; padding:8px; border-left:6px solid var(--peach); font-size:11px; }
 #pidNum { border-radius: 0 14px 14px 0; margin-left: 3px; }
 #envPill { border-radius: 14px; margin-left: 5px; }
 #tip { position: fixed; display: none; z-index: 10; pointer-events: none;
@@ -292,12 +302,12 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
     <div class="profile-chip" id="profileDrafter"></div>
     <div class="frow" id="profileDraftRow"><label for="profileDraftModel">Draft override</label><input type="text" id="profileDraftModel" placeholder="HF repo or local directory" data-tip="1.3.1+ --draft-model; family comes from the model config, never the repo name."></div>
     <div class="profile-meta" id="profileLaunchMeta"></div>
-    <!-- S6b owns per-version option groups here; selected profile = cfSelectedProfile(). -->
     <div id="profileDetailSlot"></div>
-    <!-- S6b activation commits cfBuildDoc() before config.activate; selection alone is not activation. -->
-    <div id="profileActivationSlot"></div>
-    <button class="mini" id="btnProfilesSave">Save configurations</button>
+    <button class="mini" id="btnProfilesSave">Commit</button>
   </div>
+    <div id="profileActivationSlot"><button class="mini" id="btnProfileActivate">Activate profile</button>
+      <div id="profileRestartPrompt" hidden><span id="profileRestartText"></span><button class="mini" id="btnProfileRestart">Confirm restart</button></div>
+    </div>
 </section>
 </div>
 </main>
@@ -499,10 +509,16 @@ const cmd = (c, args) => { try { window.webkit.messageHandlers.cmd.postMessage(O
 let cfgDoc = null, cfgSaveResult = null, cfgValidateResult = null;
 window.__cfgGet = d => { cfgDoc = d; cfInit(d); };
 window.__cfgSave = r => { cfgSaveResult = r; };
-window.__cfgValidate = r => { cfgValidateResult = r; CF.verdicts = r.profiles || []; if (!r.ok) cfMsg((r.errors || []).join("; "), "err"); cfRenderProfiles(); };
+window.__cfgValidate = r => {
+  if (r.validation_id != null && r.validation_id !== CF.validationID) return;
+  cfgValidateResult = r; CF.validated = CF.validationBaseline || JSON.stringify(CF.draft); CF.verdicts = r.profiles || [];
+  if (r.option_defs) CF.optionDefs = r.option_defs;
+  if (!r.ok) cfMsg((r.errors || []).join("; "), "err");
+  cfRenderProfiles();
+};
 $("btnStart").onclick = () => cmd("start");
 $("btnStop").onclick = () => cmd("stop");
-$("btnRestart").onclick = () => cmd("restart");
+$("btnRestart").onclick = () => { if (S.cfg && S.cfg.restart_required === true) { showView("settings"); cfRenderProfiles(); $("profileRestartPrompt").scrollIntoView(); } else cmd("restart"); };
 
 // ---- S5: global settings (channel 06) + first-run modal (D10) ----
 const CF = { doc: null, draft: null, baseline: "", validateTimer: null, firstRunShown: false };
@@ -579,10 +595,12 @@ function cfMsg(text, kind) {
 
 function cfValidate() {
   if (!cfDirty()) { cfMsg("", ""); return; }
-  cmd("config.validate", { doc: cfBuildDoc() });
-  // The reply lands as cfg.result on the next tick.
+  CF.validationBaseline = JSON.stringify(CF.draft);
+  cmd("config.validate", { doc: cfBuildDoc(), validation_id: CF.validationID });
 }
 function cfDebouncedValidate() {
+  CF.validated = null; cfgValidateResult = null;
+  CF.validationID = (CF.validationID || 0) + 1; CF.validationBaseline = null;
   if (CF.validateTimer) clearTimeout(CF.validateTimer);
   CF.validateTimer = setTimeout(cfValidate, 400);
 }
@@ -602,6 +620,7 @@ function cfInit(doc) {
   window.__cfgReady = true;
   CF.doc = doc;
   CF.draft = cfDraft(doc);
+  CF.profileId = doc.active_profile || doc.profiles[0]?.id;
   CF.baseline = JSON.stringify(CF.draft);
   cfSyncForm();
   $("cfgKey").value = "· · · · · · · ·";  // masked; the raw key never renders
@@ -625,9 +644,15 @@ function cfRender() {
     CF.saving = false;
     CF.doc = CF.pendingDoc;
     CF.baseline = CF.pendingBaseline;
+    if (CF.activating) {
+      CF.draft.activeProfile = cfg.active_profile;
+      CF.pendingDoc.active_profile = cfg.active_profile;
+      CF.pendingDoc.profiles.forEach(p => { p.meta = cfProfileMeta(p); });
+      CF.doc = CF.pendingDoc; CF.baseline = JSON.stringify(CF.draft); CF.activating = false;
+    }
     cfMsg("Saved — " + (cfg.restart_required === true ? "restart to apply" : "applied on next launch"), "ok");
   } else if (CF.saving && cfg.result && cfg.result !== CF.previousResult && cfg.result.ok === false) {
-    CF.saving = false;
+    CF.saving = false; CF.activating = false;
     cfMsg((cfg.result.errors || []).join("; "), "err");
   }
   // A browse pick is consumed on exactly one tick.
@@ -694,18 +719,26 @@ function cfRenderProfiles() {
   const esc = cfEscape;
   const list = CF.draft.profiles.map(p => { const meta = cfProfileMeta(p); return '<div class="profile-row"><div class="frow"><button class="mini" data-profile-act="edit" data-id="'+esc(p.id)+'">'+esc(p.name)+'</button>'+(p.id === CF.draft.activeProfile ? '<span class="profile-cap runnable">ACTIVE</span>' : '')+'</div><div class="profile-chip">'+esc(p.model.id || "MODEL UNSET")+' · '+esc(p.model.source)+'</div>'+cfVerdict(cfProfileFacts(p))+'<div class="profile-meta">Created '+esc(meta.created_at || "—")+' · Last used '+esc(meta.last_used_at || "Never")+'</div></div>'; }).join("");
   if ($("profileList").innerHTML !== list) $("profileList").innerHTML = list;
+  $("profileRestartPrompt").hidden = S.cfg.restart_required !== true;
+  $("profileRestartText").textContent = "RESTART REQUIRED — " + (S.cfg.in_flight || 0) + " in-flight requests will be interrupted. Restart now? ";
+  $("btnProfileActivate").hidden = !cfSelectedProfile();
   const p = cfSelectedProfile();
   $("profileEditor").hidden = !p;
   if (!p) return;
   if (document.activeElement !== $("profileName") && $("profileName").value !== p.name) $("profileName").value = p.name;
   const override = p.options.draft_model || "";
   if (document.activeElement !== $("profileDraftModel") && $("profileDraftModel").value !== override) $("profileDraftModel").value = override;
-  $("profileDraftRow").hidden = S.cfg.engine.version === "1.3.0";
+  $("profileDraftRow").hidden = !cfOptionDefs().some(o => o.key === "draft_model");
   $("profileDrafter").textContent = "Drafter · " + (cfProfileFacts(p).drafter || "UNKNOWN — engine decides at load");
   const meta = cfProfileMeta(p);
   $("profileLaunchMeta").textContent = "Last successful launch · " + (meta.last_successful_launch || "Never") + " · Last failure · " + (meta.last_failure ? meta.last_failure.at + " — " + meta.last_failure.message : "None");
   const models = cfModels().map((m, i) => '<button class="profile-model" data-model-index="'+i+'">'+esc(m.id)+' · '+esc(m.source)+' · '+esc(m.kind)+' '+cfVerdict(m)+'</button>').join("") || '<div class="profile-meta">No scanned models — add a model folder or Scan above.</div>';
   if ($("profileModels").innerHTML !== models) $("profileModels").innerHTML = models;
+  cfRenderOptions(p);
+  const validated = CF.validated === JSON.stringify(CF.draft) && cfgValidateResult && cfgValidateResult.ok;
+  $("btnProfilesSave").disabled = !cfDirty() || !validated || CF.saving;
+  $("btnProfileActivate").disabled = CF.saving || (cfDirty() && !validated);
+  $("btnProfileActivate").textContent = p.id === CF.draft.activeProfile ? "Apply active profile" : "Activate profile";
 }
 function cfProfileChanged() { CF.verdicts = []; cfRenderProfiles(); cfDebouncedValidate(); }
 function cfNewProfile(cloneFrom) {
@@ -734,6 +767,63 @@ $("profileDraftModel").onchange = () => { const p = cfSelectedProfile(); if (p) 
 $("btnProfileModels").onclick = () => { $("profileModels").hidden = !$("profileModels").hidden; $("btnProfileModels").setAttribute("aria-expanded", String(!$("profileModels").hidden)); };
 $("profileModels").onclick = ev => { const b = ev.target.closest('[data-model-index]'), p = cfSelectedProfile(); if (b && p) { const m = cfModels()[Number(b.dataset.modelIndex)]; p.model = { source: m.source, id: m.id, dir: m.dir || null }; cfProfileChanged(); } };
 $("btnProfilesSave").onclick = cfSave;
+
+// Contract keys stay flat and unknown keys survive a downgrade untouched.
+function cfOptionDefs() { return CF.optionDefs || S.cfg.option_defs || []; }
+function cfRenderOptions(p) {
+  const defs = cfOptionDefs(), esc = cfEscape;
+  const key = p.id + JSON.stringify(defs);
+  if (CF.optionsKey !== key) {
+    CF.optionsKey = key;
+    $("profileDetailSlot").innerHTML = ["model", "memory", "cache", "compute", "api", "requests", "model-axis"].map(group => {
+      const items = defs.filter(o => o.group === group);
+      if (!items.length) return "";
+      return '<div class="option-group" data-group="'+group+'"><button class="option-bar" aria-expanded="false"><span>▸ '+group+'</span><span class="option-count"></span></button><div class="option-body">'+items.map(o => {
+        const choices = o.kind === "bool" ? ["true", "false"] : o.choices || [];
+        return '<div class="frow" data-option-row="'+esc(o.key)+'"><label for="option-'+esc(o.key)+'">'+esc(o.flag)+'</label><input id="option-'+esc(o.key)+'" data-option="'+esc(o.key)+'" type="'+(choices.length ? 'hidden' : 'text')+'" placeholder="'+esc(o.default || "engine default")+'">'+choices.map(v => '<button class="mini" data-option-choice="'+esc(o.key)+'" data-value="'+esc(v)+'">'+esc(o.kind === "bool" ? (v === "true" ? "ON" : "OFF") : v)+'</button>').join('')+'<button class="mini" data-option-reset="'+esc(o.key)+'" data-tip="Use engine default">Reset</button></div>';
+      }).join('')+'</div></div>';
+    }).join('');
+  }
+  defs.forEach(o => {
+    const input = $("option-"+o.key), value = p.options[o.key] ?? o.default ?? "";
+    const missing = (o.requires || []).filter(k => { const v = p.options[k] ?? defs.find(d => d.key === k)?.default; return v == null || v === false || v === "false" || v === "0" || v === "" || (Array.isArray(v) && !v.length); });
+    const row = input.closest('[data-option-row]');
+    row.dataset.tip = missing.length ? "Requires " + missing.join(", ") + " — set it first" : o.flag;
+    const invalid = (cfgValidateResult?.errors || []).find(e => e.includes("profile " + p.id + " option " + o.key + ":"));
+    input.setAttribute('aria-invalid', String(!!invalid));
+    if (invalid) row.dataset.tip = invalid;
+    row.classList.toggle("unmet", !!missing.length);
+    row.querySelectorAll('input,button').forEach(c => { c.disabled = !!missing.length; });
+    if (document.activeElement !== input) input.value = Array.isArray(value) ? value.join(", ") : String(value);
+    row.querySelectorAll('[data-option-choice]').forEach(b => b.classList.toggle('on', b.dataset.value === String(value)));
+    input.onchange = () => cfOptionChanged(o.key, input.value);
+  });
+  $("profileDetailSlot").querySelectorAll('.option-group').forEach(g => {
+    const count = defs.filter(o => o.group === g.dataset.group && p.options[o.key] != null && String(p.options[o.key]) !== String(o.default ?? "")).length;
+    g.querySelector('.option-count').textContent = count + " SET";
+  });
+}
+function cfOptionChanged(key, value) {
+  const p = cfSelectedProfile(), o = cfOptionDefs().find(o => o.key === key);
+  if (!p || !o) return;
+  if (value === "") delete p.options[key];
+  else p.options[key] = o.kind === "bool" ? value === "true" : o.kind === "append" ? value.split(',').map(v => v.trim()).filter(Boolean) : value;
+  if (key === "ane" && p.id === CF.draft.profiles[0]?.id) { CF.draft.ane = p.options.ane ?? true; cfSyncForm(); }
+  cfProfileChanged();
+}
+$("profileDetailSlot").onclick = ev => {
+  const b = ev.target.closest('button'); if (!b) return;
+  if (b.classList.contains('option-bar')) { const g = b.parentElement; g.classList.toggle('open'); b.setAttribute('aria-expanded', String(g.classList.contains('open'))); }
+  if (b.dataset.optionChoice) cfOptionChanged(b.dataset.optionChoice, b.dataset.value);
+  if (b.dataset.optionReset) cfOptionChanged(b.dataset.optionReset, "");
+};
+$("btnProfileActivate").onclick = () => {
+  if (CF.saving || !cfSelectedProfile()) return;
+  CF.previousResult = S.cfg.result; CF.pendingDoc = cfBuildDoc(); CF.pendingBaseline = JSON.stringify(CF.draft);
+  CF.saving = true; CF.activating = true;
+  cmd("config.activate", { doc: CF.pendingDoc, profileId: CF.profileId });
+};
+$("btnProfileRestart").onclick = () => cmd("restart");
 
 // ---- D10: first-run modal (shown once; dismissal persists via the store) ----
 function cfFirstRun() {

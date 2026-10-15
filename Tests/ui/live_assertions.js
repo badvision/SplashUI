@@ -87,6 +87,8 @@
     check('model picker reflects global scanned folders', document.querySelectorAll('#profileModels [data-model-index]').length === S.cfg.folders.reduce((n, f) => n + f.models.length, 0), document.querySelectorAll('#profileModels [data-model-index]').length);
     check('profile metadata and ACTIVE cap rendered', profileRows().some(row => row.textContent.includes('ACTIVE') && row.textContent.includes('Created') && row.textContent.includes('Last used')), $('profileList').textContent);
     check('drafter availability resolved for real package', $('profileDrafter').textContent.includes('PACKAGE') && $('profileDrafter').textContent.includes('baked'), $('profileDrafter').textContent);
+    check('runtime option definitions match real 1.3.0 kit', S.cfg.engine.version === '1.3.0' && !!$('option-kv_format') && !$('option-state_format') && !$('option-revision'), S.cfg.option_defs.map(o => o.key));
+    check('runtime option groups start collapsed', document.querySelectorAll('.option-group').length > 0 && !document.querySelector('.option-group.open'), document.querySelectorAll('.option-group').length);
     if (expected.roundTrips) {
       async function save(step, port, ane, restart) {
         if (CF.validateTimer) { clearTimeout(CF.validateTimer); CF.validateTimer = null; }
@@ -138,10 +140,27 @@
           check('current profile model edited before save without activation', cfSelectedProfile().model.id === candidates[index].id && CF.draft.activeProfile === originalActive && S.cfg.restart_required === false, { model: cfSelectedProfile().model.id, restart_required: S.cfg.restart_required });
           await saveProfiles('active model edit saved requires restart', originalProfiles.length + 1, true);
         } finally {
-          CF.draft.profiles = originalProfiles; CF.draft.activeProfile = originalActive; CF.profileId = activeId;
+          CF.draft.profiles = JSON.parse(JSON.stringify(originalProfiles)); CF.draft.activeProfile = originalActive; CF.profileId = activeId;
           cfRenderProfiles();
           await saveProfiles('profiles and active model reverted clears restart', originalProfiles.length, false);
         }
+          $('btnProfileClone').click();
+          const activated = cfSelectedProfile();
+          document.querySelector('[data-option-choice="kv_format"][data-value="bf16"]').click();
+          check('KV cache edit enters full activation candidate', cfBuildDoc().profiles.find(p => p.id === activated.id).options.kv_format === 'bf16', activated.options);
+          await until(() => !$('btnProfileActivate').disabled, 'activation validates draft');
+          $('btnProfileActivate').click();
+          await until(() => !CF.saving && S.cfg.active_profile === activated.id && S.cfg.restart_required === true, 'changed profile activated');
+          const savedActivated = S.cfg.profiles.find(p => p.id === activated.id);
+          check('activation commits option and stamps last-used', savedActivated.options.kv_format === 'bf16' && !!savedActivated.meta.last_used_at, savedActivated.meta);
+          check('activation moves ACTIVE cap', profileRows().find(row => row.textContent.includes(activated.name)).textContent.includes('ACTIVE'), $('profileList').textContent);
+          check('activation prompts with real in-flight count and explicit confirmation', !$('profileRestartPrompt').hidden && $('profileRestartText').textContent.includes(S.cfg.in_flight + ' in-flight') && !!$('btnProfileRestart'), $('profileRestartPrompt').textContent);
+          check('activation computes restart without touching engine', S.cfg.restart_required === true && S.server.pid === expected.enginePID && S.server.launched_by_app === false, snapshot('profile_activated'));
+          editProfile(activeId); $('btnProfileActivate').click();
+          await until(() => !CF.saving && S.cfg.active_profile === activeId && S.cfg.restart_required === false, 'activation reverted');
+          check('reverting activation clears prompt and restart-required', $('profileRestartPrompt').hidden && $('btnRestart').textContent === 'Restart' && S.server.pid === expected.enginePID, snapshot('activation_reverted'));
+          editProfile(activated.id); $('btnProfileRemove').click();
+          await saveProfiles('activation smoke clone removed', originalProfiles.length, false);
       } finally {
         // Best effort restore through the bridge; the runner always restores exact bytes.
         if (CF.draft.port !== expected.port || CF.draft.ane !== expected.ane) {

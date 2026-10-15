@@ -612,6 +612,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.server.launch() }
         case "config.get": respondConfigGet()
         case "config.save": respondConfigSave(body)
+        case "config.activate":
+            guard let id = body["profileId"] as? String,
+                  let obj = body["doc"] as? [String: Any],
+                  let data = try? JSONSerialization.data(withJSONObject: obj) else { return }
+            sendConfigResult(configStore.activateCandidate(data, profileId: id), to: "window.__cfgSave")
         case "config.validate": respondConfigValidate(body)
         case "browse": browse(context: body["context"] as? String ?? "")
         case "config.scan":
@@ -668,7 +673,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
               let data = try? JSONSerialization.data(withJSONObject: docObj) else { return }
         let r = configStore.validateCandidate(data)
         let states = parseConfig(data).doc.map { profileStates($0) } ?? []
-        let res: [String: Any] = ["ok": r.ok, "errors": r.errors, "warnings": r.warnings, "profiles": states]
+        let candidateVersion = parseConfig(data).doc.map { candidate in
+            planLaunch(configData(candidate), home: NSHomeDirectory(), isDir: { isDir($0) },
+                       isExecutable: { access($0, X_OK) == 0 }, brewKeg: { findBrewKeg() },
+                       kitVersion: { kitVersion($0) }).version
+        } ?? server.plan.version
+        let res: [String: Any] = ["ok": r.ok, "errors": r.errors, "warnings": r.warnings, "profiles": states,
+                                  "option_defs": profileOptionDefinitions(version: candidateVersion),
+                                  "validation_id": body["validation_id"] ?? NSNull()]
         if let json = try? JSONSerialization.data(withJSONObject: res), let str = String(data: json, encoding: .utf8) {
             evalOnReady("window.__cfgValidate(\(str))", oneShot: true)
         }
@@ -1421,6 +1433,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         eng["valid"] = plan.error == nil
         eng["error"] = plan.error ?? NSNull()
         cfgPayload["engine"] = eng
+        cfgPayload["option_defs"] = profileOptionDefinitions(version: plan.version)
         cfgPayload["mapping_fallback"] = plan.mappingFallback
         cfgPayload["mapping_used"] = plan.version ?? NSNull()
         // D13: compare against the successful launch/adoption session baseline.

@@ -27,8 +27,11 @@ ownership, and the first-run CTA's settings target. Native menu labels/selectors
 are source-asserted (not synthesized mouse-event proof). Profile assertions cover
 list/ACTIVE caps, add/remove/clone/rename, duplicate-name rejection, metadata,
 scanned source/kind/verdict model choices, drafter overrides and validation facts,
-focused-input preservation and D15 metadata flushing. Every assertion and the
-final count are JSON lines; any failure exits nonzero.
+focused-input preservation and D15 metadata flushing. S6b adds contract-gated KV cache
+controls, independently collapsed groups, requires-disabled reasons, invalid-field and
+debounced COMMIT gating, atomic draft activation, ACTIVE/last-used updates, restart
+prompt/count, revert clearing, and explicit confirmation through the existing restart
+command. Every assertion and the final count are JSON lines; any failure exits nonzero.
 
 The bridge fixture supplies computed restart state; it does **not** prove Swift's
 producer. Swift regressions and the live layer cover that boundary. `run_tests.sh`
@@ -44,7 +47,7 @@ quit any existing **SplashUI app** without stopping the already-serving engine:
 ```sh
 ./build.sh
 Tests/ui/live_smoke.sh                 # read-only integration assertions
-Tests/ui/live_smoke.sh --round-trips   # port/ANE round trips + S6a profile/model transaction
+Tests/ui/live_smoke.sh --round-trips   # port/ANE + profile/model + option/activation transactions
 ```
 
 The runner refuses to launch unless exactly one engine already owns the configured
@@ -85,11 +88,17 @@ selection is never activation. Live assertions check the settings list, metadata
 folder-derived picker and real package drafter outcome. The screenshot is taken
 with the profile area visible, but remains evidence only.
 
-S6b integration: `#profileDetailSlot` holds option groups; `#profileActivationSlot`
-holds activation/restart controls. `CF.profileId` selects an editor, not an active
-profile; `cfSelectedProfile()` exposes its draft and `cfBuildDoc()` builds the full
-candidate for commit-before-activate. Profiles already exist in schema v1; S6a
-adds no schema migration, parallel store, or new bridge command.
+S6b uses `#profileDetailSlot` for option groups and `#profileActivationSlot` for
+activation/restart controls. `CF.profileId` selects an editor, not an active profile;
+`cfSelectedProfile()` exposes its draft and `cfBuildDoc()` builds the full candidate.
+The required `config.activate` bridge command carries that full doc plus `profileId`:
+one atomic save commits draft edits, changes the active id and stamps last-used.
+The existing computed plan signature drives both the shared footer and the prompt;
+only explicit confirmation sends the existing `restart` command. No schema change.
+Live smoke clones the active profile, edits KV format, validates and activates it,
+asserts the ACTIVE cap/last-used/prompt and `restart_required: true`, then activates the
+original profile and asserts `false` before removing the clone. It never confirms a
+restart. Final suites: 103 DOM assertions and 42 live round-trip assertions.
 
 A private `/tmp/splashui-live-*` directory retains JSON per-assertion results,
 step snapshots, app log, one screenshot **as evidence only**, and a final summary

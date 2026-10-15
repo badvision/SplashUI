@@ -2470,9 +2470,27 @@ public func validateConfig(_ doc: ConfigDoc) -> ConfigSaveResult {
     }
     var seen = Set<String>()
     var dups = [String]()
+    let syntaxOptions = contractFor(nil, registry: launchRegistry).contract.options
     for p in doc.profiles {
         if p.name.isEmpty { errors.append("profile \(p.id) has an empty name") }
         if !seen.insert(p.name).inserted, !dups.contains(p.name) { dups.append(p.name) }
+        for o in syntaxOptions where !o.builtFromModel && !o.secret && o.key != "port" {
+            guard let value = p.options[o.key], value != .null else { continue }
+            let text = value.string ?? value.number.map { String($0) } ?? ""
+            var valid = true
+            if o.kind == .bool { valid = value.bool != nil }
+            else if o.kind == .append { valid = value.array?.allSatisfy { $0.string != nil } == true }
+            else if let choices = o.choices { valid = choices.contains(text) }
+            else if ["max_memory", "max_cache_disk", "max_cache_disk_writes", "max_request_size"].contains(o.key) {
+                valid = text.range(of: "^(auto|off|[0-9]+(?:\\.[0-9]+)?[kKmMgGtT]?[bB]?)$", options: .regularExpression) != nil
+            } else if ["idle_release", "request_timeout"].contains(o.key) {
+                valid = text.range(of: "^(off|[0-9]+(?:\\.[0-9]+)?[smh]?)$", options: .regularExpression) != nil
+            } else if ["max_context", "max_image_pixels", "queue_size", "thinking_token_budget"].contains(o.key) {
+                valid = text == "auto" || text.range(of: "^[0-9]+$", options: .regularExpression) != nil
+            } else if o.key == "decode_share" { valid = Double(text).map { $0.isFinite && (0...1).contains($0) } ?? false }
+            else { valid = value.string != nil }
+            if !valid { errors.append("profile \(p.id) option \(o.key): invalid syntax for \(o.flag)") }
+        }
     }
     if !dups.isEmpty {
         errors.append("duplicate profile name(s): " + dups.joined(separator: ", "))
@@ -2504,6 +2522,20 @@ public func maskSecret(_ s: String) -> String {
     let n = s.count
     guard n >= 8 else { return "\(n) ch · •••" }
     return "\(n) ch · \(s.prefix(4))…\(s.suffix(4))"
+}
+
+/// UI definitions come from the SAME contract as argv; grouping is display-only.
+public func profileOptionDefinitions(version: String?) -> [[String: Any]] {
+    contractFor(version, registry: launchRegistry).contract.options.compactMap { o in
+        guard !o.builtFromModel, !o.secret, o.key != "port" else { return nil }
+        var group = o.group
+        if group == "network" { group = "api" }
+        if ["ane", "allow_idle_sleep"].contains(o.key) { group = "compute" }
+        if o.key == "decode_share" { group = "memory" }
+        if ["draft_model", "revision", "language_only", "offline"].contains(o.key) { group = "model-axis" }
+        return ["key": o.key, "flag": o.flag, "kind": o.kind.rawValue, "group": group,
+                "default": o.defValue ?? NSNull(), "choices": o.choices ?? [], "requires": o.requires]
+    }
 }
 
 // MARK: - Tick payload (contract C4 `j.cfg`, S1a scope)
@@ -2847,6 +2879,22 @@ public final class ConfigStore {
             return r
         }
         return save(candidate: d)
+    }
+
+    /// D14: full draft + activation metadata are one validated atomic commit.
+    /// No engine operation belongs here; D13 remains a plan-signature comparison.
+    @discardableResult
+    public func activateCandidate(_ data: Data, profileId: String, now: Date = Date()) -> ConfigSaveResult {
+        let parsed = parseConfig(data)
+        guard parsed.error == nil, var candidate = parsed.doc,
+              let index = candidate.profiles.firstIndex(where: { $0.id == profileId }) else {
+            let r = ConfigSaveResult(ok: false, errors: ["invalid activation document or unknown profile"], warnings: [])
+            saveResult = r
+            return r
+        }
+        candidate.activeProfile = profileId
+        candidate.profiles[index].meta.lastUsedAt = iso8601(now)
+        return save(candidate: candidate)
     }
 
     /// `config.validate` bridge entry: the same rules, no write (JS debounces 400 ms).

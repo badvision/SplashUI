@@ -58,6 +58,16 @@ lives at `~/Library/Application Support/SplashUI/config.json` (created with docu
 on first run) and is the single source of truth. The app reads no environment variables — the
 pre-panel `SPLASH_*` env vars are deprecated and no longer have any effect on the app.
 
+Profiles expose the resolved runtime's startup options in collapsed LCARS groups;
+each group counts settings that differ from engine defaults. Unsupported flags stay
+hidden without deleting their saved values. COMMIT requires a successful debounced
+validation; unsupported model/option combinations remain saveable with warnings.
+ACTIVATE PROFILE atomically commits the whole draft and stamps that profile's last-used
+time. It does **not** restart the engine: a restart-required prompt shows the current
+in-flight request count, and **CONFIRM RESTART** explicitly applies the changed plan.
+The shared **RESTART TO APPLY** footer opens this prompt. Reverting to the running plan
+clears it without restarting. Port and the masked API key remain global-only.
+
 `./install.sh` still reads a couple of its own vars for the one-shot install (it predates the
 panel and is unaffected). `start.sh` no longer exports any of them — it launches its own engine
 directly from a fixed argv (see "How it works"); the menu-bar app ignores env and reads

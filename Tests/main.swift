@@ -3613,5 +3613,51 @@ do {
     check(configSchemaVersion == 1, "S6a needs no migration: all profile fields already exist")
 }
 
+do {
+    var candidate = defaultConfig(home: "/home", now: now)
+    candidate.globals.engine = EngineCfg(mode: "manual", manualPath: "/kits/k131")
+    candidate.profiles[0].model = ProfileModel(source: "hfid", id: "org/model")
+    candidate.profiles[0].options["draft_model"] = .string("org/draft")
+    var fs = FakeFS(); planKit(fs: &fs, path: "/kits/k131", version: "1.3.1")
+    func signature(_ d: ConfigDoc) -> String {
+        planLaunch(configData(d), home: "/home", isDir: { fs.isDir($0) },
+                   isExecutable: { fs.isExecutable($0) }, kitVersion: { _ in "1.3.1" }).signature
+    }
+    let baseline = signature(candidate)
+    var second = candidate.profiles[0]; second.id = "second"; second.name = "Second"
+    candidate.profiles.append(second)
+    var writes = 0
+    let store = ConfigStore(home: "/home", read: { _ in configData(candidate) },
+                            write: { _, _ in writes += 1; return true }, ensureDir: { _, _ in true })
+    candidate.profiles[1].options["kv_format"] = .string("bf16")
+    let result = store.activateCandidate(configData(candidate), profileId: "second", now: now)
+    check(result.ok && writes == 1, "S6b activation commits the full draft with exactly one atomic write")
+    check(store.doc.activeProfile == "second", "S6b activation moves active profile")
+    check(store.doc.profiles[1].meta.lastUsedAt != nil, "S6b activation stamps last-used")
+    check(store.doc.profiles[1].options["kv_format"] == .string("bf16"), "S6b activation keeps unsaved option edits")
+    check(signature(store.doc) != baseline, "S6b activation computes restart-required from changed active plan")
+    let stamp = store.doc.profiles[1].meta.lastUsedAt
+    check(store.save(candidate: store.doc).ok && store.doc.profiles[1].meta.lastUsedAt == stamp, "S6b explicit saves preserve activation metadata")
+    let beforeInvalid = writes
+    check(!store.activateCandidate(configData(candidate), profileId: "missing", now: now).ok && writes == beforeInvalid, "S6b unknown activation never writes")
+    let old = profileOptionDefinitions(version: "1.3.0"), latest = profileOptionDefinitions(version: "1.3.2")
+    check(!old.contains { $0["key"] as? String == "state_format" }, "S6b module hides newer contract flags")
+    check(latest.contains { $0["key"] as? String == "state_format" }, "S6b latest contract exposes state format")
+    check(!old.contains { $0["key"] as? String == "api_key" || $0["key"] as? String == "port" }, "S6b global-only secret and port never enter profile controls")
+    let revert = store.activateCandidate(configData(candidate), profileId: candidate.profiles[0].id, now: now)
+    check(revert.ok && signature(store.doc) == baseline, "S6b reverting activation clears restart-required without a restart")
+    var invalid = candidate; invalid.profiles[0].options["max_cache_disk"] = .string("nonsense")
+    check(!validateConfig(invalid).ok, "S6b malformed size blocks commit")
+    invalid = candidate; invalid.profiles[0].options["kv_format"] = .string("fp99")
+    check(!validateConfig(invalid).ok, "S6b invalid registry enum blocks commit")
+    invalid = candidate; invalid.profiles[0].options["persistent_cache"] = .bool(true); invalid.profiles[0].options["max_cache_disk"] = .string("0")
+    check(validateConfig(invalid).ok, "S6b unsupported combinations remain saveable D4")
+    check(profileOptionDefinitions(version: "1.3.1").contains { $0["key"] as? String == "revision" }, "S6b launcher option groups use the versioned registry")
+    check(!old.contains { $0["key"] as? String == "revision" }, "S6b module hides launcher-only axis")
+    let beforeForward = writes
+    let forward = String(data: configData(candidate), encoding: .utf8)!.replacingOccurrences(of: "\"schema_version\": 1", with: "\"schema_version\": 99")
+    check(!store.activateCandidate(Data(forward.utf8), profileId: "second").ok && writes == beforeForward, "S6b forward-schema activation refuses without writing")
+}
+
 print(failures == 0 ? "ALL TESTS PASSED" : "\(failures) TEST(S) FAILED")
 exit(failures == 0 ? 0 : 1)
