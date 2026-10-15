@@ -50,6 +50,36 @@ section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 
 .cache-panel { --accent: var(--teal); }
 .memory-panel { --accent: var(--peach); }
 .requests-panel { --accent: var(--lavender); }
+.settings-panel { --accent: #4455ff; }
+/* S5 settings form: the rail stays blue (#4455ff, channel 06) — S7 is the final theme pass. */
+.settings-panel .sec-h { color: var(--accent); font-family: var(--display); font-size: 14px; letter-spacing: .12em; display: flex; justify-content: space-between; align-items: center; margin: 8px 0 4px; }
+.settings-panel .sec-h span { color: var(--gray); font-size: 11px; letter-spacing: .08em; }
+.capbtns { display: flex; }
+.capbtns .cb { min-height: 22px; padding: 4px 16px 1px; font-size: 13px; background: var(--track); color: var(--gray); }
+.capbtns .cb.on { background: #4455ff; color: var(--bg); }
+.capbtns .cb:first-child { border-radius: 14px 0 0 14px; }
+.capbtns .cb:last-child { border-radius: 0 14px 14px 0; }
+.settings-panel input[type=text], .settings-panel input[type=number] {
+  flex: 1; min-width: 0; background: var(--track); color: var(--white); border: none;
+  padding: 5px 8px; font: inherit; letter-spacing: .04em; border-radius: 0;
+}
+.settings-panel input:focus-visible { outline: 2px solid #4455ff; outline-offset: 1px; }
+.settings-panel .mini { min-height: 22px; padding: 3px 10px 1px; font-size: 12px; background: var(--track); color: var(--white); }
+.settings-panel .mini:hover { filter: brightness(1.25); }
+.settings-panel .mini.del { background: rgba(221,68,68,.25); color: var(--red); }
+.frow { display: flex; gap: 6px; margin-bottom: 4px; align-items: stretch; }
+.frow .fname { background: #4455ff; color: var(--bg); display: flex; align-items: center; padding: 3px 10px 1px; font-size: 12px; min-width: 78px; max-width: 120px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 700; }
+.frow .fstat { color: var(--green); } .frow .fstat.miss { color: var(--red); } .frow .fstat.scan { color: var(--yellow); }
+.frow .fmeta { flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: 8px; color: var(--gray); font-size: 10px; overflow: hidden; white-space: nowrap; }
+.tried { color: var(--gray-dim); font-size: 10px; line-height: 1.4; margin: 2px 0 0 6px; text-transform: none; letter-spacing: 0; font-family: "Avenir Next", "Helvetica Neue", sans-serif; font-weight: 400; word-break: break-all; }
+.engpath { color: var(--teal); font-size: 11px; margin: 0 0 2px 6px; text-transform: none; letter-spacing: 0; font-family: "Avenir Next", "Helvetica Neue", sans-serif; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#cfgMsg { color: var(--gray); font-size: 11px; margin: 6px 0 0 6px; }
+#cfgMsg.ok { color: var(--green); } #cfgMsg.err { color: var(--red); }
+#cfgModal { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; background: rgba(3,3,6,.72); }
+#cfgModal .card { width: 420px; background: var(--bg2); border-top: 6px solid #4455ff; padding: 18px 20px 14px; }
+#cfgModal .card h3 { color: #4455ff; font-family: var(--display); font-size: 18px; letter-spacing: .12em; margin-bottom: 8px; }
+#cfgModal .card p { color: var(--white); text-transform: none; letter-spacing: 0; font-size: 11px; line-height: 1.5; margin-bottom: 14px; font-family: "Avenir Next", "Helvetica Neue", sans-serif; font-weight: 400; }
+#cfgModal .card .btns { display: flex; justify-content: flex-end; gap: 8px; }
 .section-heading, section > .label:first-child { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 0 0 5px; color: var(--accent); font-family: var(--display); font-size: 14px; letter-spacing: .12em; line-height: 1; }
 .section-heading h2 { font: inherit; }
 .section-heading span { color: var(--gray); font-size: 11px; letter-spacing: .08em; }
@@ -179,6 +209,60 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
   </table>
 </section>
 
+<section class="settings-panel" data-channel="06" aria-label="Settings">
+  <div class="sec-h" data-tip="Global configuration (config.json). Changes apply after an engine restart when flagged.">Settings<span>config.json</span></div>
+  <div class="sec-h" data-tip="Engine discovery: Auto walks the documented ladder (manual path, install root, Homebrew, kit registry); Manual uses exactly the path you give it."><span>Engine</span></div>
+  <div class="frow">
+    <div class="capbtns">
+      <button class="cb" id="capAuto">Auto</button>
+      <button class="cb" id="capManual">Manual</button>
+    </div>
+    <input type="text" id="manualPath" placeholder="kit directory…" data-tip="The kit directory (release.json + server/) — manual mode only.">
+    <button class="mini" id="btnBrowseEngine" data-tip="Pick the engine kit directory">Browse</button>
+  </div>
+  <div class="frow">
+    <span class="engpath" id="engPath" style="flex:1;min-width:0;margin:0" data-tip="The resolved kit directory the engine actually runs (Auto discovery result or your Manual path)."></span>
+    <b id="vCfg" style="color:var(--teal)">—</b>
+    <b id="engValid" style="color:var(--green)">—</b>
+  </div>
+  <div class="tried" id="engTried"></div>
+  <div class="sec-h" data-tip="Where the app discovers models. Each folder is scanned in the background; PRESENT/MISSING reflects the directory, the count the models found."><span>Model folders</span></div>
+  <div id="folderList"></div>
+  <div class="frow">
+    <input type="text" id="folderPath" placeholder="add a model folder path…">
+    <button class="mini" id="btnBrowseFolder" data-tip="Pick a model folder directory">Browse</button>
+    <button class="mini" id="btnAddFolder" data-tip="Add this path as a new model folder">Add</button>
+  </div>
+  <div class="sec-h" data-tip="Server port (127.0.0.1). The running engine is adopted if it is already serving the port."><span>Network</span></div>
+  <div class="frow">
+    <label style="color:var(--gray);font-family:var(--display)">Port</label>
+    <input type="number" id="cfgPort" min="1" max="65535">
+    <label style="color:var(--gray);font-family:var(--display)">API key</label>
+    <input type="text" id="cfgKey" readonly data-tip="The API key (env-only, never on argv). Masked on load — the raw value never renders in the DOM.">
+  </div>
+  <div class="sec-h" data-tip="Apple Neural Engine: all available compute cores. Required for the standalone splash — keep it ON."><span>Compute</span></div>
+  <div class="frow">
+    <div class="capbtns">
+      <button class="cb on" id="aneOn">ANE On</button>
+      <button class="cb" id="aneOff">Off</button>
+    </div>
+  </div>
+  <div class="frow" style="margin-top:8px">
+    <button class="btn" id="btnCfgSave" style="background:#4455ff;color:var(--bg);flex:1;border-radius:0 14px 14px 0">Save</button>
+    <span id="cfgMsg" style="min-width:0"></span>
+  </div>
+</section>
+
+<div id="cfgModal">
+  <div class="card">
+    <h3>First run</h3>
+    <p>Welcome. Your engine kit, model folders and launch options live in the <b>Settings</b> section below. Point the app at your 1.3.0 kit and a model folder, then save — the engine restarts to apply.</p>
+    <div class="btns">
+      <button class="btn" id="modalDismiss" style="background:var(--track);color:var(--white)">Later</button>
+      <button class="btn" id="modalCta" style="background:#4455ff;color:var(--bg)">Open Settings</button>
+    </div>
+  </div>
+</div>
 <div id="footer">
   <button class="btn gr" id="btnStart">Start</button>
   <button class="btn y" id="btnRestart">Restart</button>
@@ -335,6 +419,8 @@ function render(){
   // cfg.restart_required — the footer button says so until a restart clears it.
   const rr = S.cfg && S.cfg.restart_required === true;
   $("btnRestart").textContent = rr ? "RESTART TO APPLY" : "Restart";
+  cfRender();
+  cfFirstRun();
   const h = document.body.scrollHeight;
   if (h !== lastH) { lastH = h; try { window.webkit.messageHandlers.size.postMessage(h) } catch(e) {} }
 }
@@ -350,12 +436,182 @@ function drawSpark(){
 window.update = d => { if (!("cfg" in d) && S && S.cfg) d.cfg = S.cfg; S = d; render(); };
 const cmd = (c, args) => { try { window.webkit.messageHandlers.cmd.postMessage(Object.assign({ cmd: c }, args || {})); } catch(e) {} };
 let cfgDoc = null, cfgSaveResult = null, cfgValidateResult = null;
-window.__cfgGet = d => { cfgDoc = d; };
+window.__cfgGet = d => { cfgDoc = d; cfInit(d); };
 window.__cfgSave = r => { cfgSaveResult = r; };
 window.__cfgValidate = r => { cfgValidateResult = r; };
 $("btnStart").onclick = () => cmd("start");
 $("btnStop").onclick = () => cmd("stop");
 $("btnRestart").onclick = () => cmd("restart");
+
+// ---- S5: global settings (channel 06) + first-run modal (D10) ----
+const CF = { doc: null, draft: null, baseline: "", validateTimer: null, firstRunShown: false };
+
+function cfDraft(doc) {
+  const g = doc.globals || {};
+  const p = (doc.profiles || [])[0] || {};
+  return { engineMode: (g.engine && g.engine.mode) || "auto",
+           manualPath: (g.engine && g.engine.manual_path) || "",
+           port: g.port || 8123,
+           folders: (g.model_folders || []).map(f => Object.assign({}, f)),
+           ane: (p.options && p.options.ane !== undefined) ? p.options.ane : true };
+}
+
+// The whole doc, raw (the tick payload only carries the mask — the raw api_key
+// must round-trip untouched, so save edits CF.doc, never a reconstructed doc).
+function cfBuildDoc() {
+  const d = JSON.parse(JSON.stringify(CF.doc));
+  const dr = CF.draft;
+  d.globals.engine.mode = dr.engineMode;
+  d.globals.engine.manual_path = dr.engineMode === "manual" ? dr.manualPath : null;
+  d.globals.port = dr.port;
+  d.globals.model_folders = dr.folders;
+  if (d.profiles && d.profiles.length) {
+    if (!d.profiles[0].options) d.profiles[0].options = {};
+    d.profiles[0].options.ane = dr.ane;
+  }
+  return d;
+}
+
+function cfSyncForm() {
+  const d = CF.draft;
+  $("capAuto").classList.toggle("on", d.engineMode === "auto");
+  $("capManual").classList.toggle("on", d.engineMode === "manual");
+  if ($("manualPath").value !== d.manualPath) $("manualPath").value = d.manualPath;
+  if ($("manualPath").disabled !== (d.engineMode !== "manual")) $("manualPath").disabled = d.engineMode !== "manual";
+  if ($("cfgPort").value != String(d.port)) $("cfgPort").value = d.port;
+  $("aneOn").classList.toggle("on", d.ane);
+  $("aneOff").classList.toggle("on", !d.ane);
+}
+
+function cfRenderFolders() {
+  $("folderList").innerHTML = CF.draft.folders.map((f, i) => {
+    const st = (S.cfg && S.cfg.folders || []).find(x => x && x.id === f.id);
+    const scanning = st && st.scanning === true;
+    const present = st && st.present === true;
+    const missing = st && st.present === false;
+    const models = st && Array.isArray(st.models) ? st.models : null;
+    let stat = "…", cls = "scan";
+    if (scanning) { stat = "SCANNING"; }
+    else if (present) { stat = "PRESENT"; cls = ""; }
+    else if (missing) { stat = "MISSING"; cls = "miss"; }
+    const count = models === null ? "" : (models.length + " model" + (models.length === 1 ? "" : "s"));
+    return '<div class="frow"><span class="fname" title="'+f.path+'">'+f.id+'</span>'+
+      '<span class="fstat '+cls+'" style="min-width:74px">'+stat+'</span>'+
+      '<span class="fmeta">'+count+
+      '<button class="mini" data-act="scan" data-i="'+i+'" data-tip="Force-rescan this folder">Scan</button>'+
+      '<button class="mini del" data-act="del" data-i="'+i+'" data-tip="Remove this folder from the registry">Del</button>'+
+      '</span></div>';
+  }).join("");
+}
+
+function cfDirty() { return JSON.stringify(CF.draft) !== CF.baseline; }
+
+function cfMsg(text, kind) {
+  const m = $("cfgMsg");
+  m.textContent = text;
+  m.className = kind || "";
+}
+
+function cfValidate() {
+  if (!cfDirty()) { cfMsg("", ""); return; }
+  cmd("config.validate", { doc: cfBuildDoc() });
+  // The reply lands as cfg.result on the next tick.
+}
+function cfDebouncedValidate() {
+  if (CF.validateTimer) clearTimeout(CF.validateTimer);
+  CF.validateTimer = setTimeout(cfValidate, 400);
+}
+
+function cfSave() {
+  if (!cfDirty()) { cfMsg("No changes", ""); return; }
+  cmd("config.save", { doc: cfBuildDoc() });
+  cfMsg("Saving…", "");
+}
+
+// One-time population from the raw doc (config.get), then the draft is ours.
+function cfInit(doc) {
+  if (CF.draft) return;
+  CF.doc = doc;
+  CF.draft = cfDraft(doc);
+  CF.baseline = JSON.stringify(CF.draft);
+  cfSyncForm();
+  $("cfgKey").value = "· · · · · · · ·";  // masked; the raw key never renders
+}
+
+function cfRender() {
+  const cfg = S.cfg;
+  if (!cfg) return;
+  const e = cfg.engine || {};
+  $("vCfg").textContent = e.version || "—";
+  const valid = e.valid;
+  const ev = $("engValid");
+  if (valid === true) { ev.textContent = "VALID"; ev.style.color = "var(--green)"; ev.removeAttribute("data-tip"); }
+  else if (valid === false) { ev.textContent = "ERROR"; ev.style.color = "var(--red)"; ev.setAttribute("data-tip", String(e.error || "")); }
+  else { ev.textContent = "—"; ev.style.color = ""; }
+  $("engPath").textContent = e.path || e.manual_path || "";
+  const tried = Array.isArray(e.tried) ? e.tried : [];
+  $("engTried").textContent = tried.length ? "ladder: " + tried.join(" → ") : "";
+  // The save/validate reply rides one tick as cfg.result.
+  if (cfg.result && cfg.result.ok === true) {
+    // The store now holds exactly cfBuildDoc(): re-base draft + doc on it.
+    CF.doc = cfBuildDoc();
+    CF.baseline = JSON.stringify(CF.draft);
+    cfMsg("Saved — " + (cfg.restart_required === true ? "restart to apply" : "applied on next launch"), "ok");
+  } else if (cfg.result && cfg.result.ok === false) {
+    cfMsg((cfg.result.errors || []).join("; "), "err");
+  }
+  // A browse pick is consumed on exactly one tick.
+  if (cfg.picked && typeof cfg.picked === "object") {
+    const pk = cfg.picked;
+    if (pk.context === "engine") { CF.draft.manualPath = pk.path; cfSyncForm(); cfDebouncedValidate(); }
+    else if (pk.context === "model_folder") { $("folderPath").value = pk.path; }
+  }
+  cfRenderFolders();
+}
+
+$("capAuto").onclick = () => { CF.draft.engineMode = "auto"; cfSyncForm(); cfDebouncedValidate(); };
+$("capManual").onclick = () => { CF.draft.engineMode = "manual"; cfSyncForm(); cfDebouncedValidate(); };
+$("manualPath").onchange = () => { CF.draft.manualPath = $("manualPath").value; cfDebouncedValidate(); };
+$("btnBrowseEngine").onclick = () => cmd("browse", { context: "engine" });
+$("cfgPort").onchange = () => { const v = parseInt($("cfgPort").value, 10); if (v > 0 && v < 65536) { CF.draft.port = v; cfDebouncedValidate(); } };
+$("aneOn").onclick = () => { CF.draft.ane = true; cfSyncForm(); cfDebouncedValidate(); };
+$("aneOff").onclick = () => { CF.draft.ane = false; cfSyncForm(); cfDebouncedValidate(); };
+$("btnBrowseFolder").onclick = () => cmd("browse", { context: "model_folder" });
+$("btnAddFolder").onclick = () => {
+  const p = $("folderPath").value.trim();
+  if (!p) return;
+  let id = "folder" + (CF.draft.folders.length + 1);
+  while (CF.draft.folders.some(f => f.id === id)) id = id.slice(0, -1) + (parseInt(id.slice(-1), 10) + 1);
+  CF.draft.folders.push({ id, path: p, source: "manual" });
+  $("folderPath").value = "";
+  cfDebouncedValidate();
+};
+$("folderList").onclick = (ev) => {
+  const b = ev.target && ev.target.closest ? ev.target.closest("[data-act]") : null;
+  if (!b) return;
+  const i = parseInt(b.dataset.i, 10);
+  if (b.dataset.act === "del") { CF.draft.folders.splice(i, 1); cfDebouncedValidate(); }
+  else if (b.dataset.act === "scan") { const f = CF.draft.folders[i]; if (f) cmd("config.scan", { id: f.id }); }
+};
+$("btnCfgSave").onclick = cfSave;
+
+// ---- D10: first-run modal (shown once; dismissal persists via the store) ----
+function cfFirstRun() {
+  if (!(S.cfg && S.cfg.first_run === true) || CF.firstRunShown) return;
+  CF.firstRunShown = true;
+  $("cfgModal").style.display = "flex";
+}
+function cfFirstRunDone() {
+  cmd("config.firstRunDone");
+  $("cfgModal").style.display = "none";
+}
+$("modalCta").onclick = () => {
+  cfFirstRunDone();
+  document.querySelector(".settings-panel").scrollIntoView({ behavior: "smooth" });
+};
+$("modalDismiss").onclick = cfFirstRunDone;
+// One-time: fetch the raw doc so the settings draft can round-trip api_key.
+cmd("config.get");
 
 if (location.search.includes("demo")) {
   const D = { t:Date.now()/1000, state:"decode", ready:true, model:"incoai/Qwen3.8-27B-Splash", ctx:262144,

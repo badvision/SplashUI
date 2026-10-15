@@ -459,6 +459,25 @@ public func enumerateModels(folder: ModelFolder,
     }
 }
 
+/// S5: the tick state of one model folder — pure (T1): `present` is a cheap
+/// isDir on the folder path; `models` is `enumerateModels` (every FS access
+/// through the injected closures), rendered as model ids — EMPTY when the
+/// folder is absent (nothing to count). `scanning` is false here (a synchronous
+/// snapshot); the app-level background scanner stamps it true while its own
+/// scan of THIS helper is in flight. `error` is null on this pure path.
+public func folderTickState(folder: ModelFolder,
+                            isDir: (String) -> Bool,
+                            fileContents: (String) -> String?,
+                            listDir: (String) -> [String]?) -> [String: Any] {
+    let present = isDir(folder.path)
+    let models: [Any] = present
+        ? enumerateModels(folder: folder, isDir: isDir, fileContents: fileContents, listDir: listDir)
+            .map { $0.id as Any }
+        : []
+    return ["id": folder.id, "path": folder.path, "source": folder.source,
+            "models": models, "scanning": false, "present": present,
+            "error": NSNull()]
+}
 
 // MARK: - Versioned launch registry (contract C2, D3/D9/D16)
 //
@@ -1428,6 +1447,10 @@ public struct LaunchConfig: Equatable {
     public var modelId: String?       // the model actually served
     public var modelDir: String?      // the on-disk dir (the module form's positional arg)
     public var version: String?       // the kit's release.json version
+    public var tried: [String]        // S5: every kit rung checked, in order (the
+                                      // actionable miss names them; a healthy plan
+                                      // carries its winning rung). Display-only —
+                                      // it never feeds the plan signature.
     public var mappingFallback: Bool  // D3: the visible FALLBACK indicator's source
     public var error: String?         // actionable text; nil = the plan launches
     public var profileId: String?
@@ -1440,7 +1463,7 @@ public struct LaunchConfig: Equatable {
     public init(workDir: String? = nil, executable: String? = nil, base: String? = nil,
                 engineArgs: [String] = [], engineEnv: [String: String] = [:],
                 port: Int? = nil, modelId: String? = nil, modelDir: String? = nil,
-                version: String? = nil, mappingFallback: Bool = false,
+                version: String? = nil, tried: [String] = [], mappingFallback: Bool = false,
                 error: String? = nil, profileId: String? = nil, profileName: String? = nil,
                 restartRequired: Bool = false, restartReason: String? = nil,
                 signature: String = "", issues: [String] = []) {
@@ -1453,6 +1476,7 @@ public struct LaunchConfig: Equatable {
         self.modelId = modelId
         self.modelDir = modelDir
         self.version = version
+        self.tried = tried
         self.mappingFallback = mappingFallback
         self.error = error
         self.profileId = profileId
@@ -1496,7 +1520,7 @@ public func planLaunch(_ data: Data,
                         isExecutable: isExecutable, brewKeg: brewKeg,
                         kitVersion: kitVersion)
     guard let kit = kr.kit else {
-        return LaunchConfig(version: kr.version, error: kr.error,
+        return LaunchConfig(version: kr.version, tried: kr.tried, error: kr.error,
                             profileId: profile.id, profileName: profile.name)
     }
     // 4. the contract for THAT kit (D16: exact, else the latest fallback).
@@ -1505,7 +1529,7 @@ public func planLaunch(_ data: Data,
     //    enumeration (the fresh discovery beats a stale stored dir).
     let model = profile.model
     guard model.source != "none", let mid = model.id, !mid.isEmpty else {
-        return LaunchConfig(version: kr.version,
+        return LaunchConfig(version: kr.version, tried: kr.tried,
                             error: "no model selected — pick one in Settings (06)",
                             profileId: profile.id, profileName: profile.name)
     }
@@ -1537,7 +1561,7 @@ public func planLaunch(_ data: Data,
     let elig = eligibility(kind: kind!, contract: contract, modelId: mid, modelDir: dir,
                            draftModel: draftModel, family: family, files: files)
     if elig.verdict == .blocked || elig.verdict == .unrunnable {
-        return LaunchConfig(modelId: mid, modelDir: dir, version: kr.version,
+        return LaunchConfig(modelId: mid, modelDir: dir, version: kr.version, tried: kr.tried,
                             mappingFallback: fallback, error: elig.reason,
                             profileId: profile.id, profileName: profile.name)
     }
@@ -1550,7 +1574,7 @@ public func planLaunch(_ data: Data,
     if built.args.isEmpty {
         let msg = built.issues.first(where: { $0.severity == .error })?.message
             ?? "cannot build the launch argv"
-        return LaunchConfig(modelId: mid, modelDir: dir, version: kr.version,
+        return LaunchConfig(modelId: mid, modelDir: dir, version: kr.version, tried: kr.tried,
                             mappingFallback: fallback, error: msg,
                             profileId: profile.id, profileName: profile.name)
     }
@@ -1561,7 +1585,7 @@ public func planLaunch(_ data: Data,
         : nil
     guard let executable else {
         return LaunchConfig(workDir: kit, base: kit, modelId: mid, modelDir: dir,
-                            version: kr.version, mappingFallback: fallback,
+                            version: kr.version, tried: kr.tried, mappingFallback: fallback,
                             error: "the kit at \(kit) has no usable python (python/bin/python{,3})",
                             profileId: profile.id, profileName: profile.name)
     }
@@ -1574,7 +1598,7 @@ public func planLaunch(_ data: Data,
     return LaunchConfig(workDir: kit, executable: executable, base: kit,
                         engineArgs: built.args, engineEnv: built.env,
                         port: g.port, modelId: mid, modelDir: dir,
-                        version: kr.version, mappingFallback: fallback,
+                        version: kr.version, tried: kr.tried, mappingFallback: fallback,
                         profileId: profile.id, profileName: profile.name,
                         signature: sigParts.joined(separator: "\u{1F}"),
                         issues: built.issues.filter { $0.severity == .warning }.map { $0.message })
@@ -1958,10 +1982,14 @@ public struct ConfigDoc: Equatable {
     public var activeProfile: String?
     /// Unknown top-level keys, preserved verbatim on save (forward-compat).
     public var reserved: [String: JSONValue]
+    /// S5/D10: the first-run modal was shown once and dismissed.
+    public var firstRunShown: Bool = false
     public init(globals: GlobalCfg = GlobalCfg(), profiles: [Profile] = [],
-                activeProfile: String? = nil, reserved: [String: JSONValue] = [:]) {
+                activeProfile: String? = nil, reserved: [String: JSONValue] = [:],
+                firstRunShown: Bool = false) {
         self.globals = globals; self.profiles = profiles
         self.activeProfile = activeProfile; self.reserved = reserved
+        self.firstRunShown = firstRunShown
     }
 }
 
@@ -2161,9 +2189,10 @@ private struct ConfigParser {
             active = try str(a, "active_profile")
         }
         var reserved: [String: JSONValue] = [:]
-        let knownTop: Set<String> = ["schema_version", "globals", "profiles", "active_profile"]
+        let knownTop: Set<String> = ["schema_version", "globals", "profiles", "active_profile", "first_run_shown"]
         for (k, v) in top where !knownTop.contains(k) { reserved[k] = v }
-        return ConfigDoc(globals: globals, profiles: profiles, activeProfile: active, reserved: reserved)
+        let shown = top["first_run_shown"].flatMap { $0.bool } ?? false
+        return ConfigDoc(globals: globals, profiles: profiles, activeProfile: active, reserved: reserved, firstRunShown: shown)
     }
 }
 
@@ -2278,6 +2307,7 @@ public func configData(_ doc: ConfigDoc, schemaVersion: Int = configSchemaVersio
             ])
         }),
         "active_profile": doc.activeProfile.map(JSONValue.string) ?? .null,
+        "first_run_shown": .bool(doc.firstRunShown),
     ]
     for (k, v) in doc.reserved where top[k] == nil {
         top[k] = v
@@ -2474,6 +2504,7 @@ public func configTickPayload(
         "manual_path": doc.globals.engine.manualPath ?? NSNull(),
         "brew": doc.globals.engine.brew,
         "resolved": NSNull(), "version": NSNull(), "tried": NSNull(),
+        "path": NSNull(),
         "valid": NSNull(), "error": NSNull(),
     ]
     let folders: [Any] = doc.globals.modelFolders.map { f -> [String: Any] in

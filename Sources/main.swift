@@ -432,6 +432,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     private var configStore: ConfigStore!
     // Last canonical j.cfg JSON: the change gate (cfg ticks only when it changed).
     private var lastCfgJSON: String?
+    // S5: global settings channel (06).
+    /// R9 mitigation: a directory picker (browse) may steal focus from the
+    /// panel; while it is open the hidePanel observers (window resignKey,
+    /// global mouse) must not dismiss the panel behind the sheet.
+    private var pickerOpen = false
+    /// A browse pick (context + path), stamped by the NSOpenPanel close and
+    /// consumed exactly ONE tick into the payload's `picked` dict.
+    private var pendingPicked: (context: String, path: String)?
+    /// The background folder scanner.
+    private let folderScanQueue = DispatchQueue(label: "com.splashui.folderscan", qos: .utility)
+    private var folderScanCache: [String: [String: Any]] = [:]
+    private var folderScanKey: String?
+    private var folderScanInFlight = false
 
     private let orange = NSColor(red: 0.98, green: 0.54, blue: 0.24, alpha: 1)
     private let teal = NSColor(red: 0.25, green: 0.76, blue: 0.79, alpha: 1)
@@ -502,11 +515,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         if let url = Bundle.main.url(forResource: "panel", withExtension: "html") {
             webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
         }
-        NotificationCenter.default.addObserver(self, selector: #selector(hidePanel),
-                                               name: NSWindow.didResignKeyNotification, object: panel)
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            self?.hidePanel()
+        NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: panel, queue: .main) { [weak self] _ in
+            guard let self = self, !self.pickerOpen else { return }
+            self.hidePanel()
         }
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            guard let self = self, !self.pickerOpen else { return }
+            self.hidePanel()
+        }
+        // S5/D10: a fresh install (the first-run seed ran) auto-shows the
+        // panel so the settings modal is the first thing a new user sees.
+        if configStore.firstRun { showPanel() }
     }
 
     @objc private func togglePanel() {
@@ -552,6 +571,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         case "config.get": respondConfigGet()
         case "config.save": respondConfigSave(body)
         case "config.validate": respondConfigValidate(body)
+        case "browse": browse(context: body["context"] as? String ?? "")
+        case "config.scan":
+            if let id = body["id"] as? String { forceFolderScan(id) }
+        case "config.firstRunDone":
+            configStore.doc.firstRunShown = true
+            _ = configStore.saveCurrent()
         default: break
         }
     }
@@ -588,6 +613,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         guard let data = try? JSONSerialization.data(withJSONObject: res),
               let str = String(data: data, encoding: .utf8) else { return }
         webView.evaluateJavaScript("\(fn)(\(str))", completionHandler: nil)
+    }
+
+    // MARK: S5 — directory picker (browse) + background folder scanner
+
+    /// R9 mitigation: a directory picker may steal focus from the panel. While
+    /// it is open, `NSApp.activate` keeps the panel key and the hidePanel
+    /// observers (resignKey + global mouse) are guarded by `pickerOpen`, so the
+    /// panel never dismisses mid-pick. The pick is stamped into `pendingPicked`
+    /// and rides the NEXT tick as the `picked` dict (consumed one tick).
+    private func browse(context: String) {
+        guard !pickerOpen else { return }
+        let openPanel = NSOpenPanel()
+        openPanel.canChooseDirectories = true
+        openPanel.canChooseFiles = false
+        openPanel.allowsMultipleSelection = false
+        openPanel.prompt = context == "model_folder" ? "Choose model folder" : "Choose engine kit"
+        pickerOpen = true
+        defer { pickerOpen = false }
+        NSApp.activate(ignoringOtherApps: true)
+        if openPanel.runModal() == .OK, let url = openPanel.url {
+            pendingPicked = (context: context, path: url.path)
+        }
+    }
+
+    /// Force-rescan one folder id (the per-row SCAN button): drop its cache
+    /// entry, then re-scan the whole set (bounded + shallow, so cheap).
+    private func forceFolderScan(_ id: String) {
+        folderScanCache[id] = nil
+        runFolderScan()
+    }
+
+    /// The scan cache key = the sorted "id path" pairs: a re-scan happens when
+    /// the folder SET changes (add / delete / path edit), never per tick.
+    private func folderSetKey(_ folders: [ModelFolder]) -> String {
+        folders.map { "\($0.id) \($0.path)" }.sorted().joined(separator: "\n")
+    }
+
+    /// Kick the background folder scan (main-thread callers only). The cache
+    /// itself is touched on the MAIN thread exclusively; the file-system work
+    /// (bounded, shallow listings) runs on the utility queue, then the result
+    /// is committed back on main. `scanning` rides the tick while in flight.
+    private func runFolderScan() {
+        let folders = configStore.doc.globals.modelFolders
+        let fm = FileManager.default
+        let todo = folders.filter { folderScanCache[$0.id] == nil }
+        folderScanQueue.async {
+            let results = todo.map { f -> (String, [String: Any]) in
+                (f.id, folderTickState(
+                    folder: f,
+                    isDir: { fm.fileExists(atPath: $0, isDirectory: nil) },
+                    fileContents: { d -> String? in
+                        guard d == f.path || d.hasPrefix(f.path + "/") else { return nil }
+                        return (try? String(contentsOfFile: d, encoding: .utf8))
+                    },
+                    listDir: { d -> [String]? in
+                        guard d == f.path || d.hasPrefix(f.path + "/") else { return nil }
+                        return (try? fm.contentsOfDirectory(atPath: d))
+                    }))
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                for (id, st) in results { self.folderScanCache[id] = st }
+                self.folderScanKey = self.folderSetKey(self.configStore.doc.globals.modelFolders)
+                self.folderScanInFlight = false
+            }
+        }
     }
 
     // JS reports natural content height; panel grows/shrinks to fit (top edge pinned)
@@ -1179,7 +1270,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         var eng = (cfgPayload["engine"] as? [String: Any]) ?? [:]
         eng["resolved"] = plan.workDir != nil
         eng["version"] = plan.version ?? NSNull()
-        eng["tried"] = []
+        // S5: the engine path + every rung the discovery ladder tried (the
+        // kit-miss path names them all; the success path the rungs to the winner).
+        eng["path"] = plan.workDir ?? NSNull()
+        eng["tried"] = plan.tried
         eng["valid"] = plan.error == nil
         eng["error"] = plan.error ?? NSNull()
         cfgPayload["engine"] = eng
@@ -1193,6 +1287,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             ? (plan.error ?? "the configuration changed — restart the engine to apply")
             : NSNull()
         cfgPayload["registry_report"] = registryTickValueOverlay(registryReport(for: plan))
+        // S5: model-folder state (background scan). Re-scan only when the
+        // folder SET changes (key = sorted ids+paths) or a force scan cleared
+        // an entry; `scanning` rides the tick while one is in flight.
+        let doc = configStore.doc
+        let fkey = folderSetKey(doc.globals.modelFolders)
+        if fkey != folderScanKey {
+            runFolderScan()
+        }
+        var folders: [[String: Any]] = []
+        for f in doc.globals.modelFolders {
+            var st = folderScanCache[f.id] ?? ["id": f.id, "path": f.path, "source": f.source,
+                                               "models": [Any](), "present": NSNull() as Any, "error": NSNull()]
+            st["scanning"] = folderScanInFlight || st["present"] is NSNull
+            folders.append(st)
+        }
+        cfgPayload["folders"] = folders
+        // S5: a browse pick rides exactly ONE tick as `picked` (the base
+        // payload's `picked` null is overridden here; consumed one tick).
+        if let p = pendingPicked {
+            cfgPayload["picked"] = ["context": p.context, "path": p.path]
+            pendingPicked = nil
+        }
         let cfgJSON = jsonString(JSONValue(any: cfgPayload), indent: 0)
         if cfgJSON != lastCfgJSON {
             lastCfgJSON = cfgJSON

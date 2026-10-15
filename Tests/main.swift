@@ -3241,15 +3241,14 @@ do {
  let d = parseConfig(cfg).doc!
 
  // A mirror of main.swift's S4 overlay (the harness cannot compile main.swift):
- // fill the plan-derived engine block, the mapping indicator + used version, the
- // restart state, and the registry drift (S2b) onto the change-gated base.
- func applyPlanToCfg(_ payload: inout [String: Any], plan: LaunchConfig?,
+func applyPlanToCfg(_ payload: inout [String: Any], plan: LaunchConfig?,
                      restart: Bool?, reason: String?, report: RegistryReport?) {
-     var eng = (payload["engine"] as? [String: Any]) ?? [:]
+    var eng = (payload["engine"] as? [String: Any]) ?? [:]
      if let p = plan {
          eng["resolved"] = p.workDir != nil
          eng["version"] = p.version ?? NSNull()
-         eng["tried"] = []
+         eng["path"] = p.workDir ?? NSNull()
+         eng["tried"] = p.tried
          eng["valid"] = p.error == nil
          eng["error"] = p.error ?? NSNull()
      }
@@ -3401,6 +3400,177 @@ do {
        "S4 engineEnv: the key is NOT on argv (the S2a anchor)")
  check(planB.engineEnv["SPLASH_API_KEY"] == "splash-standalone-1",
        "S4 engineEnv: LaunchConfig.engineEnv carries the key")
+}
+
+// 91. S5: LaunchConfig.tried — populated on both the kit-miss path and the
+// success path. On the kit-miss path the tried list is every rung the ladder
+// checked; on success it is the same (the ladder always appends each rung it
+// examines, not just the one it picks).
+do {
+    // Kit-miss path: manual mode with a bad path -> tried contains the manual
+    // path + the install.sh layout rung (and the brew keg if brew is enabled).
+    let cfgMiss = planCfgJSON(engineMode: "manual", manualPath: "/bad/kit",
+                               port: 8123, key: "k", name: "default",
+                               modelId: "incoai/Qwen3.8-27B-Splash",
+                               modelDir: nil, options: [:])
+    let planMiss = planLaunch(cfgMiss, home: "/home",
+                              isDir: { _ in false }, isExecutable: { _ in false },
+                              brewKeg: { nil }, kitVersion: { _ in nil },
+                              fileContents: { _ in nil }, listDir: { _ in nil })
+    check(planMiss.error != nil, "S5 tried: kit-miss plan errors")
+    check(planMiss.tried.contains("/bad/kit"),
+          "S5 tried: manual path appears in the kit-miss tried list")
+    check(planMiss.tried.contains("/home/SplashUI/kit/splash-1.3.0-arm64-macos26"),
+          "S5 tried: install.sh layout rung appears in the kit-miss tried list")
+
+    // Success path: a valid kit -> tried contains the same rungs.
+    var fsS5 = FakeFS()
+    planKit(fs: &fsS5, path: "/kits/kit130", version: "1.3.0")
+    fsS5.dir("/models/pkg", ["manifest.json", "model.json", "config.json", "tokenizer/", "draft/"])
+    fsS5.file("/models/pkg/manifest.json", #"{"model_type": "qwen3_5", "draft_repo": "draft"}"#)
+    fsS5.file("/models/pkg/draft/config.json")
+    let cfgOk = planCfgJSON(engineMode: "manual", manualPath: "/kits/kit130",
+                             port: 8123, key: "k", name: "default",
+                             modelId: "incoai/Qwen3.8-27B-Splash",
+                             modelDir: "/models/pkg", options: [:])
+    let planOk = planLaunch(cfgOk, home: "/home",
+                            isDir: { fsS5.isDir($0) }, isExecutable: { fsS5.isExecutable($0) },
+                            brewKeg: { nil }, kitVersion: { readKitVersion(fs: fsS5, kit: $0) },
+                            fileContents: { fsS5.fileContents($0) }, listDir: { fsS5.listDir($0) })
+    check(planOk.error == nil, "S5 tried: success plan is healthy")
+    check(planOk.tried.contains("/kits/kit130"),
+          "S5 tried: the chosen kit appears in the success-path tried list")
+    check(planOk.tried.contains("/home/SplashUI/kit/splash-1.3.0-arm64-macos26"),
+          "S5 tried: the install.sh rung is also in the success-path tried list")
+}
+
+// 92. S5: configTickPayload engine.path — the resolved kit dir (workDir).
+do {
+    var fsP = FakeFS()
+    planKit(fs: &fsP, path: "/kits/kit130", version: "1.3.0")
+    fsP.dir("/models/pkg", ["manifest.json", "model.json", "config.json", "tokenizer/", "draft/"])
+    fsP.file("/models/pkg/manifest.json", #"{"model_type": "qwen3_5", "draft_repo": "draft"}"#)
+    fsP.file("/models/pkg/draft/config.json")
+    let cfgP = planCfgJSON(engineMode: "manual", manualPath: "/kits/kit130",
+                            port: 8123, key: "k", name: "default",
+                            modelId: "incoai/Qwen3.8-27B-Splash",
+                            modelDir: "/models/pkg", options: [:])
+    let planP = planLaunch(cfgP, home: "/home",
+                           isDir: { fsP.isDir($0) }, isExecutable: { fsP.isExecutable($0) },
+                           brewKeg: { nil }, kitVersion: { readKitVersion(fs: fsP, kit: $0) },
+                           fileContents: { fsP.fileContents($0) }, listDir: { fsP.listDir($0) })
+    let dP = parseConfig(cfgP).doc!
+    let payloadP = configTickPayload(doc: dP, loadError: nil, versionTooNew: false,
+                                      activeInvalid: false, firstRun: false,
+                                      inFlight: 0, result: nil)
+    // The base engine dict has path: NSNull (pre-plan). The plan overlay fills it.
+    let baseEng = payloadP["engine"] as? [String: Any]
+    check(baseEng?["path"] is NSNull,
+          "S5 path: the base engine dict has path null (pre-plan)")
+    // Simulate the main.swift overlay:
+    var eng = baseEng ?? [:]
+    eng["path"] = planP.workDir ?? NSNull()
+    check(eng["path"] as? String == "/kits/kit130",
+          "S5 path: the overlay fills path with the resolved kit dir")
+}
+
+// 93. S5: folderTickState — present, missing, and empty-models cases.
+do {
+    var fsF = FakeFS()
+    fsF.dir("/folders/lm", ["incoai/Qwen3.8-27B-Splash", "local/m3"])
+    fsF.dir("/folders/lm/incoai/Qwen3.8-27B-Splash", ["manifest.json"])
+    fsF.dir("/folders/lm/local/m3", ["config.json"])
+    fsF.file("/folders/lm/incoai/Qwen3.8-27B-Splash/manifest.json", "{}")
+    let lm = ModelFolder(id: "lmstudio", path: "/folders/lm", source: "auto")
+    let st = folderTickState(folder: lm,
+                             isDir: { fsF.isDir($0) },
+                             fileContents: { fsF.fileContents($0) },
+                             listDir: { fsF.listDir($0) })
+    check(st["present"] as? Bool == true, "S5 folderTick: present true for an existing dir")
+    check(st["scanning"] as? Bool == false, "S5 folderTick: scanning false in the pure path")
+    check(st["error"] is NSNull, "S5 folderTick: error null in the pure path")
+    check(st["id"] as? String == "lmstudio", "S5 folderTick: id matches the folder")
+    let models = st["models"] as? [Any]
+    check(models?.count == 2,
+          "S5 folderTick: two models enumerated (got \(models?.count ?? -1))")
+
+    // Missing folder: present false, models empty.
+    let gone = ModelFolder(id: "gone", path: "/no/such/dir", source: "auto")
+    let stGone = folderTickState(folder: gone,
+                                 isDir: { fsF.isDir($0) },
+                                 fileContents: { fsF.fileContents($0) },
+                                 listDir: { fsF.listDir($0) })
+    check(stGone["present"] as? Bool == false, "S5 folderTick: present false for a missing dir")
+    check((stGone["models"] as? [Any])?.isEmpty == true,
+          "S5 folderTick: models empty for a missing dir")
+
+    // Empty folder: present true, models empty.
+    fsF.dir("/folders/empty", [])
+    let empty = ModelFolder(id: "empty", path: "/folders/empty", source: "auto")
+    let stEmpty = folderTickState(folder: empty,
+                                  isDir: { fsF.isDir($0) },
+                                  fileContents: { fsF.fileContents($0) },
+                                  listDir: { fsF.listDir($0) })
+    check(stEmpty["present"] as? Bool == true, "S5 folderTick: present true for an empty dir")
+    check((stEmpty["models"] as? [Any])?.isEmpty == true,
+          "S5 folderTick: models empty for an empty dir")
+}
+
+// 94. S5: full store round-trip — manual mode + custom folder + ane=false
+// produces the --disable-ane flag in the engine argv.
+do {
+    var fsRT = FakeFS()
+    planKit(fs: &fsRT, path: "/kits/kit130", version: "1.3.0")
+    fsRT.dir("/models/pkg", ["manifest.json", "model.json", "config.json", "tokenizer/", "draft/"])
+    fsRT.file("/models/pkg/manifest.json", #"{"model_type": "qwen3_5", "draft_repo": "draft"}"#)
+    fsRT.file("/models/pkg/draft/config.json")
+    let cfgRT = planCfgJSON(engineMode: "manual", manualPath: "/kits/kit130",
+                             port: 8123, key: "splash-standalone-1", name: "default",
+                             modelId: "incoai/Qwen3.8-27B-Splash",
+                             modelDir: "/models/pkg", options: ["ane": "false"])
+    let planRT = planLaunch(cfgRT, home: "/home",
+                            isDir: { fsRT.isDir($0) }, isExecutable: { fsRT.isExecutable($0) },
+                            brewKeg: { nil }, kitVersion: { readKitVersion(fs: fsRT, kit: $0) },
+                            fileContents: { fsRT.fileContents($0) }, listDir: { fsRT.listDir($0) })
+    check(planRT.error == nil, "S5 roundtrip: plan is healthy (got: \(planRT.error ?? "ok"))")
+    check(planRT.engineArgs.contains("--disable-ane"),
+          "S5 roundtrip: ane=false -> --disable-ane appears in engine argv")
+    check(!planRT.engineArgs.contains("true"),
+          "S5 roundtrip: ane=false -> no bare 'true' in argv")
+
+    // Now test the ConfigStore round-trip: save, re-read, verify the doc.
+    let home = "/tmp/s5rt"
+    var storeWrites: [String: Data] = [:]
+    var store = ConfigStore(
+        home: home,
+        path: home + "/config.json",
+        read: { _ in nil },  // first load: absent -> seeds
+        write: { data, path in storeWrites[path] = data; return true },
+        ensureDir: { _, _ in true },
+        brewKeg: { nil }, kitVersion: { _ in nil }, isDir: { _ in false })
+    // Build a manual-mode doc with ane=false:
+    var doc = store.doc
+    doc.globals.engine = EngineCfg(mode: "manual", manualPath: "/kits/kit130", brew: false)
+    doc.globals.modelFolders = [ModelFolder(id: "lmstudio", path: "/models", source: "auto")]
+    doc.globals.port = 8123
+    doc.globals.apiKey = "splash-standalone-1"
+    if let i = doc.profiles.firstIndex(where: { $0.id == doc.activeProfile }) {
+        doc.profiles[i].options["ane"] = .bool(false)
+    }
+    let r = store.save(candidate: doc)
+    check(r.ok, "S5 store roundtrip: save succeeds")
+    // Read back:
+    let savedData = storeWrites[home + "/config.json"]
+    check(savedData != nil, "S5 store roundtrip: file was written")
+    if let d = savedData {
+        let (rd, _, _) = parseConfig(d)
+        check(rd?.globals.engine.mode == "manual", "S5 store roundtrip: manual mode persisted")
+        check(rd?.globals.engine.manualPath == "/kits/kit130", "S5 store roundtrip: manual path persisted")
+        check(rd?.globals.port == 8123, "S5 store roundtrip: port persisted")
+        if let p = rd?.profiles.first(where: { $0.id == rd?.activeProfile }) {
+            check(p.options["ane"]?.bool == false, "S5 store roundtrip: ane=false persisted")
+        }
+    }
 }
 
 print(failures == 0 ? "ALL TESTS PASSED" : "\(failures) TEST(S) FAILED")
