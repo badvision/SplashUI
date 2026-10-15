@@ -450,6 +450,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     private var folderScanCache: [String: [String: Any]] = [:]
     private var folderScanKey: String?
     private var folderScanInFlight = false
+    // MARK: - Smoke hooks (env-gated, dev only)
+    // The borderless NSPanel is invisible to AX (no AXWindows, no CDP) and
+    // auto-dismisses on focus loss, so an external smoke agent cannot drive it.
+    // SPLASHUI_SMOKE=1 (plus SPLASHUI_SMOKE_CHANNEL / SPLASHUI_SMOKE_JS /
+    // SPLASHUI_SMOKE_OUT) makes a launch deterministic. Off by default: without
+    // these env vars every path here is unreachable and behavior is unchanged.
+    let smokeMode = ProcessInfo.processInfo.environment["SPLASHUI_SMOKE"] == "1"
+    let smokeChannel = ProcessInfo.processInfo.environment["SPLASHUI_SMOKE_CHANNEL"]
+    let smokeJS = ProcessInfo.processInfo.environment["SPLASHUI_SMOKE_JS"]
+    let smokeOut = ProcessInfo.processInfo.environment["SPLASHUI_SMOKE_OUT"] ?? "/tmp/splashui_smoke_out.json"
 
     private let orange = NSColor(red: 0.98, green: 0.54, blue: 0.24, alpha: 1)
     private let teal = NSColor(red: 0.25, green: 0.76, blue: 0.79, alpha: 1)
@@ -522,11 +532,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
         }
         NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: panel, queue: .main) { [weak self] _ in
-            guard let self = self, !self.pickerOpen else { return }
+            // Smoke mode reuses the `pickerOpen` guard pattern: both auto-dismiss
+            // paths (this resignKey + the R9 global-mouse monitor below) must not
+            // close the panel while the smoke agent is driving it.
+            guard let self = self, !self.pickerOpen, !self.smokeMode else { return }
             self.hidePanel()
         }
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            guard let self = self, !self.pickerOpen else { return }
+            guard let self = self, !self.pickerOpen, !self.smokeMode else { return }
             self.hidePanel()
         }
         // S5/D10: a fresh install (the first-run seed ran) auto-shows the
@@ -651,6 +664,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         if let s = pendingTick {
             pendingTick = nil
             webView.evaluateJavaScript(s, completionHandler: nil)
+        }
+        // Smoke hook: webReady is the go — show + drive the panel here, where the
+        // page can actually receive JS (pre-ready evals are silent no-ops).
+        if smokeMode { smokeWebReady() }
+    }
+
+    // MARK: - Smoke hooks (env-gated, dev only)
+
+    /// Runs once, when the panel's webview is ready. With SPLASHUI_SMOKE=1 this
+    /// auto-shows the panel (so the smoke agent finds it), switches to
+    /// SPLASHUI_SMOKE_CHANNEL if set (channel switching in panel.html is a
+    /// scrollIntoView on the section's `data-channel`, as the first-run modal
+    /// does), then executes SPLASHUI_SMOKE_JS and writes the returned value
+    /// (stringified) to SPLASHUI_SMOKE_OUT.
+    private func smokeWebReady() {
+        showPanel()
+        if let c = smokeChannel, !c.isEmpty {
+            let script = "var s=document.querySelector('section[data-channel=\"\\(c)\"]'); if (s) s.scrollIntoView();"
+            webView.evaluateJavaScript(script, completionHandler: nil)
+        }
+        guard let path = smokeJS, let code = try? String(contentsOfFile: path, encoding: .utf8) else { return }
+        // Wrap in an IIFE so any expression returns its value; serialize the
+        // result (JSON for objects, raw text for strings) so the smoke agent
+        // always reads a stable file.
+        webView.evaluateJavaScript("(function(){ return (\(code)); })()") { [weak self] result, error in
+            DispatchQueue.main.async {
+                let out = self?.smokeOut ?? "/tmp/splashui_smoke_out.json"
+                var text: String
+                if let r = result as? String {
+                    text = r
+                } else if let r = result, let d = try? JSONSerialization.data(withJSONObject: [r], options: [.fragmentsAllowed]),
+                          let s = String(data: d, encoding: .utf8) {
+                    text = s
+                } else if let error = error {
+                    text = "{\"error\": \"JS evaluation failed\"}"
+                } else {
+                    text = "null"
+                }
+                try? text.data(using: .utf8)?.write(to: URL(fileURLWithPath: out))
+            }
         }
     }
 
