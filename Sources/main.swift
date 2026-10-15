@@ -90,8 +90,8 @@ final class ServerProc {
     private var launchDate = Date()
     private var restartDates: [Date] = []
     private var outHandle: FileHandle?
-    // D13: the signature of the last plan the engine actually launched (nil before
-    // the first successful launch). restart_required = current signature != this.
+    // D13: the session baseline from the last successful launch or adoption
+    // (nil before either). restart_required = current signature != this.
     var lastSuccessfulPlanSignature: String?
 
     // The launch plan (S4/D9): planned from config.json by planLaunch, consumed
@@ -114,7 +114,13 @@ final class ServerProc {
     }
 
     // App-side adoption of an already-serving engine (e.g. one started by start.sh).
-    func adopt() { everUp = true }
+    func adopt() {
+        everUp = true
+        // An external engine's full argv is unknown. Treat the current config
+        // as this session's baseline so later edits still prompt for restart.
+        // This is in-memory only, just like a successful launch's signature.
+        lastSuccessfulPlanSignature = plan.signature
+    }
 
     // Clear the error state so a user-pressed Start/Restart begins a fresh attempt.
     func clearLaunchError() {
@@ -1375,8 +1381,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         cfgPayload["engine"] = eng
         cfgPayload["mapping_fallback"] = plan.mappingFallback
         cfgPayload["mapping_used"] = plan.version ?? NSNull()
-        // D13: the running plan's signature vs the last one the engine actually
-        // launched. nil before the first launch; a rename shares the signature.
+        // D13: compare against the successful launch/adoption session baseline.
+        // nil before either; a rename shares the signature.
         let restart = server.lastSuccessfulPlanSignature.map { plan.signature != $0 }
         cfgPayload["restart_required"] = restart ?? NSNull()
         cfgPayload["restart_reason"] = restart == true

@@ -53,6 +53,12 @@ Stop or Restart command is sent. A 4.5-second watchdog bounds the 8199 window; t
 original port is continuously probed for 200-with-key / 401-without-key during the
 run. The adopted-plan baseline is an app-session UX assumption, not a claim that an
 external process's entire argv was inspected; edits after adoption require restart.
+The live `adoption stamps restart baseline` assertion deliberately requires false,
+not null, before editing: it pins `ServerProc.adopt()` itself rather than merely
+simulating it. Adoption stamps the already-computed current plan in memory;
+subsequent port/ANE edits compare against that signature. Reverting a change or a
+successful explicit restart clears the comparison. Nothing is persisted to config,
+and neither adopting nor saving automatically restarts an external engine.
 
 A private `/tmp/splashui-live-*` directory retains JSON per-assertion results,
 step snapshots, app log, one screenshot **as evidence only**, and a final summary
