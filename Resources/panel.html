@@ -343,8 +343,12 @@ function drawSpark(){
   hist.forEach((v,i)=>{ const px = i/(89)*c.width, py = c.height - v/max*(c.height-4) - 2; i?x.lineTo(px,py):x.moveTo(px,py); });
   x.stroke();
 }
-window.update = d => { S = d; render(); };
-const cmd = c => { try { window.webkit.messageHandlers.cmd.postMessage(c); } catch(e) {} };
+window.update = d => { if (!("cfg" in d) && S && S.cfg) d.cfg = S.cfg; S = d; render(); };
+const cmd = (c, args) => { try { window.webkit.messageHandlers.cmd.postMessage(Object.assign({ cmd: c }, args || {})); } catch(e) {} };
+let cfgDoc = null, cfgSaveResult = null, cfgValidateResult = null;
+window.__cfgGet = d => { cfgDoc = d; };
+window.__cfgSave = r => { cfgSaveResult = r; };
+window.__cfgValidate = r => { cfgValidateResult = r; };
 $("btnStart").onclick = () => cmd("start");
 $("btnStop").onclick = () => cmd("stop");
 $("btnRestart").onclick = () => cmd("restart");

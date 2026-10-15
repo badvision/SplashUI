@@ -558,5 +558,370 @@ check(rssBytesFromPsOutput("NaN") == nil, "RSS: malformed")
 check(rssBytesFromPsOutput("-1") == nil, "RSS: negative")
 check(rssBytesFromPsOutput(String(Int64.max)) == nil, "RSS: overflow")
 
+// ---- config.json store (S1a): parse / migrate / serialize / defaults / store ----
+
+// 1. JSONValue canonical form: deterministic key order, escapes, number rendering.
+do {
+    let a = JSONValue.object(["b": .number(2), "a": .string("x\ny")])
+    let b = JSONValue.object(["a": .string("x\ny"), "b": .number(2)])
+    check(canonicalJSONString(a) == canonicalJSONString(b), "cfg: canonical key order is deterministic")
+    check(canonicalJSONString(a) == "{\"a\":\"x\\ny\",\"b\":2}", "cfg: canonical renders sorted keys + escapes + integer numbers")
+    check(canonicalJSONString(.number(240.5)) == "240.5", "cfg: fractional numbers keep the fraction")
+    check(canonicalJSONString(.array([.null, .bool(true), .string("s")])) == "[null,true,\"s\"]", "cfg: mixed-type arrays")
+    check(canonicalJSONString(.object(["a": .object(["c": .null])])) == "{\"a\":{\"c\":null}}", "cfg: nested objects")
+}
+
+// 2. defaultConfig regression anchor (D9): the 9 documented vars, encoded as data.
+do {
+    let d = defaultConfig(home: "/home", now: now)
+    check(d.globals.port == 8123, "default: port 8123")
+    check(d.globals.apiKey == "splash-standalone-1", "default: key splash-standalone-1")
+    let ids = d.globals.modelFolders.map { $0.id }
+    check(ids == ["lmstudio", "ollama", "hfhub", "splash", "installroot"], "default: the 5 documented auto roots, in order")
+    let paths = d.globals.modelFolders.map { $0.path }
+    check(paths == ["/home/.lmstudio/models", "/home/.ollama/models",
+                    "/home/.cache/huggingface/hub",
+                    "/home/Library/Application Support/Splash/models",
+                    "/home/SplashUI/models"], "default: the 5 documented root paths")
+    check(d.globals.modelFolders.allSatisfy { $0.source == "auto" }, "default: roots tagged source auto")
+    check(d.globals.engine.mode == "auto" && d.globals.engine.brew && d.globals.engine.manualPath == nil,
+          "default: engine auto (full discovery ladder) + brew rung on")
+    check(d.profiles.count == 1 && d.profiles[0].name == "Default", "default: one profile named Default")
+    check(d.activeProfile == d.profiles[0].id && d.profiles[0].id.hasPrefix("p-"),
+          "default: active = the Default profile, app-generated id")
+    let o = d.profiles[0].options
+    check(o["max_cache_disk"]?.string == "100g", "default: max_cache_disk 100g")
+    check(o["idle_release"]?.string == "240m", "default: idle_release 240m")
+    check(o["ane"]?.bool == true, "default: ANE on (binding decision)")
+    check(o["persistent_cache"]?.bool == true, "default: persistent cache on (today's hardcoded --persistent-cache)")
+    check(d.profiles[0].model.source == "lmstudio" && d.profiles[0].model.id == "incoai/Qwen3.8-27B-Splash"
+          && d.profiles[0].model.dir == nil, "default: the documented model (lmstudio package; dir resolves at scan)")
+    check(d.profiles[0].meta.createdAt != nil, "default: created_at stamped")
+}
+
+// 3. Round-trip: parseConfig(configData(doc)) == doc; schema_version stamped.
+do {
+    let d = defaultConfig(home: "/home", now: now)
+    let data = configData(d)
+    let (d2, err, dropped) = parseConfig(data)
+    check(err == nil, "cfg: round-trip parses cleanly")
+    check(dropped.isEmpty, "cfg: round-trip drops nothing")
+    check(d2 == d, "cfg: round-trip is identity")
+    check(String(data: data, encoding: .utf8)?.contains("\"schema_version\": 1") == true,
+          "cfg: current schema_version stamped on write")
+}
+
+// 4. Unknown top-level keys are preserved verbatim (forward-compat).
+do {
+    var d = defaultConfig(home: "/home", now: now)
+    d.reserved["experimental"] = .object(["feature_flags": .object(["beta_ui": .bool(true)])])
+    d.reserved["note"] = .string("hand-edited")
+    let (d2, err, _) = parseConfig(configData(d))
+    check(err == nil, "cfg: doc with unknown top-level keys parses")
+    check(d2 == d, "cfg: unknown top-level keys preserved through round-trip")
+    let out = String(data: configData(d2!), encoding: .utf8)!
+    check(out.contains("\"experimental\"") && out.contains("\"feature_flags\"") && out.contains("\"beta_ui\""),
+          "cfg: unknown top-level keys re-serialized verbatim")
+}
+
+// 5. Unknown keys inside globals/profile entries are dropped (reported, not written back).
+do {
+    let txt = """
+    {"schema_version":1,
+     "globals":{"engine":{"mode":"auto","manual_path":null,"brew":true,"custom_engine":7},
+                "model_folders":[],"port":8123,"api_key":"k","mystery":"x"},
+     "profiles":[{"id":"p1","name":"A","extra":"drop","model":{"source":"none","id":null,"dir":null},"options":{},"meta":{}}],
+     "active_profile":"p1"}
+    """
+    let (d, err, dropped) = parseConfig(Data(txt.utf8))
+    check(err == nil, "cfg: file with unknown nested keys still parses")
+    check(dropped.contains("globals.mystery") && dropped.contains("globals.engine.custom_engine")
+          && dropped.contains("profiles[0].extra"), "cfg: unknown nested keys reported for the console log")
+    let out = String(data: configData(d!), encoding: .utf8)!
+    check(!out.contains("mystery") && !out.contains("custom_engine") && !out.contains("\"extra\""),
+          "cfg: unknown nested keys not written back")
+}
+
+// 6. Corrupt: unparseable / strict-type-violating files are flagged, never repaired in place.
+do {
+    let (d, err, _) = parseConfig(Data("this is not json".utf8))
+    check(d == nil, "cfg: corrupt (not JSON) -> no doc")
+    if case .invalidFormat = err { check(true, "cfg: corrupt -> invalidFormat") }
+    else { check(false, "cfg: corrupt -> invalidFormat") }
+}
+do {
+    func bad(_ field: String) -> Data {
+        Data("{\"schema_version\":1,\"globals\":{\(field)},\"profiles\":[],\"active_profile\":null}".utf8)
+    }
+    let cases: [(String, Data, String)] = [
+        ("string port", bad("\"port\":\"8123\""), "port"),
+        ("empty api_key", bad("\"port\":8123,\"api_key\":\"\""), "api_key"),
+        ("port 0", bad("\"port\":0"), "port"),
+        ("port 65536", bad("\"port\":65536"), "port"),
+        ("unknown engine mode", bad("\"engine\":{\"mode\":\"sometimes\"}"), "mode"),
+        ("bool where int expected", bad("\"port\":true"), "port"),
+    ]
+    for (label, data, needle) in cases {
+        let (_, err, _) = parseConfig(data)
+        if case .invalidFormat(let msg) = err {
+            check(msg.contains(needle), "cfg: corrupt(\(label)) -> invalidFormat names the field")
+        } else {
+            check(false, "cfg: corrupt(\(label)) -> invalidFormat names the field")
+        }
+    }
+    // Missing known fields -> defaults (lenient), not corrupt.
+    let t = Data("{\"schema_version\":1,\"globals\":{},\"profiles\":[],\"active_profile\":null}".utf8)
+    let (td, te, _) = parseConfig(t)
+    check(te == nil && td?.globals.port == 8123 && td?.globals.apiKey == "splash-standalone-1",
+          "cfg: missing known fields fall back to defaults (not corrupt)")
+}
+
+// 7. version > app -> read-only load, never written.
+do {
+    let txt = """
+    {"schema_version":2,
+     "globals":{"port":9999,"api_key":"k2","model_folders":[],"engine":{"mode":"manual","manual_path":"/x","brew":false}},
+     "profiles":[{"id":"p9","name":"Fwd","model":{"source":"hfid","id":"x/y","dir":null},"options":{"state_format":"bf16"},"meta":{"created_at":"t"}}],
+     "active_profile":"p9"}
+    """
+    let (d, err, _) = parseConfig(Data(txt.utf8))
+    check(d != nil, "cfg: newer version still loads (read-only display)")
+    if case .versionTooNew(let f, let a)? = err { check(f == 2 && a == 1, "cfg: versionTooNew carries file/app versions") }
+    else { check(false, "cfg: versionTooNew carries file/app versions") }
+    var wrote = false
+    let store = ConfigStore(home: "/home", path: "/h/SplashUI/config.json",
+                            read: { _ in Data(txt.utf8) },
+                            write: { _, _ in wrote = true; return true },
+                            ensureDir: { _, _ in true })
+    let r = store.saveCurrent()
+    check(store.versionTooNew, "store: newer file version -> read-only")
+    check(!r.ok && wrote == false, "store: read-only store refuses to write (file untouched)")
+    check(r.errors.first?.contains("2") == true, "store: refusal names the file's version")
+    check(store.doc.globals.port == 9999, "store: read-only store shows the forward doc's values")
+}
+
+// 8. Migration: v1 identity; pre-v1 clamps; the ordered migrator is a no-op at v1.
+do {
+    let d = defaultConfig(home: "/home", now: now)
+    check(migrate(d, from: 1, to: 1) == d, "migrate: v1->v1 identity")
+    check(migrate(d, from: 0, to: 1) == d, "migrate: pre-v1 clamps to v1 (identity)")
+    let txt = """
+    {"schema_version":0,
+     "globals":{"port":8123,"api_key":"k0","model_folders":[],"engine":{"mode":"auto","brew":true}},
+     "profiles":[],"active_profile":null}
+    """
+    let (d2, err, _) = parseConfig(Data(txt.utf8))
+    check(err == nil && d2?.globals.port == 8123, "cfg: pre-v1 file loads (clamped, identity migration)")
+}
+
+// 9. Store: corrupt file -> last-good in memory + load_error, file untouched.
+do {
+    let good = defaultConfig(home: "/home", now: now)
+    let goodData = configData(good)
+    let corrupt = Data("}{ not json".utf8)
+    var fileData: Data? = goodData
+    var writes = 0
+    let path = "/h/Library/Application Support/SplashUI/config.json"
+    let store = ConfigStore(home: "/home", path: path,
+                            read: { _ in fileData },
+                            write: { d, _ in writes += 1; fileData = d; return true },
+                            ensureDir: { _, _ in true })
+    check(store.doc == good && store.loadError == nil, "store: clean load keeps the file's doc")
+    fileData = corrupt
+    store.load()
+    check(store.doc == good, "store: corrupt file -> last-good stays in memory")
+    check(store.loadError != nil, "store: corrupt file -> load_error surfaced")
+    check(fileData == corrupt && writes == 0, "store: corrupt file left untouched (never repaired)")
+    // A fresh store (no last-good) on a corrupt file -> the documented defaults.
+    fileData = corrupt
+    let s2 = ConfigStore(home: "/home", path: path,
+                         read: { _ in fileData },
+                         write: { _, _ in true },
+                         ensureDir: { _, _ in true })
+    check(s2.loadError != nil, "store: corrupt, no last-good -> load_error")
+    check(s2.doc.globals.port == 8123 && s2.doc.globals.apiKey == "splash-standalone-1",
+          "store: corrupt, no last-good -> documented defaults")
+    check(s2.doc.profiles.count == 1 && s2.doc.profiles[0].name == "Default",
+          "store: corrupt, no last-good -> Default profile from defaults")
+}
+
+// 10. Store: absent file -> in-memory defaults, no write (single-writer rule).
+do {
+    var writes = 0
+    let store = ConfigStore(home: "/home", path: "/h/x/config.json",
+                            read: { _ in nil },
+                            write: { _, _ in writes += 1; return true },
+                            ensureDir: { _, _ in true })
+    check(store.loadError == nil && !store.versionTooNew, "store: absent file -> no error, not version-too-new")
+    check(store.doc.globals.port == 8123, "store: absent file -> documented defaults in memory")
+    check(writes == 0, "store: absent file is not written (only config.save writes; first-run seed is S1b)")
+}
+
+// 11. Store save: validate + atomic write + in-memory update + result stamping.
+do {
+    let good = defaultConfig(home: "/home", now: now)
+    var fileData: Data? = configData(good)
+    var writes = 0
+    let store = ConfigStore(home: "/home", path: "/h/x/config.json",
+                            read: { _ in fileData },
+                            write: { d, _ in writes += 1; fileData = d; return true },
+                            ensureDir: { _, _ in true })
+    var cand = good
+    cand.globals.port = 9000
+    let r = store.save(candidate: cand)
+    check(r.ok, "store: valid save succeeds")
+    check(writes == 1, "store: one atomic write per save")
+    check(fileData == configData(cand), "store: written bytes == canonical serialization")
+    check(store.doc == cand, "store: save updates the in-memory doc")
+    check(store.saveResult?.ok == true, "store: save stamps the result for the tick")
+    // A save that fails validation: no write, doc unchanged, error stamp.
+    var badCand = cand
+    badCand.globals.port = 0
+    let rb = store.save(candidate: badCand)
+    check(!rb.ok && writes == 1, "store: invalid save refuses without writing")
+    check(store.doc == cand, "store: in-memory doc unchanged after a refused save")
+    check(store.saveResult?.ok == false, "store: refused save stamps the error")
+    // A write failure (disk full / perms): doc unchanged, error stamp.
+    let storeFail = ConfigStore(home: "/home", path: "/h/x/config.json",
+                                read: { _ in fileData },
+                                write: { _, _ in false },
+                                ensureDir: { _, _ in true })
+    let before = storeFail.doc
+    let rf = storeFail.save(candidate: cand)
+    check(!rf.ok && storeFail.doc == before, "store: failed write leaves the doc untouched")
+}
+
+// 12. saveCandidate (the bridge entry): parse + validate + write.
+do {
+    let txt = """
+    {"schema_version":1,
+     "globals":{"port":8200,"api_key":"k","model_folders":[],"engine":{"mode":"auto","brew":true}},
+     "profiles":[{"id":"p1","name":"A","model":{"source":"none","id":null,"dir":null},"options":{"kv_format":"int8"},"meta":{"created_at":"t"}}],
+     "active_profile":"p1"}
+    """
+    var writes = 0
+    var fileData: Data? = nil
+    let store = ConfigStore(home: "/home", path: "/h/x/config.json",
+                            read: { _ in fileData },
+                            write: { d, _ in writes += 1; fileData = d; return true },
+                            ensureDir: { _, _ in true })
+    let r = store.saveCandidate(Data(txt.utf8))
+    check(r.ok && writes == 1, "store: saveCandidate parses + writes a valid doc")
+    check(store.doc.globals.port == 8200, "store: candidate values land in memory")
+    check(String(data: configData(store.doc), encoding: .utf8)!.contains("\"schema_version\": 1"),
+          "store: current schema_version stamped on the saved doc")
+    let bad = Data("{\"schema_version\":1,\"globals\":{\"port\":\"nope\"},\"profiles\":[],\"active_profile\":null}".utf8)
+    let r2 = store.saveCandidate(bad)
+    check(!r2.ok && writes == 1, "store: saveCandidate with a type error refuses without writing")
+    check(store.doc.globals.port == 8200, "store: in-memory doc unchanged after a refused candidate")
+    let fwd = Data("{\"schema_version\":9,\"globals\":{\"port\":8200},\"profiles\":[],\"active_profile\":null}".utf8)
+    let r3 = store.saveCandidate(fwd)
+    check(!r3.ok && writes == 1, "store: forward-version candidate refused (never destroys forward data)")
+}
+
+// 13. Save validation rules (pure).
+do {
+    let d = defaultConfig(home: "/home", now: now)
+    check(validateConfig(d).ok, "validate: default config is valid")
+    var dup = d
+    var clone = dup.profiles[0]
+    clone.id = "p-2-xyz"
+    dup.profiles.append(clone)
+    let rv = validateConfig(dup)
+    check(!rv.ok && rv.errors.contains(where: { $0.contains("Default") }), "validate: duplicate profile name rejected")
+    var badPort = d
+    badPort.globals.port = 0
+    check(!validateConfig(badPort).ok, "validate: port 0 rejected")
+    var dang = d
+    dang.activeProfile = "p-nope"
+    let rd = validateConfig(dang)
+    check(rd.ok && rd.warnings.contains(where: { $0.contains("active_profile") }),
+          "validate: dangling active_profile warns (never blocks)")
+    let (norm, invalid) = normalizeConfig(dang)
+    check(norm.activeProfile == nil && invalid, "normalize: dangling active -> null + active_invalid")
+    var man = d
+    man.globals.engine.mode = "manual"
+    man.globals.engine.manualPath = nil
+    let rm = validateConfig(man)
+    check(rm.ok && rm.warnings.contains(where: { $0.contains("manual") }),
+          "validate: manual mode without a path warns (never blocks)")
+}
+
+// 14. Masking: len + first/last 4; the raw key never appears.
+do {
+    check(maskSecret("splash-standalone-1") == "19 ch · spla…ne-1", "mask: len + first/last 4")
+    check(!maskSecret("splash-standalone-1").contains("splash-standalone-1"), "mask: raw key never appears")
+    check(maskSecret("abc") == "3 ch · •••", "mask: short keys fully masked")
+    check(maskSecret("") == "0 ch · •••", "mask: empty key masked, not echoed")
+}
+
+// 15. configTickPayload + the change gate.
+do {
+    let d = defaultConfig(home: "/home", now: now)
+    func payload(_ doc: ConfigDoc, inFlight: Int = 0, result: ConfigSaveResult? = nil) -> [String: Any] {
+        configTickPayload(doc: doc, loadError: nil, versionTooNew: false, activeInvalid: false,
+                          firstRun: false, inFlight: inFlight, result: result)
+    }
+    let p1 = payload(d)
+    let keys = ["load_error", "version_too_new", "engine", "folders", "port", "api_key_masked",
+                "profiles", "active_profile", "active_invalid", "mapping_fallback", "mapping_used",
+                "registry_report", "first_run", "restart_required", "restart_reason", "in_flight",
+                "result", "picked"]
+    for k in keys { check(p1[k] != nil, "cfg payload: carries \(k)") }
+    check(p1["port"] as? Int == 8123, "cfg payload: port")
+    check(p1["api_key_masked"] as? String == "19 ch · spla…ne-1", "cfg payload: api_key masked")
+    let canon1 = canonicalJSONString(JSONValue(any: p1))
+    check(!canon1.contains("splash-standalone-1"), "cfg payload: raw key never in the tick")
+    let p2 = payload(d)
+    check(canonicalJSONString(JSONValue(any: p2)) == canon1, "change-gate: unchanged config -> stable canonical form")
+    var d2 = d
+    d2.globals.port = 8124
+    check(canonicalJSONString(JSONValue(any: payload(d2))) != canon1, "change-gate: changed config -> new canonical form")
+    let pr = payload(d, inFlight: 1, result: ConfigSaveResult(ok: true, errors: [], warnings: ["w1"]))
+    check(pr["in_flight"] as? Int == 1, "cfg payload: in_flight count")
+    check((pr["result"] as? [String: Any])?["ok"] as? Bool == true
+          && ((pr["result"] as? [String: Any])?["warnings"] as? [String])?.contains("w1") == true,
+          "cfg payload: result stamp {ok, errors, warnings}")
+    let pe = configTickPayload(doc: d, loadError: "boom", versionTooNew: true, activeInvalid: false,
+                               firstRun: false, inFlight: 0, result: nil)
+    check(pe["load_error"] as? String == "boom" && pe["version_too_new"] as? Bool == true,
+          "cfg payload: load_error + version_too_new surface")
+    // Reserved top-level keys ride along so the JS draft can carry them through a save.
+    var d3 = d
+    d3.reserved["experimental"] = .object(["beta_ui": .bool(true)])
+    check(canonicalJSONString(JSONValue(any: payload(d3))).contains("experimental"),
+          "cfg payload: reserved top-level keys ride along")
+    // The one-shot result round-trip: stamped once, then nulled (the gate flips, then settles).
+    let withRes = canonicalJSONString(JSONValue(any: payload(d, result: ConfigSaveResult(ok: true, errors: [], warnings: []))))
+    let withoutRes = canonicalJSONString(JSONValue(any: payload(d, result: nil)))
+    check(withRes != canon1 && withoutRes == canon1, "change-gate: result stamp flips the gate exactly once")
+}
+
+// 16. Real filesystem (the store's default closures): 0700 dir, 0600 file, atomic rename.
+do {
+    let home = "/tmp/splashui-s1a-\(ProcessInfo.processInfo.processIdentifier)"
+    try? FileManager.default.removeItem(atPath: home)
+    let store = ConfigStore(home: home)   // the real default FS closures
+    var cand = defaultConfig(home: home, now: now)
+    cand.globals.port = 8124
+    let r = store.save(candidate: cand)
+    let path = home + "/Library/Application Support/SplashUI/config.json"
+    let mode = ((try? FileManager.default.attributesOfItem(atPath: path))?[.posixPermissions] as? Int) ?? -1
+    check(r.ok, "store(fs): save succeeds on the real filesystem")
+    check(mode == 0o600, "store(fs): file mode 0600 (the API key)")
+    let dirMode = ((try? FileManager.default.attributesOfItem(atPath: home + "/Library/Application Support/SplashUI"))?[.posixPermissions] as? Int) ?? -1
+    check(dirMode == 0o700, "store(fs): parent dir mode 0700")
+    check(!FileManager.default.fileExists(atPath: path + ".tmp"), "store(fs): no stray tmp file after the atomic rename")
+    if let fileData = FileManager.default.contents(atPath: path) {
+        let re = parseConfig(fileData)
+        check(re.doc?.globals.port == 8124, "store(fs): the saved file re-parses with the change")
+    } else {
+        check(false, "store(fs): the saved file re-parses with the change")
+    }
+    let s2 = ConfigStore(home: home)
+    check(s2.doc == cand && s2.loadError == nil, "store(fs): a fresh store reloads the saved file cleanly")
+    try? FileManager.default.removeItem(atPath: home)
+}
+
 print(failures == 0 ? "ALL TESTS PASSED" : "\(failures) TEST(S) FAILED")
 exit(failures == 0 ? 0 : 1)

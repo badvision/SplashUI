@@ -436,10 +436,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     private var lastServerSeen = Date.distantPast
     private var downSince: Date?
 
+    // config.json store — the single source of truth for engine/model/profile
+    // configuration (D9). Loaded before the first engine launch (D1); the ONLY
+    // code path that writes the file (R8 single-writer).
+    private var configStore: ConfigStore!
+    // Last canonical j.cfg JSON: the change gate (cfg ticks only when it changed).
+    private var lastCfgJSON: String?
+
     private let orange = NSColor(red: 0.98, green: 0.54, blue: 0.24, alpha: 1)
     private let teal = NSColor(red: 0.25, green: 0.76, blue: 0.79, alpha: 1)
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        // The config loads first (small file, one synchronous read) — before any
+        // engine launch reads the configuration it replaces (D1).
+        configStore = ConfigStore(home: NSHomeDirectory())
         setupStatusItem()
         setupPanel()
         if server.pid == nil {
@@ -523,7 +533,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             if let h = message.body as? Int { applyPanelHeight(h) }
             return
         }
-        guard let cmd = message.body as? String else { return }
+        // Object-body commands: the JS sends {cmd: "…", …args} (T8 clean cutover —
+        // string bodies are no longer accepted).
+        guard let body = message.body as? [String: Any] else { return }
+        let cmd = body["cmd"] as? String ?? ""
         switch cmd {
         case "start": server.clearLaunchError(); server.launch()
         case "stop":
@@ -534,8 +547,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             // starts at attempt 1 with no stale error in the UI.
             server.stop()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.server.launch() }
+        case "config.get": respondConfigGet()
+        case "config.save": respondConfigSave(body)
+        case "config.validate": respondConfigValidate(body)
         default: break
         }
+    }
+
+    // MARK: Config bridge (config.get / config.save / config.validate)
+
+    /// The whole doc, raw (the edit form needs the unmasked api_key to round-trip
+    /// it — the tick payload only ever carries the mask, D6).
+    private func respondConfigGet() {
+        let data = configData(configStore.doc)
+        guard let str = String(data: data, encoding: .utf8) else { return }
+        webView.evaluateJavaScript("window.__cfgGet(\(str))", completionHandler: nil)
+    }
+
+    /// Parse the candidate strictly, validate, write (the single-writer path).
+    private func respondConfigSave(_ body: [String: Any]) {
+        guard let docObj = body["doc"] as? [String: Any],
+              let data = try? JSONSerialization.data(withJSONObject: docObj) else { return }
+        let r = configStore.saveCandidate(data)
+        sendConfigResult(r, to: "window.__cfgSave")
+    }
+
+    /// The same rules, no write (syntax/strict check only — unsupported combos
+    /// never block; that is S3's eligibility, D4).
+    private func respondConfigValidate(_ body: [String: Any]) {
+        guard let docObj = body["doc"] as? [String: Any],
+              let data = try? JSONSerialization.data(withJSONObject: docObj) else { return }
+        let r = configStore.validateCandidate(data)
+        sendConfigResult(r, to: "window.__cfgValidate")
+    }
+
+    private func sendConfigResult(_ r: ConfigSaveResult, to fn: String) {
+        let res: [String: Any] = ["ok": r.ok, "errors": r.errors, "warnings": r.warnings]
+        guard let data = try? JSONSerialization.data(withJSONObject: res),
+              let str = String(data: data, encoding: .utf8) else { return }
+        webView.evaluateJavaScript("\(fn)(\(str))", completionHandler: nil)
     }
 
     // JS reports natural content height; panel grows/shrinks to fit (top edge pinned)
@@ -1055,6 +1105,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             "kit_dir": js(server.slash.workDir),
         ]
 
+        // ---- cfg (change gate: it ticks only when it changed; unchanged -> the
+        // key is omitted and the JS keeps its last copy). In S1a it reflects the
+        // config store; the fields later stories own ride along as stable nulls.
+        let cfgInFlight = prefillCount + decodeCount + frontendCount
+        let cfgPayload = configTickPayload(
+            doc: configStore.doc,
+            loadError: configStore.loadError,
+            versionTooNew: configStore.versionTooNew,
+            activeInvalid: configStore.activeInvalid,
+            firstRun: configStore.firstRun,
+            inFlight: cfgInFlight,
+            result: configStore.consumeSaveResult())
+        let cfgJSON = jsonString(JSONValue(any: cfgPayload), indent: 0)
+        if cfgJSON != lastCfgJSON {
+            lastCfgJSON = cfgJSON
+            j["cfg"] = cfgPayload
+        }
         if let data = try? JSONSerialization.data(withJSONObject: j),
            let str = String(data: data, encoding: .utf8) {
             webView.evaluateJavaScript("window.update(\(str))")
