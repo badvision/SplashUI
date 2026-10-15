@@ -206,6 +206,260 @@ func versionGE(_ a: String, _ b: String) -> Bool {
     }
     return true
 }
+// MARK: - Engine kit resolution (S3: extracted from resolveSplashPaths, D2/D9/D16)
+
+/// The outcome of the engine-kit discovery ladder. `tried` carries every rung
+/// checked (in order) so the miss error can name them (today's actionable-error
+/// style). The version comes from the resolved kit's release.json (D16 —
+/// detected, never user-set); nil when the kit's release.json is unreadable
+/// (downstream, `contractFor` falls back).
+public struct KitResolve: Equatable {
+    public var kit: String?       // the resolved kit dir, or nil
+    public var version: String?   // the resolved kit's release.json version
+    public var tried: [String]    // every rung checked, in order
+    public var error: String?     // actionable error text when kit == nil
+}
+
+/// The engine-kit ladder — the Auto discovery of D2, as a pure function.
+///
+/// Rungs, in order (D2: discovery ORDER, never version preference — a newer
+/// engine is never auto-promoted over the one the active model package was
+/// built against; that mismatch is the eligibility layer's verdict, S3):
+/// 1. the manual engine path — only when `mode == "manual"` (it replaces rung 1
+///    of the old env ladder; an incomplete manual kit is skipped, not fatal);
+/// 2. the fixed install.sh layout: `~/SplashUI/kit/splash-1.3.0-arm64-macos26`
+///    — the install.sh constants, hard-wired. D9: NO env reads — `SPLASHUI_HOME`
+///    and `SPLASH_VERSION` are not user-facing, the rung is a constant, not a var;
+/// 3. the Homebrew keg's `libexec` — only when the config's brew rung is enabled
+///    (D10 seeds it from detection; S5 exposes it). The old gate (brew only when
+///    no local model) is gone: in the config world the model is per-profile and
+///    the engine global, so the ladder cannot consult it — a 1.3.1 keg under a
+///    1.3.0 package model is refused by eligibility, with the 1.3.0 kit named.
+///
+/// A kit is the exact `isKit()` checks of the old code: a dir holding
+/// `engine/splash` (executable) and a bundled `python/bin/python{,3}`. The first
+/// VALID kit wins; every attempted rung is recorded for the error text.
+/// PURE (T1): FS/detection through injected closures; no process env (D9).
+public func resolveKit(engine: EngineCfg,
+                       home: String,
+                       isDir: (String) -> Bool,
+                       isExecutable: (String) -> Bool,
+                       brewKeg: () -> String? = { nil },
+                       kitVersion: (String) -> String? = { _ in nil }) -> KitResolve {
+    var tried: [String] = []
+    var kit: String?
+    func isKit(_ d: String) -> Bool {
+        isDir(d) && isExecutable(d + "/engine/splash") &&
+        (isExecutable(d + "/python/bin/python") || isExecutable(d + "/python/bin/python3"))
+    }
+    func tryKit(_ d: String) {
+        guard !d.isEmpty else { return }
+        tried.append(d)
+        if kit == nil, isKit(d) { kit = d }
+    }
+
+    if engine.mode == "manual" {
+        tryKit(engine.manualPath ?? "")
+    }
+    // The install.sh layout (install.sh's own constants — never app-read env):
+    // <root>/kit/splash-<version>-arm64-macos26 with root = ~/SplashUI.
+    tryKit(home + "/SplashUI/kit/splash-1.3.0-arm64-macos26")
+    if engine.brew {
+        if let b = brewKeg(), !b.isEmpty {
+            tryKit(b + "/libexec")   // the keg's libexec IS the engine kit
+        }
+    }
+
+    let version = kit.flatMap(kitVersion)
+    var error: String?
+    if kit == nil {
+        let list = tried.isEmpty ? "(none)" : tried.joined(separator: ", ")
+        error = "engine kit not found — no valid kit at: " + list +
+            " — a kit needs engine/splash + python/bin/python{,3} — "
+            + "point the engine at a kit folder in Settings (engine → manual), "
+            + "or run `./install.sh`, or install via Homebrew (brew install incoai/tap/splash)"
+    }
+    return KitResolve(kit: kit, version: version, tried: tried, error: error)
+}
+// MARK: - Model classification + enumeration (S3: contract C3)
+
+/// What a model directory (or an id-only model) is. C3: package/assembly/hfid/other.
+public enum ModelKind: String, Equatable {
+    /// A 1.3.0-format Splash package: `manifest.json` at the model root (the draft
+    /// is baked in, `tokenizer/` + `draft/` subdirs). Only the module flavor (1.3.0)
+    /// loads these; the 1.3.1+ engine refuses them ("Splash no longer loads").
+    case package
+    /// A Splash assembly: `model.json` + `config.json` at the root; the drafter
+    /// lives in `draft/` (1.3.0: `draft/config.json` is required by ModelDescriptor.mm).
+    case assembly
+    /// A model identified by a Hugging Face id: an id-only selection, or a local
+    /// copy of an HF repo (a plain config/weights or GGUF dir under an owner/repo
+    /// id). Served BY THAT ID — positionally by the 1.3.0 module flavor (which
+    /// then reads the local dir), download/symlink by the 1.3.1+ launcher.
+    case hfid
+    /// A local dir that is neither package nor assembly and carries no HF id
+    /// (owner/repo): no flavor can name or load it.
+    case other
+}
+
+/// The presence of the files/dirs the classifier and the eligibility table look
+/// at (C3): `manifest.json`, `model.json`, `config.json`, `tokenizer/`, `draft/`,
+/// `draft/config.json`. All of it is existence, read through the injected
+/// closures (a nil dir leaves everything false).
+public struct ModelDirFiles: Equatable {
+    public var manifest: Bool
+    public var modelJson: Bool
+    public var config: Bool
+    public var tokenizer: Bool
+    public var draft: Bool
+    public var draftConfig: Bool
+    public init(manifest: Bool = false, modelJson: Bool = false, config: Bool = false,
+                tokenizer: Bool = false, draft: Bool = false, draftConfig: Bool = false) {
+        self.manifest = manifest
+        self.modelJson = modelJson
+        self.config = config
+        self.tokenizer = tokenizer
+        self.draft = draft
+        self.draftConfig = draftConfig
+    }
+}
+
+public func modelDirFiles(_ dir: String?,
+                          isDir: (String) -> Bool,
+                          fileContents: (String) -> String?) -> ModelDirFiles {
+    guard let dir, !dir.isEmpty else { return ModelDirFiles() }
+    return ModelDirFiles(
+        manifest: fileContents(dir + "/manifest.json") != nil,
+        modelJson: fileContents(dir + "/model.json") != nil,
+        config: fileContents(dir + "/config.json") != nil,
+        tokenizer: isDir(dir + "/tokenizer"),
+        draft: isDir(dir + "/draft"),
+        draftConfig: fileContents(dir + "/draft/config.json") != nil)
+}
+
+/// C3 classification: `package` (manifest.json wins) / `assembly` (model.json +
+/// config.json) / `hfid` (id-only, or a local dir named by a full HF id — a plain
+/// HF repo copy) / `other` (a local dir with no package/assembly marker and no
+/// owner/repo id). A 1-component name is NOT an HF id (HF repos are owner/repo).
+public func classifyModelDir(dir: String?,
+                             id: String?,
+                             isDir: (String) -> Bool,
+                             fileContents: (String) -> String?) -> ModelKind {
+    guard let dir, !dir.isEmpty else { return .hfid }   // an id-only model
+    if fileContents(dir + "/manifest.json") != nil { return .package }
+    if fileContents(dir + "/model.json") != nil && fileContents(dir + "/config.json") != nil {
+        return .assembly
+    }
+    return id?.contains("/") == true ? .hfid : .other
+}
+
+/// One discovered model of a model folder (C3/C4: `cfg.folders[].models[]`).
+/// `dir` is the on-disk dir the model loads from (nil: an ollama name — the
+/// blobs are not a loadable model dir). `kind` is `classifyModelDir`'s verdict.
+public struct ModelEntry: Equatable {
+    public var id: String       // owner/repo (two-level roots), the repo name (1-level), or the ollama model name
+    public var dir: String?
+    public var source: String   // the model folder's id (lmstudio/hfhub/.../u-<n>)
+    public var kind: ModelKind
+    public init(id: String, dir: String? = nil, source: String, kind: ModelKind) {
+        self.id = id
+        self.dir = dir
+        self.source = source
+        self.kind = kind
+    }
+}
+
+/// The per-dir enumeration bound (C3): the FIRST 200 entries in sort order,
+/// hidden (dot-prefixed) entries skipped.
+private func boundedEntries(_ names: [String]) -> [String] {
+    names.sorted().filter { !$0.hasPrefix(".") }.prefix(200).map { $0 }
+}
+
+/// Enumerate one model folder's models (C3). PURE (T1): the folder's `path` is
+/// the root; every FS access goes through the injected closures. Layout rules:
+/// - `hfhub`: `models--<owner>--<repo>` dirs decode to `owner/repo`; the model
+///   dir is `snapshots/<newest>` — `refs/main` names the current commit when
+///   readable, else the last snapshot in sort order (ONE listing of snapshots/,
+///   no recursion); a repo without snapshots is dropped; an empty hub -> [].
+/// - `ollama`: the manifest paths under `manifests{,-v2}/registry.ollama.ai/
+///   library/` become model names (no dir: the blobs are not loadable); an
+///   empty library -> [] (NOT an error).
+/// - `splash`: the launcher's selection links (install/models.py: models/
+///   <owner>/<repo> symlinks; .selections/* hidden) — the two-level rule below,
+///   symlinks followed by the injected closures, the link path is the dir.
+/// - the two-level roots (lmstudio/installroot) and manual folders: a root entry
+///   that looks like a model dir (a manifest.json/model.json/config.json marker
+///   at its root) is a 1-level model (id = its name); a root entry without a
+///   marker is an owner-like dir — its subdirs are the models (id = owner/repo;
+///   depth <= 2, so anything deeper is not a model).
+public func enumerateModels(folder: ModelFolder,
+                            isDir: (String) -> Bool,
+                            fileContents: (String) -> String?,
+                            listDir: (String) -> [String]?) -> [ModelEntry] {
+    let root = folder.path
+    func entries(_ dir: String) -> [String] {
+        guard let names = listDir(dir) else { return [] }
+        return boundedEntries(names)
+    }
+    func kind(of dir: String?, id: String) -> ModelKind {
+        classifyModelDir(dir: dir, id: id, isDir: isDir, fileContents: fileContents)
+    }
+
+    switch folder.id {
+    case "hfhub":
+        var out: [ModelEntry] = []
+        for name in entries(root) where name.hasPrefix("models--") {
+            let repoId = String(name.dropFirst("models--".count)).replacingOccurrences(of: "--", with: "/")
+            let snapsDir = root + "/" + name + "/snapshots"
+            guard let snaps = listDir(snapsDir) else { continue }
+            let snapsB = boundedEntries(snaps)
+            guard !snapsB.isEmpty else { continue }
+            var snap: String?
+            if let ref = fileContents(root + "/" + name + "/refs/main") {
+                let trimmed = ref.trimmingCharacters(in: .whitespacesAndNewlines)
+                if snapsB.contains(trimmed) { snap = trimmed }
+            }
+            if snap == nil { snap = snapsB.last }
+            guard let s = snap else { continue }
+            out.append(ModelEntry(id: repoId, dir: snapsDir + "/" + s,
+                                  source: folder.id, kind: kind(of: snapsDir + "/" + s, id: repoId)))
+        }
+        return out
+    case "ollama":
+        var names = Set<String>()
+        for base in ["manifests", "manifests-v2"] {
+            for n in entries(root + "/" + base + "/registry.ollama.ai/library") {
+                names.insert(n)
+            }
+        }
+        return names.sorted().map {
+            ModelEntry(id: $0, dir: nil, source: folder.id, kind: kind(of: nil, id: $0))
+        }
+    default:
+        // lmstudio / installroot / splash / manual (u-<n>): the two-level rule.
+        var out: [ModelEntry] = []
+        for name in entries(root) {
+            let p = root + "/" + name
+            guard isDir(p) else { continue }
+            let files = modelDirFiles(p, isDir: isDir, fileContents: fileContents)
+            if files.manifest || files.modelJson || files.config {
+                // a model dir directly under the root (1-level).
+                out.append(ModelEntry(id: name, dir: p, source: folder.id, kind: kind(of: p, id: name)))
+            } else if let kids = listDir(p) {
+                // an owner-like dir: its subdirs are the models (2-level).
+                for k in boundedEntries(kids) {
+                    let kp = p + "/" + k
+                    guard isDir(kp) else { continue }
+                    out.append(ModelEntry(id: name + "/" + k, dir: kp,
+                                          source: folder.id, kind: kind(of: kp, id: name + "/" + k)))
+                }
+            }
+        }
+        return out
+    }
+}
+
+
 // MARK: - Versioned launch registry (contract C2, D3/D9/D16)
 //
 // The UI->CLI mapping is a HAND-AUTHORED registry keyed by the kit's release.json
@@ -279,12 +533,17 @@ public struct VersionContract: Equatable {
     public let familyRegistry: [String: String]
     /// 1.3.2's suggested drafter models (1.3.0/1.3.1: none).
     public let suggestedModels: [String]
+    /// config.json -> family rules (the app's plan-time knowledge of the
+    /// engine's config->family registry; 1.3.0: none — packages bake the draft).
+    public let familyRules: [FamilyRule]
     public init(version: String, flavor: LaunchFlavor, options: [OptionDef],
-                familyRegistry: [String: String] = [:], suggestedModels: [String] = []) {
+                familyRegistry: [String: String] = [:], suggestedModels: [String] = [],
+                familyRules: [FamilyRule] = []) {
         self.version = version
         self.flavor = flavor
         self.options = options
         self.familyRegistry = familyRegistry
+        self.familyRules = familyRules
         self.suggestedModels = suggestedModels
     }
     public func option(_ key: String) -> OptionDef? { options.first { $0.key == key } }
@@ -323,12 +582,13 @@ private let sharedOptions130_131: [OptionDef] = [
     OptionDef(flag: "--max-context", key: "max_context", kind: .value, group: "memory", defValue: "auto"),
     OptionDef(flag: "--kv-format", key: "kv_format", kind: .value, group: "memory",
               defValue: "int8", choices: ["int8", "bf16"]),
-    OptionDef(flag: "--cache-dir", key: "cache_dir", kind: .value, group: "cache"),
+    OptionDef(flag: "--cache-dir", key: "cache_dir", kind: .value, group: "cache",
+              requires: ["persistent_cache"]),
     OptionDef(flag: "--served-model-name", key: "served_model_name", kind: .append, group: "api"),
     OptionDef(flag: "--announce-served-name", key: "announce_served_name", kind: .bool, group: "api",
               defValue: "false", requires: ["served_model_name"]),
     OptionDef(flag: "--default-reasoning-effort", key: "reasoning_effort", kind: .value, group: "api",
-              choices: ["none", "minimal", "low", "medium", "high", "xhigh"]),
+              choices: ["none", "minimal", "low", "medium", "high", "xhigh", "max"]),
     OptionDef(flag: "--max-request-size", key: "max_request_size", kind: .value, group: "requests",
               defValue: "128M"),
     OptionDef(flag: "--max-image-pixels", key: "max_image_pixels", kind: .value, group: "requests",
@@ -343,10 +603,12 @@ private let sharedOptions130_131: [OptionDef] = [
 
 // The 1.3.2 shared set (the real 1.3.2 tag's serve_options.py, diffed against the
 // 1.3.1 keg): the same order with the 1.3.2 deltas in place — --max-cache-disk
-// default 0 -> auto (<=32G free; the engine now accepts persistent-cache on top
-// of it, so requires is dropped), + the 4 new flags inserted beside their
+// default 0 -> auto (<=32G free), + the 4 new flags inserted beside their
 // relatives (--state-format after --kv-format, --max-cache-disk-writes after
-// --max-cache-disk, the thinking pair after --default-reasoning-effort).
+// --max-cache-disk, the thinking pair after --default-reasoning-effort). The
+// engine's cross-checks survive the semantics change: --persistent-cache still
+// requires a non-zero --max-cache-disk (the 1.3.2 check is `== 0`, so the
+// unset->auto default passes) and --cache-dir still needs --persistent-cache.
 private let sharedOptions132: [OptionDef] = [
     OptionDef(flag: "--host", key: "host", kind: .value, group: "network",
               defValue: "127.0.0.1", appDefault: "127.0.0.1", alwaysEmit: true),
@@ -355,7 +617,7 @@ private let sharedOptions132: [OptionDef] = [
     OptionDef(flag: "--api-key", key: "api_key", kind: .value, group: "network",
               secret: true, envVar: "SPLASH_API_KEY"),
     OptionDef(flag: "--persistent-cache", key: "persistent_cache", kind: .bool, group: "cache",
-              defValue: "false"),
+              defValue: "false", requires: ["max_cache_disk"]),
     OptionDef(flag: "--max-cache-disk", key: "max_cache_disk", kind: .value, group: "cache",
               defValue: "auto"),
     OptionDef(flag: "--max-cache-disk-writes", key: "max_cache_disk_writes", kind: .value, group: "cache",
@@ -371,12 +633,13 @@ private let sharedOptions132: [OptionDef] = [
               defValue: "int8", choices: ["int8", "bf16"]),
     OptionDef(flag: "--state-format", key: "state_format", kind: .value, group: "memory",
               defValue: "fp32", choices: ["fp32", "bf16"]),
-    OptionDef(flag: "--cache-dir", key: "cache_dir", kind: .value, group: "cache"),
+    OptionDef(flag: "--cache-dir", key: "cache_dir", kind: .value, group: "cache",
+              requires: ["persistent_cache"]),
     OptionDef(flag: "--served-model-name", key: "served_model_name", kind: .append, group: "api"),
     OptionDef(flag: "--announce-served-name", key: "announce_served_name", kind: .bool, group: "api",
               defValue: "false", requires: ["served_model_name"]),
     OptionDef(flag: "--default-reasoning-effort", key: "reasoning_effort", kind: .value, group: "api",
-              choices: ["none", "minimal", "low", "medium", "high", "xhigh"]),
+              choices: ["none", "minimal", "low", "medium", "high", "xhigh", "max"]),
     OptionDef(flag: "--thinking-token-budget", key: "thinking_token_budget", kind: .value, group: "api"),
     OptionDef(flag: "--thinking-end-text", key: "thinking_end_text", kind: .value, group: "api"),
     OptionDef(flag: "--max-request-size", key: "max_request_size", kind: .value, group: "requests",
@@ -428,6 +691,12 @@ public let contract131 = VersionContract(
     familyRegistry: [
         "Qwen3.8-27B": "incoai/Qwen3.8-27B-DFlash2",
         "Qwen3.6-35B-A3B": "incoai/Qwen3.6-35B-A3B-DFlash2",
+    ],
+    familyRules: [
+        // verified: the mlx-community/Qwen3.8-27B-4bit config.json on this
+        // machine says model_type "qwen3_5", and the engine's registry maps the
+        // Qwen3.8-27B family (the repo name alone would mislead).
+        FamilyRule(configKey: "model_type", value: "qwen3_5", family: "Qwen3.8-27B"),
     ])
 
 /// The 1.3.2 contract: 1.3.1 + the 4 new flags; --max-cache-disk default
@@ -441,6 +710,9 @@ public let contract132 = VersionContract(
     familyRegistry: [
         "Qwen3.8-27B": "incoai/Qwen3.8-27B-DFlash2",
         "Qwen3.6-35B-A3B": "incoai/Qwen3.6-35B-A3B-DFlash2",
+    ],
+    familyRules: [
+        FamilyRule(configKey: "model_type", value: "qwen3_5", family: "Qwen3.8-27B"),
     ])
 
 /// The default registry: every authored version.
@@ -636,6 +908,310 @@ public func buildArgv(_ contract: VersionContract,
         }
     }
     return (args: args, env: env, issues: issues)
+}
+// MARK: - S3: family rules, eligibility, and the launch planner (C3, D4, D9, D16)
+
+/// One config.json -> family rule: the app's plan-time knowledge of the engine's
+/// config->family registry (1.3.1/1.3.2). The engine's family comes from the model
+/// CONFIG, not the repo name, so a repo named ...Qwen... can still be a different
+/// family. The one verified pair: model_type "qwen3_5" -> Qwen3.8-27B (checked
+/// against the mlx-community repo's config.json on this machine AND the registry).
+public struct FamilyRule: Equatable {
+    public let configKey: String   // e.g. "model_type"
+    public let value: String       // e.g. "qwen3_5"
+    public let family: String      // e.g. "Qwen3.8-27B"
+    public init(configKey: String, value: String, family: String) {
+        self.configKey = configKey
+        self.value = value
+        self.family = family
+    }
+}
+
+/// The plan-time family of a model, from its config.json. D4: undecidable (no
+/// readable config, or no rule matches) -> nil, which becomes the `unknown`
+/// verdict upstream — the engine is the final arbiter. NEVER a guess.
+public func deriveFamily(config: String?, contract: VersionContract) -> String? {
+    guard let config, let data = config.data(using: .utf8),
+          let any = try? JSONSerialization.jsonObject(with: data, options: []),
+          let obj = any as? [String: Any],
+          let dict = JSONValue(any: obj).object else { return nil }
+    for rule in contract.familyRules {
+        if case .string(let v) = dict[rule.configKey] ?? .null, v == rule.value {
+            return rule.family
+        }
+    }
+    return nil
+}
+
+/// A plan-time eligibility verdict for (model kind x engine contract). D4: static
+/// + conservative — never a false-runnable, never a false-block:
+/// - `runnable`   the plan launches;
+/// - `unrunnable` saveable (D4) but the start is refused pre-flight with the fix;
+/// - `blocked`    a hard gate: the engine categorically refuses the combo (the
+///                1.3.0 package under 1.3.1+), launch is never attempted;
+/// - `unknown`    the app cannot decide (the family comes from the model config at
+///                load) — the launch proceeds; the engine decides, its own error
+///                surfaces in the existing LAUNCH FAIL state.
+public struct Eligibility: Equatable {
+    public enum Verdict: String, Equatable {
+        case runnable, unrunnable, blocked, unknown
+    }
+    public var verdict: Verdict
+    public var reason: String?
+    public init(verdict: Verdict, reason: String? = nil) {
+        self.verdict = verdict
+        self.reason = reason
+    }
+}
+
+/// The plan-time table (C3), row by model kind, column by engine flavor.
+public func eligibility(kind: ModelKind,
+                        contract: VersionContract,
+                        modelId: String?,
+                        modelDir: String?,
+                        draftModel: String?,
+                        family: String?,
+                        files: ModelDirFiles) -> Eligibility {
+    let v = contract.version
+    switch kind {
+    case .package:
+        if contract.flavor == .launcher {
+            return Eligibility(verdict: .blocked, reason:
+                "engine v\(v) refuses 1.3.0 packages ('Splash no longer loads') — "
+                + "run a 1.3.0 kit (engine → manual path), or switch the model to its HF repo id")
+        }
+        var missing = [String]()
+        if !files.tokenizer { missing.append("tokenizer/") }
+        if !files.draft { missing.append("draft/") }
+        guard !missing.isEmpty else { return Eligibility(verdict: .runnable) }
+        return Eligibility(verdict: .unrunnable, reason:
+            "the 1.3.0 package \(modelId ?? "") is missing \(missing.joined(separator: " + ")) — "
+            + "a package needs both subdirs (the 1.3.0 engine bakes no draft in at load)")
+    case .assembly:
+        if contract.flavor == .launcher {
+            return Eligibility(verdict: .blocked, reason:
+                "engine v\(v) serves models by HF id — it cannot load a local assembly "
+                + "directory (model.json) — pick the model's HF repo id, or run a 1.3.0 kit")
+        }
+        var missing = [String]()
+        if !files.config { missing.append("config.json") }
+        if !files.draftConfig { missing.append("draft/config.json") }
+        guard !missing.isEmpty else { return Eligibility(verdict: .runnable) }
+        return Eligibility(verdict: .unrunnable, reason:
+            "the assembly \(modelId ?? "") is missing \(missing.joined(separator: " + ")) — "
+            + "an assembly needs both (the drafter requires a draft in both engine versions)")
+    case .hfid:
+        if contract.flavor == .module {
+            if modelId == nil || !modelId!.contains("/") {
+                return Eligibility(verdict: .unrunnable, reason:
+                    "the 1.3.0 engine requires --model in OWNER/REPO form — this model has no "
+                    + "Hugging Face id — rename it, or use a 1.3.1+ engine")
+            }
+            if modelDir == nil {
+                return Eligibility(verdict: .unrunnable, reason:
+                    "the 1.3.0 engine loads the model directory positionally (it never downloads) — "
+                    + "no local directory for \(modelId!) was found — download the model into a model "
+                    + "folder, or use a 1.3.1+ engine (it downloads by id)")
+            }
+            if files.config { return Eligibility(verdict: .runnable) }
+            return Eligibility(verdict: .unrunnable, reason:
+                "the 1.3.0 engine needs a config.json in the model dir to load it positionally — "
+                + "\(modelId!) has none")
+        }
+        // The launcher (1.3.1+): serves by HF id, one-time download.
+        if modelId == nil || !modelId!.contains("/") {
+            let shown = (modelId?.isEmpty == false) ? modelId! : "the model"
+            return Eligibility(verdict: .unrunnable, reason:
+                "\(shown) is not an HF id (owner/repo) — the v\(v) engine serves models by HF id")
+        }
+        if !(draftModel ?? "").isEmpty {
+            return Eligibility(verdict: .runnable, reason: "an explicit --draft-model is set")
+        }
+        if let family {
+            if let draft = contract.familyRegistry[family] {
+                return Eligibility(verdict: .runnable,
+                                   reason: "family \(family) is in the v\(v) registry (draft \(draft))")
+            }
+            return Eligibility(verdict: .unrunnable, reason:
+                "no DFlash2 draft is known for the \(family) family (the engine refuses at start) — "
+                + "set --draft-model to a local dir or HF repo, or run a 1.3.0 kit")
+        }
+        return Eligibility(verdict: .unknown, reason:
+            "engine decides at load — the model's family comes from its config (not its repo name); "
+            + "the v\(v) registry decides then")
+    case .other:
+        if contract.flavor == .module {
+            return Eligibility(verdict: .unrunnable, reason:
+                "the 1.3.0 engine loads a Splash package (manifest.json) or an assembly (model.json) — "
+                + "this model is neither — point the profile at a model it can load, or use a 1.3.1+ engine")
+        }
+        return Eligibility(verdict: .unrunnable, reason:
+            "the v\(v) engine serves models by Hugging Face id — this local directory has no repo id to serve by")
+    }
+}
+
+/// The launch result (C3): everything `ServerProc.launch` consumes, + the plan
+/// signature (D13) and the actionable error text (when the plan cannot launch).
+public struct LaunchConfig: Equatable {
+    public var workDir: String?       // the kit dir (the engine's cwd)
+    public var executable: String?    // the kit's bundled python
+    public var base: String?          // the kit root (= workDir)
+    public var engineArgs: [String]   // the full argv after the executable
+    public var engineEnv: [String: String]   // SPLASH_API_KEY — env only, never argv
+    public var port: Int?
+    public var modelId: String?       // the model actually served
+    public var modelDir: String?      // the on-disk dir (the module form's positional arg)
+    public var version: String?       // the kit's release.json version
+    public var mappingFallback: Bool  // D3: the visible FALLBACK indicator's source
+    public var error: String?         // actionable text; nil = the plan launches
+    public var profileId: String?
+    public var profileName: String?
+    public var restartRequired: Bool  // D13: COMPUTED by S4 from the signature; a
+                                       // fresh plan never requires a restart
+    public var restartReason: String?
+    public var signature: String      // D13: hash-free plan signature (see planLaunch)
+    public var issues: [String]       // warning-level (dropped options) for S7
+    public init(workDir: String? = nil, executable: String? = nil, base: String? = nil,
+                engineArgs: [String] = [], engineEnv: [String: String] = [:],
+                port: Int? = nil, modelId: String? = nil, modelDir: String? = nil,
+                version: String? = nil, mappingFallback: Bool = false,
+                error: String? = nil, profileId: String? = nil, profileName: String? = nil,
+                restartRequired: Bool = false, restartReason: String? = nil,
+                signature: String = "", issues: [String] = []) {
+        self.workDir = workDir
+        self.executable = executable
+        self.base = base
+        self.engineArgs = engineArgs
+        self.engineEnv = engineEnv
+        self.port = port
+        self.modelId = modelId
+        self.modelDir = modelDir
+        self.version = version
+        self.mappingFallback = mappingFallback
+        self.error = error
+        self.profileId = profileId
+        self.profileName = profileName
+        self.restartRequired = restartRequired
+        self.restartReason = restartReason
+        self.signature = signature
+        self.issues = issues
+    }
+}
+
+/// The pure launch planner (C3): config.json text + injected FS -> `LaunchConfig`.
+///
+/// Pipeline: parse -> active profile -> `resolveKit` (the kit ladder; D9: NO env)
+/// -> `contractFor` (D16: the kit's release.json) -> `enumerateModels` +
+/// `classifyModelDir` + `eligibility` (D4) -> `buildArgv` (S2a) -> the plan
+/// signature (D13). Every dependency is an injected closure — PURE, testable,
+/// no process env reads anywhere (D9: the config is the single source of truth).
+/// `now` is reserved for S4 (metadata timestamps); the plan itself is timeless.
+public func planLaunch(_ data: Data,
+                       home: String,
+                       isDir: (String) -> Bool,
+                       isExecutable: (String) -> Bool,
+                       brewKeg: () -> String? = { nil },
+                       kitVersion: (String) -> String? = { _ in nil },
+                       fileContents: (String) -> String? = { _ in nil },
+                       listDir: (String) -> [String]? = { _ in nil },
+                       now: Date = Date()) -> LaunchConfig {
+    // 1. the config (the store validated it at save; a plan is a dry-run of it).
+    guard let doc = parseConfig(data).doc else {
+        return LaunchConfig(error: "config.json is corrupt — the last good config remains in effect")
+    }
+    // 2. the active profile (S1b guarantees exactly one at startup).
+    guard let pid = doc.activeProfile,
+          let profile = doc.profiles.first(where: { $0.id == pid }) else {
+        return LaunchConfig(error: "no profile is selected — pick one in Settings (06)")
+    }
+    let g = doc.globals
+    // 3. the engine kit (the D2 ladder; D9: nothing from the process environment).
+    let kr = resolveKit(engine: g.engine, home: home, isDir: isDir,
+                        isExecutable: isExecutable, brewKeg: brewKeg,
+                        kitVersion: kitVersion)
+    guard let kit = kr.kit else {
+        return LaunchConfig(version: kr.version, error: kr.error,
+                            profileId: profile.id, profileName: profile.name)
+    }
+    // 4. the contract for THAT kit (D16: exact, else the latest fallback).
+    let (contract, fallback) = contractFor(kr.version, registry: launchRegistry)
+    // 5. the model: the profile's pick, resolved against the folders by
+    //    enumeration (the fresh discovery beats a stale stored dir).
+    let model = profile.model
+    guard model.source != "none", let mid = model.id, !mid.isEmpty else {
+        return LaunchConfig(version: kr.version,
+                            error: "no model selected — pick one in Settings (06)",
+                            profileId: profile.id, profileName: profile.name)
+    }
+    var dir = model.dir
+    var kind: ModelKind?
+    for folder in g.modelFolders {
+        let entries = enumerateModels(folder: folder, isDir: isDir,
+                                      fileContents: fileContents, listDir: listDir)
+        if let e = entries.first(where: { $0.id == mid }) {
+            kind = e.kind
+            if let d = e.dir { dir = d }
+            break
+        }
+    }
+    // A model the enumeration cannot find (a folder moved since the last save)
+    // is classified from its stored dir; an id with no dir at all is an hfid.
+    if kind == nil {
+        kind = dir == nil ? .hfid
+            : classifyModelDir(dir: dir, id: mid, isDir: isDir, fileContents: fileContents)
+    }
+    let files = modelDirFiles(dir, isDir: isDir, fileContents: fileContents)
+    let draftModel = profile.options["draft_model"]?.string
+    let family: String? = {
+        guard let dir else { return nil }
+        return deriveFamily(config: fileContents(dir + "/config.json"), contract: contract)
+    }()
+    // 6. the eligibility gate (D4): blocked/unrunnable -> a clean error with the
+    //    fix; unknown is NOT a gate (the engine decides at load).
+    let elig = eligibility(kind: kind!, contract: contract, modelId: mid, modelDir: dir,
+                           draftModel: draftModel, family: family, files: files)
+    if elig.verdict == .blocked || elig.verdict == .unrunnable {
+        return LaunchConfig(modelId: mid, modelDir: dir, version: kr.version,
+                            mappingFallback: fallback, error: elig.reason,
+                            profileId: profile.id, profileName: profile.name)
+    }
+    // 7. the argv (the registry is the ONLY source; D9: the key via env). The
+    //    on-disk dir is the resolved one (the module form's positional argument).
+    var launchModel = model
+    launchModel.dir = dir
+    let built = buildArgv(contract, profileValues: profile.options,
+                          model: launchModel, globals: g)
+    if built.args.isEmpty {
+        let msg = built.issues.first(where: { $0.severity == .error })?.message
+            ?? "cannot build the launch argv"
+        return LaunchConfig(modelId: mid, modelDir: dir, version: kr.version,
+                            mappingFallback: fallback, error: msg,
+                            profileId: profile.id, profileName: profile.name)
+    }
+    // 8. assemble. The executable: the kit's bundled python (python, then python3).
+    let executable: String? =
+        isExecutable(kit + "/python/bin/python") ? kit + "/python/bin/python"
+        : isExecutable(kit + "/python/bin/python3") ? kit + "/python/bin/python3"
+        : nil
+    guard let executable else {
+        return LaunchConfig(workDir: kit, base: kit, modelId: mid, modelDir: dir,
+                            version: kr.version, mappingFallback: fallback,
+                            error: "the kit at \(kit) has no usable python (python/bin/python{,3})",
+                            profileId: profile.id, profileName: profile.name)
+    }
+    // The plan signature (D13): everything that reaches the engine — the workdir,
+    // the version (the binary itself), the full argv, the key env. A profile
+    // rename changes none of these; a port/key/ANE/model/kit/fallback change does.
+    var sigParts = [kit, kr.version ?? ""]
+    sigParts += built.args
+    if let key = built.env["SPLASH_API_KEY"] { sigParts.append(key) }
+    return LaunchConfig(workDir: kit, executable: executable, base: kit,
+                        engineArgs: built.args, engineEnv: built.env,
+                        port: g.port, modelId: mid, modelDir: dir,
+                        version: kr.version, mappingFallback: fallback,
+                        profileId: profile.id, profileName: profile.name,
+                        signature: sigParts.joined(separator: "\u{1F}"),
+                        issues: built.issues.filter { $0.severity == .warning }.map { $0.message })
 }
 
 // The UI never outlives the service — but only for a service that actually ran.

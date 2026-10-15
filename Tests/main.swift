@@ -2,11 +2,21 @@
 // Run from the repo root: ./run_tests.sh   (compiles ui_logic.swift + this file, no AppKit).
 
 import Foundation
+import Darwin
 
 var failures = 0
 func check(_ cond: Bool, _ label: String) {
     if cond { print("ok  - \(label)") }
     else { failures += 1; print("FAIL- \(label)") }
+}
+
+/// The harness's process-environment injection (D9 invariance tests): set the
+/// given vars, run the closure, then restore (unset) them. The deprecated
+/// SPLASH_* vars must have zero effect on anything in ui_logic.swift.
+func withEnv(_ vars: [String: String], _ body: () -> Void) {
+    for (k, v) in vars { setenv(k, v, 1) }
+    body()
+    for k in vars.keys { unsetenv(k) }
 }
 
 
@@ -1317,8 +1327,8 @@ do {
           "contract 1.3.2: --max-cache-disk-writes default 0 (no limit)")
     check(c.option("thinking_token_budget")?.defValue == nil && c.option("thinking_end_text")?.defValue == nil,
           "contract 1.3.2: the thinking flags have no engine default (emit only when set)")
-    check(c.option("persistent_cache")?.kind == .bool && c.option("persistent_cache")?.requires.isEmpty == true,
-          "contract 1.3.2: --persistent-cache is still store_true and no longer requires --max-cache-disk (auto is non-zero)")
+    check(c.option("persistent_cache")?.kind == .bool && c.option("persistent_cache")?.requires == ["max_cache_disk"],
+          "contract 1.3.2: --persistent-cache requires --max-cache-disk (the 1.3.2 engine hard-errors on max_cache_disk == 0; unset -> auto passes)")
     check(c.option("max_cache_disk_writes")?.requires == ["max_cache_disk"],
           "contract 1.3.2: --max-cache-disk-writes requires the SSD cache (the 1.3.2 engine check)")
     check(c.familyRegistry == contract131.familyRegistry,
@@ -1530,6 +1540,964 @@ do {
                        "--host", "127.0.0.1", "--port", "8123", "--state-format", "bf16"],
           "fallback: the 1.3.2 mapping drives the argv (launch proceeds)")
     check(res.env == ["SPLASH_API_KEY": "k"], "fallback: env built from the globals as usual")
+}
+
+// 42. G1: the real 1.3.2 engine hard-errors `--persistent-cache` when
+// --max-cache-disk is 0 (serve_options.py: `if args.persistent_cache and
+// args.max_cache_disk == 0: parser.error(...)`). The registry must carry the
+// requires; the disabled-state check ("0") does the work. Unset -> "auto"
+// (non-zero) -> the flag is kept.
+do {
+    let model = ProfileModel(source: "hfid", id: "m/r")
+    let globals = GlobalCfg(port: 8123, apiKey: "k")
+    let unset = buildArgv(contract132, profileValues: ["persistent_cache": .bool(true)],
+                          model: model, globals: globals)
+    check(unset.args.contains("--persistent-cache") && unset.issues.isEmpty,
+          "G1 1.3.2: --persistent-cache kept when --max-cache-disk is unset (engine default auto is non-zero)")
+    let zero = buildArgv(contract132, profileValues: ["persistent_cache": .bool(true), "max_cache_disk": .string("0")],
+                         model: model, globals: globals)
+    check(!zero.args.contains("--persistent-cache") && zero.args.contains("--max-cache-disk") && zero.args.contains("0"),
+          "G1 1.3.2: a '0' cache disables --persistent-cache (dropped), the '0' itself emits")
+    check(zero.issues.count == 1 && zero.issues[0].severity == .warning && zero.issues[0].message.contains("--persistent-cache"),
+          "G1 1.3.2: the warning names --persistent-cache (D4: warn, never block)")
+}
+
+// 43. G2: `--cache-dir needs --persistent-cache` — the engine cross-checks it in
+// ALL THREE versions (verified: the 1.3.0 kit, the 1.3.1 keg, and the 1.3.2 tag
+// serve_options.py each carry the check). The registry must mirror it in every
+// shared set; a cache-dir without persistent-cache is dropped with a warning.
+do {
+    let model = ProfileModel(source: "lmstudio", id: "m/r", dir: "/m")   // dir + id: both flavors build
+    let globals = GlobalCfg(port: 8123, apiKey: "k")
+    for contract in [contract130, contract131, contract132] {
+        check(contract.option("cache_dir")?.requires == ["persistent_cache"],
+              "G2: \(contract.version) --cache-dir requires --persistent-cache (the engine cross-check)")
+        let v = buildArgv(contract, profileValues: ["cache_dir": .string("/tmp/pc")],
+                          model: model, globals: globals)
+        check(!v.args.contains("--cache-dir") && !v.args.contains("/tmp/pc"),
+              "G2: \(contract.version) --cache-dir dropped without --persistent-cache")
+        check(v.issues.count == 1 && v.issues[0].severity == .warning && v.issues[0].message.contains("--cache-dir"),
+              "G2: \(contract.version) the warning names --cache-dir (D4: warn, never block)")
+        let ok = buildArgv(contract, profileValues: ["cache_dir": .string("/tmp/pc"), "persistent_cache": .bool(true),
+                                                     "max_cache_disk": .string("100g")],
+                           model: model, globals: globals)
+        check(ok.args.contains("--cache-dir") && ok.args.contains("--persistent-cache") && ok.issues.isEmpty,
+              "G2: \(contract.version) --cache-dir kept when --persistent-cache is on (a non-zero cache satisfies it)")
+    }
+}
+
+// 44. G3: REASONING_EFFORTS is 7 values in 1.3.0 AND 1.3.2 (verified in both
+// kits' serve_options.py): none, minimal, low, medium, high, xhigh, max — the
+// registry was missing "max" in all three contracts.
+do {
+    let seven = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+    for contract in [contract130, contract131, contract132] {
+        check(contract.option("reasoning_effort")?.choices == seven,
+              "G3: \(contract.version) --default-reasoning-effort has the 7 real choices (incl. max)")
+    }
+    let model = ProfileModel(source: "hfid", id: "m/r")
+    let res = buildArgv(contract131, profileValues: ["reasoning_effort": .string("max")],
+                        model: model, globals: GlobalCfg(port: 8123, apiKey: "k"))
+    check(res.args.contains("--default-reasoning-effort") && res.args.contains("max"),
+          "G3: 'max' emits on the argv (S6b's save-validation consumes the choices)")
+}
+
+// ---- S3: resolveKit (the engine ladder extracted from resolveSplashPaths) ----
+// D2: discovery ORDER (never version preference). D9: NO env reads — the
+// install.sh layout rung is the fixed ~/SplashUI + 1.3.0 constants (the
+// rung is a constant, not a var). D16: version from the resolved kit's
+// release.json via the injected kitVersion. The old model-gate on the brew
+// rung is gone (planning-decision 2): first valid kit wins; the model
+// mismatch is the eligibility layer's verdict.
+
+let fixedKitDir = "/home/SplashUI/kit/splash-1.3.0-arm64-macos26"
+
+// 45. auto mode: the fixed install.sh-layout rung beats the brew keg (order).
+do {
+    let (kd, ke) = kitPaths(fixedKitDir)
+    let (bd, be) = brewPaths("/opt/homebrew")
+    let r = resolveKit(
+        engine: EngineCfg(mode: "auto", manualPath: nil, brew: true),
+        home: "/home",
+        isDir: { (kd | bd).contains($0) }, isExecutable: { (ke | be).contains($0) },
+        brewKeg: { "/opt/homebrew" },
+        kitVersion: { $0 == fixedKitDir ? "1.3.0" : nil })
+    check(r.kit == fixedKitDir, "resolveKit: the fixed ~/SplashUI + 1.3.0 rung wins over brew (D2 order)")
+    check(r.version == "1.3.0", "resolveKit: version read from the resolved kit's release.json (D16)")
+    check(r.tried == [fixedKitDir, "/opt/homebrew/libexec"], "resolveKit: tried lists every rung in order (brew skipped once a kit is found)")
+    check(r.error == nil, "resolveKit: no error when a kit resolves")
+}
+
+// 46. auto mode: the brew keg's libexec is the kit when only brew is present.
+do {
+    let (bd, be) = brewPaths("/opt/homebrew")
+    let r = resolveKit(
+        engine: EngineCfg(mode: "auto", manualPath: nil, brew: true),
+        home: "/home",
+        isDir: { bd.contains($0) }, isExecutable: { be.contains($0) },
+        brewKeg: { "/opt/homebrew" },
+        kitVersion: { $0.hasPrefix("/opt/homebrew/libexec") ? "1.3.1" : nil })
+    check(r.kit == "/opt/homebrew/libexec", "resolveKit: the brew keg libexec rung (last) resolves")
+    check(r.version == "1.3.1", "resolveKit: the keg version surfaces (1.3.1)")
+    check(r.tried == [fixedKitDir, "/opt/homebrew/libexec"], "resolveKit: both rungs tried before the keg")
+    check(r.error == nil, "resolveKit: no error")
+}
+
+// 47. manual mode: manualPath replaces rung 1 — a valid manual kit wins over the fixed rung.
+do {
+    let (md, me) = kitPaths("/user/kit")
+    let (kd, ke) = kitPaths(fixedKitDir)
+    let r = resolveKit(
+        engine: EngineCfg(mode: "manual", manualPath: "/user/kit", brew: true),
+        home: "/home",
+        isDir: { (md | kd).contains($0) }, isExecutable: { (me | ke).contains($0) },
+        brewKeg: { nil },
+        kitVersion: { _ in nil })
+    check(r.kit == "/user/kit", "resolveKit: a valid manual path replaces rung 1 (always wins when set)")
+    check(r.tried.first == "/user/kit", "resolveKit: manual path tried first")
+}
+
+// 48. manual mode: an INCOMPLETE manual kit (no python) is skipped — the ladder continues.
+do {
+    let (kd, ke) = kitPaths(fixedKitDir)
+    let dirs: Set<String> = kd.union(["/broken/kit"])
+    let exe: Set<String> = ke.union(["/broken/kit/engine/splash"])   // engine yes, python no
+    let r = resolveKit(
+        engine: EngineCfg(mode: "manual", manualPath: "/broken/kit", brew: true),
+        home: "/home",
+        isDir: { dirs.contains($0) }, isExecutable: { exe.contains($0) },
+        brewKeg: { nil },
+        kitVersion: { $0 == fixedKitDir ? "1.3.0" : nil })
+    check(r.kit == fixedKitDir, "resolveKit: an incomplete manual kit is skipped, the fixed rung wins")
+    check(r.tried == ["/broken/kit", fixedKitDir], "resolveKit: the broken manual path is in the tried list")
+    check(r.error == nil, "resolveKit: no error")
+}
+
+// 49. manual mode with an empty path: no rung 1 — the ladder starts at the fixed rung.
+do {
+    let (kd, ke) = kitPaths(fixedKitDir)
+    let r = resolveKit(
+        engine: EngineCfg(mode: "manual", manualPath: "", brew: true),
+        home: "/home",
+        isDir: { kd.contains($0) }, isExecutable: { ke.contains($0) },
+        brewKeg: { nil })
+    check(r.kit == fixedKitDir, "resolveKit: an empty manual path contributes no rung")
+    check(r.tried == [fixedKitDir], "resolveKit: only the fixed rung tried (no brew kit present)")
+}
+
+// 50. the brew rung only exists when the config's brew flag is on.
+do {
+    let (bd, be) = brewPaths("/opt/homebrew")
+    let r = resolveKit(
+        engine: EngineCfg(mode: "auto", manualPath: nil, brew: false),
+        home: "/home",
+        isDir: { bd.contains($0) }, isExecutable: { be.contains($0) },
+        brewKeg: { "/opt/homebrew" })
+    check(r.kit == nil, "resolveKit: brew disabled -> the keg is never tried")
+    check(r.tried == [fixedKitDir], "resolveKit: the tried list shows only the fixed rung")
+    check((r.error ?? "").contains("engine kit not found"), "resolveKit: the miss error says kit not found")
+}
+
+// 51. nothing anywhere: an actionable error names every rung tried (today's style).
+do {
+    let r = resolveKit(
+        engine: EngineCfg(mode: "auto", manualPath: nil, brew: true),
+        home: "/home",
+        isDir: { _ in false }, isExecutable: { _ in false },
+        brewKeg: { "/opt/homebrew" },
+        kitVersion: { _ in nil })
+    check(r.kit == nil && r.version == nil, "resolveKit: nothing found -> no kit, no version")
+    let e = r.error ?? ""
+    check(e.contains("engine kit not found"), "resolveKit: the error names the failure")
+    check(e.contains(fixedKitDir) && e.contains("/opt/homebrew/libexec"),
+          "resolveKit: the error names every location tried")
+}
+
+// 52. D9: the ladder reads NO environment. With every documented SPLASH_* var
+// set in the process environment, the result is unchanged (the rungs are
+// config + constants — SPLASH_KIT_DIR / SPLASHUI_HOME / SPLASH_VERSION are gone).
+do {
+    let (kd, ke) = kitPaths(fixedKitDir)
+    let (bd, be) = brewPaths("/opt/homebrew")
+    let noEnv = resolveKit(
+        engine: EngineCfg(mode: "auto", manualPath: nil, brew: true),
+        home: "/home",
+        isDir: { (kd | bd).contains($0) }, isExecutable: { (ke | be).contains($0) },
+        brewKeg: { "/opt/homebrew" },
+        kitVersion: { $0 == fixedKitDir ? "1.3.0" : $0.hasPrefix("/opt/homebrew/libexec") ? "1.3.1" : nil })
+    withEnv(["SPLASH_KIT_DIR": "/env/kit", "SPLASHUI_HOME": "/customroot",
+                     "SPLASH_VERSION": "9.9.9", "SPLASH_PORT": "9999",
+                     "SPLASH_KEY": "other", "SPLASH_MODEL_ROOT": "/env/model",
+                     "SPLASH_MAX_CACHE_DISK": "50g", "SPLASH_IDLE_RELEASE": "60m",
+                     "SPLASH_ANE": "off"]) {
+        let polluted = resolveKit(
+            engine: EngineCfg(mode: "auto", manualPath: nil, brew: true),
+            home: "/home",
+            isDir: { (kd | bd).contains($0) }, isExecutable: { (ke | be).contains($0) },
+            brewKeg: { "/opt/homebrew" },
+            kitVersion: { $0 == fixedKitDir ? "1.3.0" : $0.hasPrefix("/opt/homebrew/libexec") ? "1.3.1" : nil })
+        check(polluted == noEnv, "resolveKit D9: the 9 SPLASH_* vars in the process env change nothing")
+    }
+}
+
+// 53. the isKit validation is the exact 3-way check: dir + engine/splash + python{,3}.
+do {
+    // a dir with an engine but NO python at all -> not a kit
+    let dirs: Set<String> = ["/x", "/x/engine"]
+    let exe: Set<String> = ["/x/engine/splash"]
+    let r1 = resolveKit(engine: EngineCfg(mode: "manual", manualPath: "/x", brew: false),
+                        home: "/home",
+                        isDir: { dirs.contains($0) }, isExecutable: { exe.contains($0) },
+                        brewKeg: { nil })
+    check(r1.kit == nil, "isKit: engine/splash without python is not a kit")
+    // python3 alone suffices (the brew layout)
+    let d2: Set<String> = ["/y", "/y/python"]
+    let e2: Set<String> = ["/y/engine/splash", "/y/python/bin/python3"]
+    let r2 = resolveKit(engine: EngineCfg(mode: "manual", manualPath: "/y", brew: false),
+                        home: "/home",
+                        isDir: { d2.contains($0) }, isExecutable: { e2.contains($0) },
+                        brewKeg: { nil })
+    check(r2.kit == "/y", "isKit: engine/splash + python3 is a kit (the keg layout)")
+}
+
+// ---- S3: model classification + enumeration ---------------------------------
+
+/// A fake FS for enumeration fixtures: path sets + text contents + symlinks
+/// (a symlink entry aliases its target for isDir/listDir/fileContents — the
+/// kernel follows links, so the pure closures do too). NEVER the real FS:
+/// tests must not scan the machine's 92G HF cache.
+struct FakeFS {
+    var dirs: Set<String> = []
+    var files: Set<String> = []
+    var text: [String: String] = [:]
+    var symlinks: [String: String] = [:]
+    var executables: Set<String> = []
+
+    func isDir(_ p: String) -> Bool {
+        if let t = symlinks[p] { return isDir(t) }
+        return dirs.contains(p)
+    }
+    func isExecutable(_ p: String) -> Bool { executables.contains(p) }
+    func fileContents(_ p: String) -> String? {
+        var cur = p
+        var guard_ = 0
+        while let t = symlinks[cur], guard_ < 8 { cur = t; guard_ += 1 }
+        if let s = text[cur] { return s }
+        return files.contains(cur) ? "" : nil
+    }
+    func listDir(_ p: String) -> [String]? {
+        var cur = p
+        var guard_ = 0
+        while let t = symlinks[cur], guard_ < 8 { cur = t; guard_ += 1 }
+        guard dirs.contains(cur) else { return nil }
+        var entries = Set<String>()
+        for name in dirs where name.hasPrefix(cur + "/") {
+            let rest = String(name.dropFirst(cur.count + 1))
+            if !rest.contains("/") { entries.insert(rest) }
+        }
+        for name in files where name.hasPrefix(cur + "/") {
+            let rest = String(name.dropFirst(cur.count + 1))
+            if !rest.contains("/") { entries.insert(rest) }
+        }
+        for name in symlinks.keys where name.hasPrefix(cur + "/") {
+            let rest = String(name.dropFirst(cur.count + 1))
+            if !rest.contains("/") { entries.insert(rest) }
+        }
+        return entries.sorted()
+    }
+    mutating func dir(_ p: String, _ children: [String]) {
+        insertAncestors(p)
+        dirs.insert(p)
+        for c in children {
+            let name = c.hasSuffix("/") ? String(c.dropLast()) : c
+            let full = p + "/" + name
+            if c.hasSuffix("/") { dirs.insert(full) } else { files.insert(full) }
+        }
+    }
+    mutating func file(_ path: String, _ contents: String = "") {
+        insertAncestors((path as NSString).deletingLastPathComponent)
+        files.insert(path)
+        text[path] = contents
+    }
+    mutating func exec(_ path: String) { executables.insert(path) }
+    private mutating func insertAncestors(_ path: String) {
+        var cur = path
+        while cur.hasPrefix("/") {
+            dirs.insert(cur)
+            guard cur != "/" else { break }
+            let i = cur.lastIndex(of: "/")!   // cur != "/" and hasPrefix("/") guarantee it
+            cur = String(cur[..<i])
+        }
+    }
+}
+
+// 54. classifyModelDir: the 4 kinds (C3: package/assembly/hfid/other).
+do {
+    var fs = FakeFS()
+    fs.dir("/m/pkg", ["manifest.json", "model.json", "config.json"])
+    fs.dir("/m/asm", ["model.json", "config.json"])
+    fs.dir("/m/plain", ["config.json", "model.safetensors"])
+    fs.dir("/m/half", ["model.json"])
+    let isDir = fs.isDir, fc = fs.fileContents
+    // package: manifest.json wins (even when a model.json is also present).
+    check(classifyModelDir(dir: "/m/pkg", id: "o/r", isDir: isDir, fileContents: fc) == .package,
+          "classify: manifest.json -> package (beats model.json)")
+    // assembly: model.json + config.json.
+    check(classifyModelDir(dir: "/m/asm", id: "o/r", isDir: isDir, fileContents: fc) == .assembly,
+          "classify: model.json + config.json -> assembly")
+    // a plain model dir (config.json, weights) WITH an HF id -> hfid (its local copy).
+    check(classifyModelDir(dir: "/m/plain", id: "o/r", isDir: isDir, fileContents: fc) == .hfid,
+          "classify: a plain dir with an HF id -> hfid")
+    // the same dir WITHOUT an id -> other (no name to serve by).
+    check(classifyModelDir(dir: "/m/plain", id: nil, isDir: isDir, fileContents: fc) == .other,
+          "classify: a plain dir without an id -> other")
+    // a 1-component name is not an HF id either.
+    check(classifyModelDir(dir: "/m/plain", id: "name", isDir: isDir, fileContents: fc) == .other,
+          "classify: a 1-component name is not an HF id -> other")
+    // model.json without config.json is not an assembly (it needs both).
+    check(classifyModelDir(dir: "/m/half", id: "o/r", isDir: isDir, fileContents: fc) == .hfid,
+          "classify: model.json without config.json is not an assembly (a plain dir with an id)")
+    // an id-only model (no dir) -> hfid.
+    check(classifyModelDir(dir: nil, id: "o/r", isDir: isDir, fileContents: fc) == .hfid,
+          "classify: no dir (id-only) -> hfid")
+}
+
+// 55. enumerateModels: the lmstudio layout (<owner>/<repo>, two-level, skip hidden,
+// cap 200/dir; kinds classified; source tagged). The real root on this machine:
+// 6 models under 5 owners (incoai x3, keXjos, lmstudio-community, local,
+// mlx-community, p4ik — 7 under 6 owners).
+do {
+    var fs = FakeFS()
+    fs.file("/root/README.md")                       // a root file: not a model
+    fs.dir("/root/.hidden", ["config.json"])         // hidden: skipped
+    fs.dir("/root/incoai/Qwen3.8-27B-Splash", ["manifest.json", "tokenizer/", "draft/", "target/"])
+    fs.dir("/root/incoai/Qwen3.8-27B-Splash-Reasoning", ["config.json"])
+    fs.dir("/root/incoai/Qwen3.8-27B-DFlash2", ["config.json"])
+    fs.dir("/root/keXjos/m1", ["config.json"])
+    fs.dir("/root/lmstudio-community/m2", ["model.json", "config.json"])
+    fs.dir("/root/local/m3", ["config.json"])
+    fs.dir("/root/mlx-community/Qwen3.8-27B-4bit", ["config.json"])
+    fs.dir("/root/p4ik/m4", ["config.json"])
+    let folder = ModelFolder(id: "lmstudio", path: "/root", source: "auto")
+    let models = enumerateModels(folder: folder,
+                                 isDir: fs.isDir, fileContents: fs.fileContents, listDir: fs.listDir)
+    check(models.count == 8, "lmstudio: 8 models under 6 owners (hidden skipped, root file skipped)")
+    check(models.map { $0.id } == [
+        "incoai/Qwen3.8-27B-DFlash2", "incoai/Qwen3.8-27B-Splash",
+        "incoai/Qwen3.8-27B-Splash-Reasoning", "keXjos/m1",
+        "lmstudio-community/m2", "local/m3", "mlx-community/Qwen3.8-27B-4bit", "p4ik/m4"],
+        "lmstudio: ids are owner/repo, sorted")
+    check(models.allSatisfy { $0.source == "lmstudio" }, "lmstudio: source-tagged with the folder id")
+    let splash = models.first { $0.id == "incoai/Qwen3.8-27B-Splash" }
+    check(splash?.kind == .package, "lmstudio: the Splash package classifies as package")
+    check(splash?.dir == "/root/incoai/Qwen3.8-27B-Splash", "lmstudio: the dir is the on-disk repo dir")
+    let asm = models.first { $0.id == "lmstudio-community/m2" }
+    check(asm?.kind == .assembly, "lmstudio: model.json+config.json classifies as assembly")
+    let plain = models.first { $0.id == "mlx-community/Qwen3.8-27B-4bit" }
+    check(plain?.kind == .hfid, "lmstudio: a plain MLX repo with an id classifies as hfid")
+    check(models.allSatisfy { $0.dir?.hasPrefix("/root/") == true }, "lmstudio: dirs are two-level under the root")
+}
+
+// 56. enumeration bounds (92G-style): the 200-entries-per-dir cap and depth <= 2.
+do {
+    var fs = FakeFS()
+    for i in 0..<250 {
+        fs.dir(String(format: "/root/owner-%03d", i) + "/repo", ["config.json"])
+    }
+    // depth-3 dirs under a repo: never enumerated (depth <= 2).
+    fs.dir("/root/owner-000/repo/tokenizer", ["tokenizer.json"])
+    let folder = ModelFolder(id: "lmstudio", path: "/root", source: "auto")
+    let models = enumerateModels(folder: folder,
+                                 isDir: fs.isDir, fileContents: fs.fileContents, listDir: fs.listDir)
+    check(models.count == 200, "cap: 250 owner dirs -> 200 (the per-dir cap)")
+    check(models.allSatisfy { $0.id.hasPrefix("owner-") }, "cap: the FIRST 200 in sort order survive")
+    check(!models.contains { $0.id.contains("tokenizer") }, "depth: 3-level entries are never models")
+    check(models.allSatisfy { $0.dir.map { $0.split(separator: "/").count } == 3 },
+          "depth: every model sits exactly two levels under the root")
+}
+
+// 57. enumerateModels: the hfhub layout — models--<o>--<r> decodes to o/r; the
+// snapshot is the newest (refs/main when present, else the last in sort order);
+// a single listing, no recursion; an empty hub -> [] (NOT an error).
+do {
+    var fs = FakeFS()
+    fs.file("/hub/CACHEDIR.TAG")
+    fs.dir("/hub/blobs", ["ab12"])
+    // two snapshots; refs/main points at the OLDER one (the current ref).
+    fs.dir("/hub/models--o--r/snapshots/aaaa", ["config.json"])
+    fs.dir("/hub/models--o--r/snapshots/bbbb", ["config.json"])
+    fs.file("/hub/models--o--r/refs/main", "aaaa")
+    fs.dir("/hub/models--x--y/snapshots/1111", ["config.json"])
+    fs.dir("/hub/models--x--y/snapshots/2222", ["config.json"])
+    fs.dir("/hub/models--p--q/snapshots", [])       // an empty snapshots dir
+    let folder = ModelFolder(id: "hfhub", path: "/hub", source: "auto")
+    let models = enumerateModels(folder: folder,
+                                 isDir: fs.isDir, fileContents: fs.fileContents, listDir: fs.listDir)
+    check(models.count == 2, "hfhub: 2 repos (blobs/ + CACHEDIR.TAG skipped; the empty-snapshot repo dropped)")
+    let or = models.first { $0.id == "o/r" }
+    check(or?.dir == "/hub/models--o--r/snapshots/aaaa", "hfhub: refs/main picks the current snapshot")
+    let xy = models.first { $0.id == "x/y" }
+    check(xy?.dir == "/hub/models--x--y/snapshots/2222", "hfhub: without refs, the last snapshot in sort order")
+    check(models.allSatisfy { $0.kind == .hfid }, "hfhub: snapshot dirs with a config.json + an id -> hfid")
+    // an empty hub is not an error.
+    var empty = FakeFS()
+    empty.dir("/hub2/blobs", [])
+    empty.file("/hub2/CACHEDIR.TAG")
+    let m2 = enumerateModels(folder: ModelFolder(id: "hfhub", path: "/hub2", source: "auto"),
+                             isDir: empty.isDir, fileContents: empty.fileContents, listDir: empty.listDir)
+    check(m2.isEmpty, "hfhub: an empty hub -> [] (not an error)")
+}
+
+// 58. enumerateModels: ollama — the manifest paths become names; an EMPTY root
+// is [] (not an error); entries carry no dir (blobs are not loadable model dirs).
+do {
+    var fs = FakeFS()
+    fs.dir("/om/models/manifests/registry.ollama.ai/library/qwen3.8-27b", ["latest"])
+    fs.file("/om/models/manifests/registry.ollama.ai/library/llama3.1-8b:latest")
+    let folder = ModelFolder(id: "ollama", path: "/om/models", source: "auto")
+    let models = enumerateModels(folder: folder,
+                                 isDir: fs.isDir, fileContents: fs.fileContents, listDir: fs.listDir)
+    check(models.count == 2, "ollama: 2 manifest names (a dir and a file entry)")
+    check(models.map { $0.id }.sorted() == ["llama3.1-8b:latest", "qwen3.8-27b"],
+          "ollama: ids are the manifest names, sorted")
+    check(models.allSatisfy { $0.dir == nil }, "ollama: no dir (the blobs are not a loadable model dir)")
+    // the real machine's root is empty: not an error.
+    var empty = FakeFS()
+    empty.dir("/om2/models/manifests/registry.ollama.ai/library", [])
+    empty.dir("/om2/models/manifests-v2/registry.ollama.ai/library", [])
+    let m2 = enumerateModels(folder: ModelFolder(id: "ollama", path: "/om2/models", source: "auto"),
+                             isDir: empty.isDir, fileContents: empty.fileContents, listDir: empty.listDir)
+    check(m2.isEmpty, "ollama: an empty library -> [] (not an error)")
+}
+
+// 59. enumerateModels: the Splash app-support root — the launcher symlinks its
+// models here under models/<owner>/<repo> (install/models.py selection_link),
+// .selections/* for variant/revision picks (hidden: skipped); the enumeration
+// follows each symlink (isDir/fileContents follow links) and reports the
+// symlink path as the model dir.
+do {
+    var fs = FakeFS()
+    // the real targets (the launcher's preparation dir + the HF cache).
+    fs.dir("/targets/qwen4bit", ["config.json"])
+    fs.dir("/targets/dflash2", ["config.json", "draft.safetensors"])
+    // the root: owner dirs + selection symlinks (the launcher's two-level layout).
+    fs.dir("/splash/models/mlx-community", [])
+    fs.dir("/splash/models/incoai", [])
+    fs.dirs.insert("/splash/models/.selections")
+    fs.symlinks["/splash/models/mlx-community/Qwen3.8-27B-4bit"] = "/targets/qwen4bit"
+    fs.symlinks["/splash/models/incoai/Qwen3.8-27B-DFlash2"] = "/targets/dflash2"
+    fs.symlinks["/splash/models/.selections/ab12cd"] = "/targets/qwen4bit"
+    fs.file("/splash/models/.DS_Store")
+    let folder = ModelFolder(id: "splash", path: "/splash/models", source: "auto")
+    let models = enumerateModels(folder: folder,
+                                 isDir: fs.isDir, fileContents: fs.fileContents, listDir: fs.listDir)
+    check(models.count == 2, "splash: 2 symlinked models (.selections + hidden skipped)")
+    check(models.map { $0.id }.sorted() == ["incoai/Qwen3.8-27B-DFlash2", "mlx-community/Qwen3.8-27B-4bit"],
+          "splash: ids are owner/repo (the launcher's selection_link layout)")
+    let q = models.first { $0.id == "mlx-community/Qwen3.8-27B-4bit" }
+    check(q?.dir == "/splash/models/mlx-community/Qwen3.8-27B-4bit",
+          "splash: the dir is the symlink path (the kernel resolves it to the target)")
+    check(q?.kind == .hfid, "splash: classification follows the link to the target's files (a config + an HF id)")
+}
+
+// 60. enumerateModels: manual folders — the same rules, source-tagged; a models
+// root with single-level model dirs AND two-level owner dirs both work.
+do {
+    var fs = FakeFS()
+    fs.dir("/manual/my-model", ["config.json", "weights.npz"])   // single-level model
+    fs.dir("/manual/ownerX/repoY", ["config.json"])              // two-level model
+    fs.dir("/manual/.cache", ["config.json"])                    // hidden: skipped
+    let folder = ModelFolder(id: "u-1", path: "/manual", source: "manual")
+    let models = enumerateModels(folder: folder,
+                                 isDir: fs.isDir, fileContents: fs.fileContents, listDir: fs.listDir)
+    check(models.count == 2, "manual: 2 models (hidden skipped)")
+    check(models.map { $0.id }.sorted() == ["my-model", "ownerX/repoY"], "manual: single- and two-level ids")
+    check(models.allSatisfy { $0.source == "u-1" }, "manual: tagged with the folder id")
+    check(models.allSatisfy { $0.source != "auto" } && folder.source == "manual", "manual: the folder's source is manual")
+}
+
+// ---- S3: eligibility (D4: static + conservative; the plan-time table, C3) ----
+//
+// runnable  = the plan can launch;
+// unrunnable = saveable (D4) but start refused pre-flight with the fix;
+// blocked   = a hard gate: the engine categorically refuses the combo, launch
+//             is never attempted (the 1.3.0-package gate, 1.3.1+);
+// unknown   = the app cannot decide (the engine's family comes from the model
+//             config at load) — launch proceeds; the engine is the final arbiter.
+// D4: NEVER a false-runnable; undecidable -> unknown, never a fake runnable.
+
+// 61. package row: 1.3.0 = runnable iff tokenizer/ + draft/ present; 1.3.1+ =
+// BLOCKED (the engine refuses 1.3.0 packages — "Splash no longer loads").
+do {
+    let full = ModelDirFiles(manifest: true, config: true, tokenizer: true, draft: true, draftConfig: true)
+    let e = eligibility(kind: .package, contract: contract130, modelId: "incoai/Qwen3.8-27B-Splash",
+                        modelDir: "/m", draftModel: nil, family: nil, files: full)
+    check(e.verdict == .runnable, "eligibility: package + 1.3.0 with tokenizer/ + draft/ -> runnable")
+    let noTok = ModelDirFiles(manifest: true, config: true, draft: true, draftConfig: true)
+    let e2 = eligibility(kind: .package, contract: contract130, modelId: "incoai/Qwen3.8-27B-Splash",
+                         modelDir: "/m", draftModel: nil, family: nil, files: noTok)
+    check(e2.verdict == .unrunnable && (e2.reason ?? "").contains("tokenizer"),
+          "eligibility: package + 1.3.0 missing tokenizer/ -> unrunnable (names the gap)")
+    let noDraft = ModelDirFiles(manifest: true, config: true, tokenizer: true)
+    let e3 = eligibility(kind: .package, contract: contract130, modelId: "incoai/Qwen3.8-27B-Splash",
+                         modelDir: "/m", draftModel: nil, family: nil, files: noDraft)
+    check(e3.verdict == .unrunnable && (e3.reason ?? "").contains("draft"),
+          "eligibility: package + 1.3.0 missing draft/ -> unrunnable (names the gap)")
+    for c in [contract131, contract132] {
+        let eb = eligibility(kind: .package, contract: c, modelId: "incoai/Qwen3.8-27B-Splash",
+                             modelDir: "/m", draftModel: nil, family: nil, files: full)
+        check(eb.verdict == .blocked, "eligibility: package + \(c.version) -> BLOCKED")
+        let r = eb.reason ?? ""
+        check(r.contains("refuses 1.3.0 packages"), "eligibility: the blocked reason names the engine's refusal")
+        check(r.contains("1.3.0"), "eligibility: the fix text names the 1.3.0 kit (issue §7 version-tolerance)")
+    }
+}
+
+// 62. assembly row: 1.3.0 = runnable iff config.json + draft/config.json (R3: the
+// draft is required in both versions — in 1.3.0 the drafter contract IS draft/);
+// 1.3.1+ = blocked (the launcher serves by HF id, never a local assembly dir).
+do {
+    let ok = ModelDirFiles(modelJson: true, config: true, draft: true, draftConfig: true)
+    let e = eligibility(kind: .assembly, contract: contract130, modelId: "o/r",
+                        modelDir: "/m", draftModel: nil, family: nil, files: ok)
+    check(e.verdict == .runnable, "eligibility: assembly + 1.3.0 with config.json + draft/config.json -> runnable")
+    let noDraft = ModelDirFiles(modelJson: true, config: true, draft: true)
+    let e2 = eligibility(kind: .assembly, contract: contract130, modelId: "o/r",
+                         modelDir: "/m", draftModel: nil, family: nil, files: noDraft)
+    check(e2.verdict == .unrunnable && (e2.reason ?? "").contains("draft/config.json"),
+          "eligibility: assembly + 1.3.0 without draft/config.json -> unrunnable (the S3 GWT case)")
+    let noConfig = ModelDirFiles(modelJson: true, draft: true, draftConfig: true)
+    let e3 = eligibility(kind: .assembly, contract: contract130, modelId: "o/r",
+                         modelDir: "/m", draftModel: nil, family: nil, files: noConfig)
+    check(e3.verdict == .unrunnable && (e3.reason ?? "").contains("config.json"),
+          "eligibility: assembly + 1.3.0 without config.json -> unrunnable")
+    for c in [contract131, contract132] {
+        let eb = eligibility(kind: .assembly, contract: c, modelId: "o/r",
+                             modelDir: "/m", draftModel: nil, family: nil, files: ok)
+        check(eb.verdict == .blocked, "eligibility: assembly + \(c.version) -> blocked (the launcher serves by HF id)")
+        check((eb.reason ?? "").contains("HF id"), "eligibility: the reason explains the launcher's id-only form")
+    }
+}
+
+// 63. hfid row, 1.3.0 (module loads positionally — it never downloads): a resolved
+// dir with a config.json -> runnable positional; no local dir -> unrunnable; a
+// 1-component name is not an HF id -> unrunnable.
+do {
+    // a pure hfid (no local dir) under 1.3.0: the module form needs the dir.
+    let e = eligibility(kind: .hfid, contract: contract130, modelId: "mlx-community/Qwen3.8-27B-4bit",
+                        modelDir: nil, draftModel: nil, family: nil, files: ModelDirFiles())
+    check(e.verdict == .unrunnable && (e.reason ?? "").contains("positionally"),
+          "eligibility: hfid + 1.3.0 with no local dir -> unrunnable (1.3.0 never downloads)")
+    // a resolved dir WITH a config.json: runnable positional (C3: iff config.json present).
+    let e2 = eligibility(kind: .hfid, contract: contract130, modelId: "mlx-community/Qwen3.8-27B-4bit",
+                         modelDir: "/hub/snapshots/x", draftModel: nil, family: nil,
+                         files: ModelDirFiles(config: true))
+    check(e2.verdict == .runnable, "eligibility: hfid + 1.3.0 with a config.json dir -> runnable positional")
+    // a resolved dir WITHOUT a config.json (e.g. a GGUF-only snapshot): unrunnable.
+    let e3 = eligibility(kind: .hfid, contract: contract130, modelId: "o/r",
+                         modelDir: "/hub/snapshots/y", draftModel: nil, family: nil,
+                         files: ModelDirFiles())
+    check(e3.verdict == .unrunnable && (e3.reason ?? "").contains("config.json"),
+          "eligibility: hfid + 1.3.0 with a dir but no config.json -> unrunnable")
+    // a 1-component name is not a valid --model id (server.py validates OWNER/REPO).
+    let e4 = eligibility(kind: .hfid, contract: contract130, modelId: "qwen3.8-27b",
+                         modelDir: nil, draftModel: nil, family: nil, files: ModelDirFiles())
+    check(e4.verdict == .unrunnable && (e4.reason ?? "").contains("OWNER/REPO"),
+          "eligibility: a 1-component id + 1.3.0 -> unrunnable (server.py validates OWNER/REPO)")
+}
+
+// 64. hfid row, 1.3.1+ (launcher): --draft-model override -> runnable; a known
+// family in the registry -> runnable; a known family NOT in the registry ->
+// unrunnable with the engine's own error; an undecidable family -> UNKNOWN
+// (the engine decides at load — D4: never a false-runnable, never a fake block).
+do {
+    let draft = eligibility(kind: .hfid, contract: contract131, modelId: "o/r",
+                            modelDir: nil, draftModel: "incoai/Qwen3.8-27B-DFlash2", family: nil,
+                            files: ModelDirFiles())
+    check(draft.verdict == .runnable, "eligibility: hfid + 1.3.1 with --draft-model -> runnable (the override)")
+    let known = eligibility(kind: .hfid, contract: contract131, modelId: "mlx-community/Qwen3.8-27B-4bit",
+                            modelDir: nil, draftModel: nil, family: "Qwen3.8-27B",
+                            files: ModelDirFiles())
+    check(known.verdict == .runnable && (known.reason ?? "").contains("Qwen3.8-27B"),
+          "eligibility: hfid + 1.3.1 with a registry family -> runnable (names the family)")
+    let unknownFam = eligibility(kind: .hfid, contract: contract131, modelId: "o/other",
+                                 modelDir: nil, draftModel: nil, family: "Gemma4-12B",
+                                 files: ModelDirFiles())
+    check(unknownFam.verdict == .unrunnable && (unknownFam.reason ?? "").contains("Gemma4-12B"),
+          "eligibility: hfid + 1.3.1 with a family outside the registry -> unrunnable (the engine's own error)")
+    check((unknownFam.reason ?? "").contains("draft"), "eligibility: the fix names the --draft-model override")
+    let undecided = eligibility(kind: .hfid, contract: contract131, modelId: "mlx-community/Qwen3.8-27B-4bit",
+                                modelDir: nil, draftModel: nil, family: nil,
+                                files: ModelDirFiles())
+    check(undecided.verdict == .unknown, "eligibility: hfid + 1.3.1 with an undecidable family -> unknown")
+    check((undecided.reason ?? "").contains("engine decides at load"),
+          "eligibility: the unknown reason says the engine decides at load (D4)")
+    // the 1.3.2 registry (identical families) behaves the same.
+    let c2 = eligibility(kind: .hfid, contract: contract132, modelId: "mlx-community/Qwen3.8-27B-4bit",
+                         modelDir: nil, draftModel: nil, family: "Qwen3.8-27B",
+                         files: ModelDirFiles())
+    check(c2.verdict == .runnable, "eligibility: hfid + 1.3.2 with a registry family -> runnable")
+    // an ollama-style 1-component name under the launcher: not an HF repo id.
+    let ol = eligibility(kind: .hfid, contract: contract131, modelId: "qwen3.8-27b",
+                         modelDir: nil, draftModel: nil, family: nil,
+                         files: ModelDirFiles())
+    check(ol.verdict == .unrunnable && (ol.reason ?? "").contains("HF"),
+          "eligibility: a 1-component id + 1.3.1+ -> unrunnable (not a Hugging Face repo id)")
+}
+
+// 65. other row: a local dir that is neither package nor assembly and carries no
+// HF id — unrunnable in BOTH flavors (saveable, D4; start refused with the fix).
+do {
+    let e1 = eligibility(kind: .other, contract: contract130, modelId: nil,
+                         modelDir: "/m", draftModel: nil, family: nil, files: ModelDirFiles())
+    check(e1.verdict == .unrunnable, "eligibility: other + 1.3.0 -> unrunnable")
+    check((e1.reason ?? "").contains("package") && (e1.reason ?? "").contains("assembly"),
+          "eligibility: the reason names what 1.3.0 actually loads")
+    let e2 = eligibility(kind: .other, contract: contract131, modelId: nil,
+                         modelDir: "/m", draftModel: nil, family: nil, files: ModelDirFiles())
+    check(e2.verdict == .unrunnable, "eligibility: other + 1.3.1 -> unrunnable (no id to serve by)")
+}
+
+// 66. family derivation (the app's plan-time knowledge of the engine's
+// config->family rule, as registry data): model_type qwen3_5 -> Qwen3.8-27B
+// (verified: the mlx-community repo's config.json AND the engine's registry).
+// An unrecognized config -> nil (undecidable -> the unknown verdict upstream).
+do {
+    let cfg = #"{"model_type": "qwen3_5", "architectures": ["Qwen3_5ForConditionalGeneration"]}"#
+    check(deriveFamily(config: cfg, contract: contract131) == "Qwen3.8-27B",
+          "family: model_type qwen3_5 derives the Qwen3.8-27B family (1.3.1)")
+    check(deriveFamily(config: cfg, contract: contract132) == "Qwen3.8-27B",
+          "family: the 1.3.2 registry carries the same rule")
+    check(deriveFamily(config: #"{"model_type": "gemma_4"}"#, contract: contract131) == nil,
+          "family: an unrecognized config -> undecidable (nil)")
+    check(deriveFamily(config: nil, contract: contract131) == nil,
+          "family: no readable config -> undecidable (nil)")
+    check(deriveFamily(config: "not json", contract: contract131) == nil,
+          "family: unparseable config -> undecidable (nil)")
+    check(deriveFamily(config: cfg, contract: contract130) == nil,
+          "family: 1.3.0 has no registry (packages bake the draft) -> always undecidable")
+}
+// ---- S3: planLaunch (C3: resolveKit -> contractFor -> enumerate -> classify ->
+// eligibility -> buildArgv -> plan signature; D9: NO env reads) ----
+
+/// A kit fixture: engine/splash + python/bin/python3 executables + release.json.
+func planKit(fs: inout FakeFS, path: String, version: String) {
+    fs.dir(path, ["engine/splash/", "python/bin/python3", "release.json"])
+    fs.exec(path + "/engine/splash")
+    fs.exec(path + "/python/bin/python3")
+    fs.file(path + "/release.json", "{\"version\": \"\(version)\"}")
+}
+
+/// A config.json with one profile; the knobs the plan-signature tests vary.
+func planCfgJSON(engineMode: String, manualPath: String?, port: Int, key: String,
+                 name: String, modelId: String?, modelDir: String?,
+                 options: [String: String]) -> Data {
+    var opts: [String: Any] = [:]
+    for (k, v) in options { opts[k] = v }
+    var engine: [String: Any] = ["mode": engineMode]
+    if let manualPath { engine["manual_path"] = manualPath }
+    var model: [String: Any] = ["source": modelId == nil ? "none" : "lmstudio"]
+    if let modelId { model["id"] = modelId }
+    if let modelDir { model["dir"] = modelDir }
+    let globals: [String: Any] = [
+        "engine": engine,
+        "model_folders": [["id": "lmstudio", "path": "/models", "source": "auto"]],
+        "port": port,
+        "api_key": key,
+    ]
+    let profiles: [[String: Any]] = [[
+        "id": "p1", "name": name,
+        "model": model,
+        "options": opts,
+    ]]
+    let top: [String: Any] = [
+        "globals": globals,
+        "profiles": profiles,
+        "active_profile": "p1",
+    ]
+    return try! JSONSerialization.data(withJSONObject: top)
+}
+
+func readKitVersion(fs: FakeFS, kit: String) -> String? {
+    guard let s = fs.fileContents(kit + "/release.json"),
+          let d = s.data(using: .utf8),
+          let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return nil }
+    return o["version"] as? String
+}
+
+func portArg(_ plan: LaunchConfig) -> String? {
+    guard let i = plan.engineArgs.firstIndex(of: "--port"), i + 1 < plan.engineArgs.count else { return nil }
+    return plan.engineArgs[i + 1]
+}
+
+// 67. planLaunch happy path, the 1.3.0 module form: a manual kit + a package
+// model found by enumeration -> positional dir argv, key via env, port from the
+// config.
+do {
+    var fs = FakeFS()
+    planKit(fs: &fs, path: "/kits/kit130", version: "1.3.0")
+    fs.dir("/models/incoai/Qwen3.8-27B-Splash",
+           ["manifest.json", "model.json", "config.json", "tokenizer/", "draft/"])
+    fs.file("/models/incoai/Qwen3.8-27B-Splash/draft/config.json")
+    let cfg = planCfgJSON(engineMode: "manual", manualPath: "/kits/kit130", port: 8123,
+                          key: "splash-standalone-1", name: "Default",
+                          modelId: "incoai/Qwen3.8-27B-Splash", modelDir: nil, options: [:])
+    let plan = planLaunch(cfg, home: "/home",
+                          isDir: { fs.isDir($0) }, isExecutable: { fs.isExecutable($0) },
+                          brewKeg: { nil },
+                          kitVersion: { readKitVersion(fs: fs, kit: $0) },
+                          fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
+    check(plan.error == nil, "planLaunch: the happy path plans (got: \(plan.error ?? "ok"))")
+    check(plan.workDir == "/kits/kit130" && plan.base == "/kits/kit130",
+          "planLaunch: workDir = the resolved manual kit")
+    check(plan.executable == "/kits/kit130/python/bin/python3", "planLaunch: the kit's bundled python")
+    check(plan.version == "1.3.0", "planLaunch: version from the kit's release.json (D16)")
+    check(plan.modelDir == "/models/incoai/Qwen3.8-27B-Splash",
+          "planLaunch: the model dir is resolved by enumeration (stored dir was null)")
+    check(Array(plan.engineArgs.prefix(3)) == ["-u", "-m", "server.server"], "planLaunch: the module form prefix")
+    check(plan.engineArgs.count > 3 && plan.engineArgs[3] == "/models/incoai/Qwen3.8-27B-Splash",
+          "planLaunch: the positional dir (1.3.0 loads it, never re-downloading)")
+    check(plan.engineArgs.contains("--model") && plan.modelId == "incoai/Qwen3.8-27B-Splash",
+          "planLaunch: server.py's required --model OWNER/REPO")
+    check(plan.engineEnv["SPLASH_API_KEY"] == "splash-standalone-1", "planLaunch: the key via env (open item 5)")
+    check(!plan.engineArgs.contains("--api-key"), "planLaunch: the key is NEVER on argv")
+    check(portArg(plan) == "8123", "planLaunch: the port from the config (not the engine default)")
+    check(!plan.mappingFallback, "planLaunch: an exact contract is not a fallback")
+    check(plan.profileId == "p1" && plan.profileName == "Default", "planLaunch: profile identity is carried")
+    check(plan.restartRequired == false, "planLaunch: a fresh plan never requires a restart (S4 wires the state)")
+    check(!plan.signature.isEmpty, "planLaunch: the plan signature is computed (D13)")
+}
+
+// 68. planLaunch happy path, the 1.3.1 launcher form via the Homebrew rung: an
+// HF model with a known family config -> the launcher serves by id; ANE off is
+// explicit; the key reaches the env (never argv).
+do {
+    var fs = FakeFS()
+    planKit(fs: &fs, path: "/keg/1.3.1/libexec", version: "1.3.1")
+    fs.dir("/models/mlx-community/Qwen3.8-27B-4bit", ["config.json"])
+    fs.file("/models/mlx-community/Qwen3.8-27B-4bit/config.json",
+            "{\"model_type\": \"qwen3_5\"}")
+    let cfg = planCfgJSON(engineMode: "auto", manualPath: nil, port: 9000, key: "test-key",
+                          name: "Qwen", modelId: "mlx-community/Qwen3.8-27B-4bit",
+                          modelDir: nil, options: ["ane": "false"])
+    let plan = planLaunch(cfg, home: "/home",
+                          isDir: { fs.isDir($0) }, isExecutable: { fs.isExecutable($0) },
+                          brewKeg: { "/keg/1.3.1" },
+                          kitVersion: { readKitVersion(fs: fs, kit: $0) },
+                          fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
+    check(plan.error == nil, "planLaunch: the launcher form plans (got: \(plan.error ?? "ok"))")
+    check(plan.workDir == "/keg/1.3.1/libexec", "planLaunch: the Homebrew keg's libexec is the kit (rung 3)")
+    check(plan.version == "1.3.1", "planLaunch: the keg's release.json version")
+    check(Array(plan.engineArgs.prefix(5)) == ["-u", "install/launcher.py", "serve",
+                                               "--model", "mlx-community/Qwen3.8-27B-4bit"],
+          "planLaunch: the launcher serves the model by its HF id")
+    check(plan.engineArgs.contains("--disable-ane"),
+          "planLaunch: ANE default-on — only an explicit ane=false adds --disable-ane")
+    check(portArg(plan) == "9000", "planLaunch: the config's port")
+    check(plan.engineEnv["SPLASH_API_KEY"] == "test-key" && !plan.engineArgs.contains("--api-key"),
+          "planLaunch: the key via env (open item 5), never on argv")
+    check(plan.modelId == "mlx-community/Qwen3.8-27B-4bit", "planLaunch: the served model id")
+}
+
+// 69. D9: the plan is invariant under the legacy SPLASH_* env vars — the config
+// is the single source of truth; nothing in the plan may come from the process
+// environment (driven through the real environment via setenv).
+do {
+    var fs = FakeFS()
+    planKit(fs: &fs, path: "/kits/kit130", version: "1.3.0")
+    fs.dir("/models/incoai/Qwen3.8-27B-Splash",
+           ["manifest.json", "model.json", "config.json", "tokenizer/", "draft/"])
+    fs.file("/models/incoai/Qwen3.8-27B-Splash/draft/config.json")
+    let cfg = planCfgJSON(engineMode: "manual", manualPath: "/kits/kit130", port: 8123,
+                          key: "splash-standalone-1", name: "Default",
+                          modelId: "incoai/Qwen3.8-27B-Splash", modelDir: nil, options: [:])
+    let planA = planLaunch(cfg, home: "/home",
+                           isDir: { fs.isDir($0) }, isExecutable: { fs.isExecutable($0) },
+                           brewKeg: { nil },
+                           kitVersion: { readKitVersion(fs: fs, kit: $0) },
+                           fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
+    setenv("SPLASH_KIT_DIR", "/elsewhere/kit", 1)
+    setenv("SPLASH_PORT", "6969", 1)
+    setenv("SPLASH_KEY", "attacker-key", 1)
+    setenv("SPLASH_MODEL_ROOT", "/elsewhere/model", 1)
+    setenv("SPLASH_MAX_CACHE_DISK", "1gb", 1)
+    setenv("SPLASH_ANE", "off", 1)
+    defer {
+        unsetenv("SPLASH_KIT_DIR"); unsetenv("SPLASH_PORT"); unsetenv("SPLASH_KEY")
+        unsetenv("SPLASH_MODEL_ROOT"); unsetenv("SPLASH_MAX_CACHE_DISK"); unsetenv("SPLASH_ANE")
+    }
+    let planB = planLaunch(cfg, home: "/home",
+                           isDir: { fs.isDir($0) }, isExecutable: { fs.isExecutable($0) },
+                           brewKeg: { nil },
+                           kitVersion: { readKitVersion(fs: fs, kit: $0) },
+                           fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
+    check(planA == planB, "D9: the plan is byte-identical with the legacy SPLASH_* env set")
+    check(planB.workDir == "/kits/kit130", "D9: the kit from the config, not SPLASH_KIT_DIR")
+    check(portArg(planB) == "8123", "D9: the port from the config, not SPLASH_PORT")
+    check(planB.engineEnv["SPLASH_API_KEY"] == "splash-standalone-1",
+          "D9: the key from the config, not SPLASH_KEY")
+    check(!planB.engineArgs.contains("--disable-ane"), "D9: ANE from the config, not SPLASH_ANE")
+}
+
+// 70. planLaunch error cases carry actionable text: the tried rungs for a missing
+// kit; the 1.3.0-package gate (blocked); an unrunnable assembly; no model.
+do {
+    // (a) no kit anywhere: the manual rung is named, with the fix.
+    let fs = FakeFS()
+    let cfgA = planCfgJSON(engineMode: "manual", manualPath: "/no/kit", port: 8123, key: "k",
+                           name: "D", modelId: "incoai/Qwen3.8-27B-Splash", modelDir: nil, options: [:])
+    let pA = planLaunch(cfgA, home: "/home",
+                        isDir: { fs.isDir($0) }, isExecutable: { fs.isExecutable($0) },
+                        brewKeg: { nil }, kitVersion: { readKitVersion(fs: fs, kit: $0) },
+                        fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
+    check(pA.error != nil && pA.error!.contains("/no/kit"), "planLaunch: the kit error names the tried rung")
+    check((pA.error ?? "").contains("install.sh") || (pA.error ?? "").contains("Homebrew"),
+          "planLaunch: the kit error names the fix")
+    // (b) a 1.3.0 package model under a 1.3.1 engine: the package gate (blocked).
+    var fsB = FakeFS()
+    planKit(fs: &fsB, path: "/kits/k131", version: "1.3.1")
+    fsB.dir("/models/incoai/Qwen3.8-27B-Splash",
+            ["manifest.json", "model.json", "config.json", "tokenizer/", "draft/"])
+    fsB.file("/models/incoai/Qwen3.8-27B-Splash/draft/config.json")
+    let cfgB = planCfgJSON(engineMode: "manual", manualPath: "/kits/k131", port: 8123, key: "k",
+                           name: "D", modelId: "incoai/Qwen3.8-27B-Splash", modelDir: nil, options: [:])
+    let pB = planLaunch(cfgB, home: "/home",
+                        isDir: { fsB.isDir($0) }, isExecutable: { fsB.isExecutable($0) },
+                        brewKeg: { nil }, kitVersion: { readKitVersion(fs: fsB, kit: $0) },
+                        fileContents: { fsB.fileContents($0) }, listDir: { fsB.listDir($0) })
+    check(pB.error != nil && pB.error!.contains("refuses 1.3.0 packages"),
+          "planLaunch: the 1.3.0 package under 1.3.1 is refused pre-flight (the issue's friction)")
+    // (c) an assembly missing its draft under 1.3.0: unrunnable (R3).
+    var fsC = FakeFS()
+    planKit(fs: &fsC, path: "/kits/kit130", version: "1.3.0")
+    fsC.dir("/models/o/asm", ["model.json", "config.json"])
+    let cfgC = planCfgJSON(engineMode: "manual", manualPath: "/kits/kit130", port: 8123, key: "k",
+                           name: "D", modelId: "o/asm", modelDir: nil, options: [:])
+    let pC = planLaunch(cfgC, home: "/home",
+                        isDir: { fsC.isDir($0) }, isExecutable: { fsC.isExecutable($0) },
+                        brewKeg: { nil }, kitVersion: { readKitVersion(fs: fsC, kit: $0) },
+                        fileContents: { fsC.fileContents($0) }, listDir: { fsC.listDir($0) })
+    check(pC.error != nil && pC.error!.contains("draft/config.json"),
+          "planLaunch: an assembly without draft/config.json is unrunnable (R3: the draft is required in both versions)")
+    // (d) no model selected: a clean error, not a crash.
+    let cfgD = planCfgJSON(engineMode: "manual", manualPath: "/kits/kit130", port: 8123, key: "k",
+                           name: "D", modelId: nil, modelDir: nil, options: [:])
+    var fsD = FakeFS()
+    planKit(fs: &fsD, path: "/kits/kit130", version: "1.3.0")
+    let pD = planLaunch(cfgD, home: "/home",
+                        isDir: { fsD.isDir($0) }, isExecutable: { fsD.isExecutable($0) },
+                        brewKeg: { nil }, kitVersion: { readKitVersion(fs: fsD, kit: $0) },
+                        fileContents: { fsD.fileContents($0) }, listDir: { fsD.listDir($0) })
+    check(pD.error != nil && (pD.error ?? "").contains("no model"),
+          "planLaunch: no model selected -> a clean error (never a launch attempt)")
+}
+
+// 71. the plan signature (D13): it flips when a field changes the argv/env/workdir
+// (port, key, ane, model, kit, fallback contract) — and NEVER on a profile rename.
+do {
+    var fs = FakeFS()
+    planKit(fs: &fs, path: "/kits/k131", version: "1.3.1")
+    fs.dir("/models/mlx-community/Qwen3.8-27B-4bit", ["config.json"])
+    fs.file("/models/mlx-community/Qwen3.8-27B-4bit/config.json", "{\"model_type\": \"qwen3_5\"}")
+    fs.dir("/models/o/other", ["config.json"])
+    let plan: (Int, String, String, String?, String) -> LaunchConfig = { port, key, name, kit, mid in
+        let cfg = planCfgJSON(engineMode: "manual", manualPath: kit, port: port, key: key,
+                              name: name, modelId: mid, modelDir: nil, options: ["ane": "false"])
+        return planLaunch(cfg, home: "/home",
+                          isDir: { fs.isDir($0) }, isExecutable: { fs.isExecutable($0) },
+                          brewKeg: { nil },
+                          kitVersion: { readKitVersion(fs: fs, kit: $0) },
+                          fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
+    }
+    let s0 = plan(8123, "k", "Default", "/kits/k131", "mlx-community/Qwen3.8-27B-4bit")
+    check(s0.error == nil, "signature: the base plan is valid")
+    check(s0.signature != plan(8124, "k", "Default", "/kits/k131", "mlx-community/Qwen3.8-27B-4bit").signature,
+          "signature: a port change flips it")
+    check(s0.signature != plan(8123, "k2", "Default", "/kits/k131", "mlx-community/Qwen3.8-27B-4bit").signature,
+          "signature: a key change flips it (it reaches the child via env)")
+    check(s0.signature == plan(8123, "k", "Renamed", "/kits/k131", "mlx-community/Qwen3.8-27B-4bit").signature,
+          "signature: a profile rename does NOT flip it (D13)")
+    check(s0.signature != plan(8123, "k", "Default", "/kits/k131", "o/other").signature,
+          "signature: a model change flips it")
+    // a kit change: a second kit of the same version (the workdir differs).
+    planKit(fs: &fs, path: "/kits/k131b", version: "1.3.1")
+    check(s0.signature != plan(8123, "k", "Default", "/kits/k131b", "mlx-community/Qwen3.8-27B-4bit").signature,
+          "signature: a kit change flips it (the workdir is part of the plan)")
+    // a fallback-contract change: an unversioned kit -> the latest contract (D16/D3).
+    planKit(fs: &fs, path: "/kits/future", version: "1.9.9")
+    let pf = plan(8123, "k", "Default", "/kits/future", "mlx-community/Qwen3.8-27B-4bit")
+    check(s0.signature != pf.signature, "signature: a fallback-contract change flips it")
+}
+
+// 72. the unknown verdict is NOT a gate: an hfid whose family the app cannot
+// derive plans fine (the engine decides at load); an explicit --draft-model also
+// plans fine regardless of family.
+do {
+    var fs = FakeFS()
+    planKit(fs: &fs, path: "/kits/k131", version: "1.3.1")
+    fs.dir("/models/o/mystery", ["config.json"])
+    fs.file("/models/o/mystery/config.json", "{\"model_type\": \"gemma_4\"}")
+    let cfg = planCfgJSON(engineMode: "manual", manualPath: "/kits/k131", port: 8123, key: "k",
+                          name: "D", modelId: "o/mystery", modelDir: nil, options: [:])
+    let plan = planLaunch(cfg, home: "/home",
+                          isDir: { fs.isDir($0) }, isExecutable: { fs.isExecutable($0) },
+                          brewKeg: { nil },
+                          kitVersion: { readKitVersion(fs: fs, kit: $0) },
+                          fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
+    check(plan.error == nil, "planLaunch: an undecidable family is not blocked (D4: the engine decides at load)")
+    let cfg2 = planCfgJSON(engineMode: "manual", manualPath: "/kits/k131", port: 8123, key: "k",
+                           name: "D", modelId: "o/mystery", modelDir: nil,
+                           options: ["draft_model": "incoai/Qwen3.8-27B-DFlash2"])
+    let plan2 = planLaunch(cfg2, home: "/home",
+                           isDir: { fs.isDir($0) }, isExecutable: { fs.isExecutable($0) },
+                           brewKeg: { nil },
+                           kitVersion: { readKitVersion(fs: fs, kit: $0) },
+                           fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
+    check(plan2.error == nil, "planLaunch: an explicit --draft-model override plans regardless of family")
+    check(plan2.engineArgs.contains("--draft-model")
+          && plan2.engineArgs.firstIndex(of: "--draft-model").map {
+              plan2.engineArgs[$0 + 1] == "incoai/Qwen3.8-27B-DFlash2"
+          } == true,
+          "planLaunch: the --draft-model override reaches the argv")
+}
+
+// 73. D4: an unrunnable/blocked plan is saveable — it still carries the model +
+// profile identity (S6 saves it; S7 shows the verdict chip + the fix text).
+do {
+    var fs = FakeFS()
+    planKit(fs: &fs, path: "/kits/k131", version: "1.3.1")
+    fs.dir("/models/incoai/Qwen3.8-27B-Splash",
+           ["manifest.json", "model.json", "config.json", "tokenizer/", "draft/"])
+    fs.file("/models/incoai/Qwen3.8-27B-Splash/draft/config.json")
+    let cfg = planCfgJSON(engineMode: "manual", manualPath: "/kits/k131", port: 8123, key: "k",
+                          name: "D", modelId: "incoai/Qwen3.8-27B-Splash", modelDir: nil, options: [:])
+    let plan = planLaunch(cfg, home: "/home",
+                          isDir: { fs.isDir($0) }, isExecutable: { fs.isExecutable($0) },
+                          brewKeg: { nil },
+                          kitVersion: { readKitVersion(fs: fs, kit: $0) },
+                          fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
+    check(plan.error != nil, "planLaunch: the package under 1.3.1 errors")
+    check(plan.modelId == "incoai/Qwen3.8-27B-Splash" && plan.profileId == "p1" && plan.profileName == "D",
+          "D4: the failed plan still carries the model + profile identity (saveable)")
+}
+
+// 74. D16/D3: an unversioned kit (release.json unknown) plans on the LATEST
+// fallback contract with mappingFallback set (the visible indicator's source).
+do {
+    var fs = FakeFS()
+    planKit(fs: &fs, path: "/kits/future", version: "1.9.9")
+    fs.dir("/models/mlx-community/Qwen3.8-27B-4bit", ["config.json"])
+    fs.file("/models/mlx-community/Qwen3.8-27B-4bit/config.json", "{\"model_type\": \"qwen3_5\"}")
+    let cfg = planCfgJSON(engineMode: "manual", manualPath: "/kits/future", port: 8123, key: "k",
+                          name: "D", modelId: "mlx-community/Qwen3.8-27B-4bit", modelDir: nil, options: [:])
+    let plan = planLaunch(cfg, home: "/home",
+                          isDir: { fs.isDir($0) }, isExecutable: { fs.isExecutable($0) },
+                          brewKeg: { nil },
+                          kitVersion: { readKitVersion(fs: fs, kit: $0) },
+                          fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
+    check(plan.error == nil, "planLaunch: a 1.9.9 kit plans on the fallback (not an error)")
+    check(plan.mappingFallback, "D3: mappingFallback is set for the unknown version")
+    check(plan.version == "1.9.9", "planLaunch: version = what release.json said (not the fallback's)")
 }
 
 print(failures == 0 ? "ALL TESTS PASSED" : "\(failures) TEST(S) FAILED")
