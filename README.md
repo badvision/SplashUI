@@ -59,6 +59,21 @@ panel and is unaffected). `start.sh` no longer exports any of them — it launch
 directly from a fixed argv (see "How it works"); the menu-bar app ignores env and reads
 `config.json`.
 
+The environment variables formerly documented here are retired. Each one maps to a
+`config.json` setting (edit these in the panel's Settings section, or in the file directly):
+
+| Retired env var        | config.json replacement                                                                 |
+|------------------------|-----------------------------------------------------------------------------------------|
+| `SPLASH_KIT_DIR`       | `globals.engine.manual_path` (with `globals.engine.mode: "manual"`)                     |
+| `SPLASHUI_HOME`        | not user-facing — fixed discovery rung at `~/SplashUI`                                  |
+| `SPLASH_VERSION`       | not user-facing — version read from the installed kit's `release.json`                  |
+| `SPLASH_PORT`          | `globals.port`                                                                          |
+| `SPLASH_KEY`           | `globals.api_key`                                                                       |
+| `SPLASH_MODEL_ROOT`    | `globals.model_folders` plus the active profile's `model` choice (`profiles[].model`)   |
+| `SPLASH_MAX_CACHE_DISK`| profile option `max_cache_disk`                                                         |
+| `SPLASH_IDLE_RELEASE`  | profile option `idle_release`                                                           |
+| `SPLASH_ANE`           | profile option `ane` (default on)                                                       |
+
 ## How it works
 
 - `start.sh` is a **full reset**: it stops any UI + server on the port, starts a fresh
