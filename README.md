@@ -34,7 +34,11 @@ the UI + lifecycle scripts.
 ./start.sh     # starts the engine server, then the menu-bar UI (adopts it)
 ```
 
-Click the menu-bar icon to show/hide the panel. `./stop.sh` tears everything down.
+Click the menu-bar icon to show/hide live status. Right-click it for **Open Status**,
+**Settings…**, or **Quit SplashUI**. The status screen's upper-right hamburger also
+opens the separate Settings screen; its **STATUS** cap returns to telemetry.
+Settings scrolls internally, with the shared restart control always reachable.
+`./stop.sh` tears everything down.
 
 ## Using the API
 

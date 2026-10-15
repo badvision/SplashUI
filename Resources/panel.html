@@ -22,6 +22,17 @@ body {
   width: 100%; padding: 10px; text-transform: uppercase; overflow-x: hidden;
   -webkit-user-select: none; user-select: none;
 }
+body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+.screen { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+[hidden] { display: none !important; }
+#footer { flex-shrink: 0; }
+#header .title { padding-right: 42px; }
+#btnSettings { position: absolute; right: 10px; top: 4px; width: 26px; height: 20px; background: var(--bg); border-radius: 0 10px 10px 0; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 4px 6px; color: var(--gray-dim); }
+#btnSettings span { height: 2px; width: 14px; border-radius: 0 2px 2px 0; background: currentColor; }
+#btnSettings:hover { color: var(--teal); }
+#btnSettings:focus-visible, #btnStatus:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
+#settingsHeader { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: #4455ff; font-family: var(--display); font-size: 25px; }
+#btnStatus { background: #4455ff; color: var(--bg); border-radius: 14px 0 0 14px; min-width: 64px; padding: 6px 10px 2px; font-size: 16px; }
 /* Flat instrument fields, separated by the LCARS rail rather than cards. */
 .row { display: flex; gap: 8px; margin-bottom: 4px; align-items: stretch; }
 .col { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -125,10 +136,13 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 </style>
 </head>
 <body>
+<main id="statusView" class="screen" aria-label="Status">
+<div id="statusContent">
 <div id="header">
   <div class="title" id="hName">Splash interface control</div>
   <div class="model" id="hModel">—</div>
   <div class="pill g" id="statusPill" data-tip="Engine state — DOWN: no server · LAUNCH FAIL: engine could not start (see error below, auto-retries) · LOADING: model loading · PREFILL: prompt being processed · DECODE: generating output · QUEUED: waiting for resources · IDLE: no work · RESTART: app is restarting the server">WAITING</div>
+  <button id="btnSettings" aria-label="Open Settings" data-tip="Open Settings"><span></span><span></span><span></span></button>
 </div>
 
 <section class="performance" data-channel="01" aria-label="Performance">
@@ -208,9 +222,13 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
     <tbody id="recentBody"></tbody>
   </table>
 </section>
+</div>
+</main>
+<main id="settingsView" class="screen" aria-label="Settings" hidden>
+<div id="settingsHeader"><button id="btnStatus" data-tip="Return to live status">Status</button><h1 style="font:inherit">Settings</h1></div>
 
 <section class="settings-panel" data-channel="06" aria-label="Settings">
-  <div class="sec-h" data-tip="Global configuration (config.json). Changes apply after an engine restart when flagged.">Settings<span>config.json</span></div>
+  <div class="sec-h" data-tip="Global configuration (config.json). Changes apply after an engine restart when flagged.">Global Settings<span>config.json</span></div>
   <div class="sec-h" data-tip="Engine discovery: Auto walks the documented ladder (manual path, install root, Homebrew, kit registry); Manual uses exactly the path you give it."><span>Engine</span></div>
   <div class="frow">
     <div class="capbtns">
@@ -252,11 +270,14 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
     <span id="cfgMsg" style="min-width:0"></span>
   </div>
 </section>
+<!-- S6a profile list/CRUD and S6b detail/activation belong here, after Global Settings. -->
+<div id="profilesSlot"></div>
+</main>
 
 <div id="cfgModal">
   <div class="card">
     <h3>First run</h3>
-    <p>Welcome. Your engine kit, model folders and launch options live in the <b>Settings</b> section below. Point the app at your 1.3.0 kit and a model folder, then save — the engine restarts to apply.</p>
+    <p>Welcome. Your engine kit, model folders and launch options live on the <b>Settings</b> screen. Point the app at your 1.3.0 kit and a model folder, then save. Apply changes with the explicit Restart control.</p>
     <div class="btns">
       <button class="btn" id="modalDismiss" style="background:var(--track);color:var(--white)">Later</button>
       <button class="btn" id="modalCta" style="background:#4455ff;color:var(--bg)">Open Settings</button>
@@ -277,6 +298,15 @@ const g = (b) => b >= 1073741824 ? (b/1073741824).toFixed(1)+" GiB" : b >= 10485
 const n = (v) => v == null ? "—" : v >= 1e6 ? (v/1e6).toFixed(1)+"M" : v >= 1e3 ? (v/1e3).toFixed(1)+"K" : String(v);
 const nn = (v) => v == null ? "—" : v;
 const ms = (v) => v == null ? "—" : v >= 60000 ? (v/60000).toFixed(1)+" min" : v >= 1000 ? (v/1000).toFixed(1)+" s" : v.toFixed(0)+" ms";
+// View state stays local to this single WebView; switching never rebuilds the draft.
+window.showView = function(view) {
+  const settings = view === "settings";
+  $("statusView").hidden = settings;
+  $("settingsView").hidden = !settings;
+  $(settings ? "settingsView" : "statusView").scrollTop = 0;
+};
+$("btnSettings").onclick = () => window.showView("settings");
+$("btnStatus").onclick = () => window.showView("status");
 
 function setT(id, v){ $(id).textContent = v == null || v === "" ? "—" : v; }
 
@@ -421,8 +451,11 @@ function render(){
   $("btnRestart").textContent = rr ? "RESTART TO APPLY" : "Restart";
   cfRender();
   cfFirstRun();
-  const h = document.body.scrollHeight;
-  if (h !== lastH) { lastH = h; try { window.webkit.messageHandlers.size.postMessage(h) } catch(e) {} }
+  // Only status content determines panel geometry; settings scrolls within it.
+  if (!$("statusView").hidden) {
+    const h = $("statusContent").scrollHeight + $("footer").offsetHeight + 20;
+    if (h !== lastH) { lastH = h; try { window.webkit.messageHandlers.size.postMessage(h) } catch(e) {} }
+  }
 }
 function up(s){ s=Math.max(0,s|0); const h=s/3600|0, m=(s%3600)/60|0, ss=s%60; return (h?h+"h ":"")+(m?m+"m ":"")+ss+"s"; }
 function drawSpark(){
@@ -600,6 +633,7 @@ $("btnCfgSave").onclick = cfSave;
 function cfFirstRun() {
   if (!(S.cfg && S.cfg.first_run === true) || CF.firstRunShown) return;
   CF.firstRunShown = true;
+  window.showView("settings");
   $("cfgModal").style.display = "flex";
 }
 function cfFirstRunDone() {
@@ -608,7 +642,7 @@ function cfFirstRunDone() {
 }
 $("modalCta").onclick = () => {
   cfFirstRunDone();
-  document.querySelector(".settings-panel").scrollIntoView({ behavior: "smooth" });
+  window.showView("settings");
 };
 $("modalDismiss").onclick = cfFirstRunDone;
 // One-time: fetch the raw doc so the settings draft can round-trip api_key.

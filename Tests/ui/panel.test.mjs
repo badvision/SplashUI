@@ -96,6 +96,40 @@ function panel({ firstRun = false } = {}) {
 const p = panel();
 try {
   const { w, $, tick, commands, drain, change, save } = p;
+  check('default screen is telemetry-only status', () => {
+    assert.ok(!$('statusView').hidden && $('settingsView').hidden);
+    assert.equal($('statusView').querySelector('.settings-panel'), null);
+    assert.deepEqual([...$('statusView').querySelectorAll('section')].map(s => s.dataset.channel), ['01', '02', '03', '04', '05']);
+  });
+  check('telemetry performance, engine and requests remain intact', () => {
+    assert.equal($('toks').closest('section').dataset.channel, '01');
+    assert.equal($('ane').closest('section').dataset.channel, '02');
+    assert.equal($('recentTable').querySelectorAll('th').length, 6);
+  });
+  check('hamburger switches views without bridging or losing draft', () => {
+    const count = commands.length, draft = w.__test.draft();
+    $('statusView').scrollTop = 90;
+    $('btnSettings').click();
+    assert.ok($('statusView').hidden && !$('settingsView').hidden);
+    assert.equal($('settingsView').scrollTop, 0);
+    assert.equal(commands.length, count);
+    assert.equal(w.__test.draft(), draft);
+    assert.equal($('btnSettings').querySelectorAll('span').length, 3);
+  });
+  check('all S5 controls live on the settings screen', () => {
+    for (const id of ['capAuto', 'capManual', 'manualPath', 'engValid', 'folderList', 'cfgPort', 'cfgKey', 'aneOn', 'btnCfgSave', 'cfgMsg'])
+      assert.ok($('settingsView').contains($(id)), id);
+    assert.ok($('settingsView').contains($('profilesSlot')));
+    assert.ok(!$('settingsView').contains($('footer')) && !$('statusView').contains($('footer')));
+  });
+  check('STATUS back cap resets scroll and returns to telemetry', () => {
+    $('settingsView').scrollTop = 120;
+    $('btnStatus').click();
+    assert.ok(!$('statusView').hidden && $('settingsView').hidden);
+    assert.equal($('statusView').scrollTop, 0);
+    $('btnSettings').click();
+    assert.equal($('settingsView').scrollTop, 0);
+  });
   check('config.get uses the object-body bridge', () => assert.deepEqual(commands[0], { cmd: 'config.get' }));
   check('draft populated from the raw ConfigDoc', () => assert.equal(w.__test.draft().manualPath, '/fixture/kit-1.3.0'));
   check('manual input agrees with draft immediately after cfInit', () => assert.equal($('manualPath').value, w.__test.draft().manualPath));
@@ -181,9 +215,16 @@ for (const button of ['modalDismiss', 'modalCta']) {
     check(`${button}: dismissal bridges persistence`, () => assert.ok(first.doc().first_run_shown && first.commands.at(-1).cmd === 'config.firstRunDone'));
     first.tick({ first_run: true });
     check(`${button}: stale first_run tick cannot reopen modal`, () => assert.equal(first.$('cfgModal').style.display, 'none'));
-    if (button === 'modalCta') check('first-run CTA scrolls to settings', () => assert.equal(first.w.document.querySelector('.settings-panel').dataset.scrolled, 'true'));
+    if (button === 'modalCta') check('first-run CTA opens settings screen', () => assert.ok(!first.$('settingsView').hidden && first.$('statusView').hidden));
   } finally { first.close(); }
 }
+const native = readFileSync(new URL('../../Sources/main.swift', import.meta.url), 'utf8');
+check('native menu exposes ordered status/settings/separator/quit actions', () => {
+  assert.match(native, /sendAction\(on: \[\.leftMouseUp, \.rightMouseUp\]\)/);
+  assert.match(native, /withTitle: "Open Status"[\s\S]*#selector\(openStatus\)[\s\S]*withTitle: "Settings…"[\s\S]*#selector\(openSettings\)[\s\S]*menu\.addItem\(\.separator\(\)\)[\s\S]*withTitle: "Quit SplashUI"[\s\S]*#selector\(quitApp\)/);
+  assert.match(native, /func openSettings\(\)[\s\S]*?showPanel\(view: "settings"\)/);
+  assert.match(native, /func openStatus\(\)[\s\S]*?showPanel\(\)/);
+});
 const failed = results.filter(result => !result.pass).length;
 console.log(JSON.stringify({ suite: 'panel-jsdom', assertions: results.length, passed: results.length - failed, failed }));
 process.exitCode = failed ? 1 : 0;

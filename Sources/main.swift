@@ -421,6 +421,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     // before load is a silent no-op (the form would render empty forever).
     private var webReady = false
     private var pendingTick: String?
+    private var pendingView = "status"
     private var globalMonitor: Any?
 
     private var lastDecodeOut: Double?
@@ -515,6 +516,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         statusItem.button?.image = trayImage(color: .systemGray, fill: 0)
         statusItem.button?.action = #selector(togglePanel)
         statusItem.button?.target = self
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
     }
 
     private func setupPanel() {
@@ -554,11 +556,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     }
 
     @objc private func togglePanel() {
+        if NSApp.currentEvent?.type == .rightMouseUp, let button = statusItem.button {
+            let menu = NSMenu()
+            menu.addItem(withTitle: "Open Status", action: #selector(openStatus), keyEquivalent: "")
+            menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: "")
+            menu.addItem(.separator())
+            menu.addItem(withTitle: "Quit SplashUI", action: #selector(quitApp), keyEquivalent: "q")
+            for item in menu.items { item.target = self }
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY), in: button)
+            return
+        }
         if panel.isVisible { hidePanel() }
         else { showPanel() }
     }
 
-    private func showPanel() {
+    @objc private func openStatus() { showPanel() }
+    @objc private func openSettings() { showPanel(view: "settings") }
+
+    private func showPanel(view: String = "status") {
+        pendingView = view
+        if webReady { webView.evaluateJavaScript("window.showView('\(view)')", completionHandler: nil) }
         if let button = statusItem.button, let win = button.window {
             let f = win.frame
             let maxX = (NSScreen.main?.frame.maxX ?? 2000) - 528
@@ -663,6 +680,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         webReady = true
+        webView.evaluateJavaScript("window.showView('\(pendingView)')", completionHandler: nil)
         if let s = pendingConfigEval {
             pendingConfigEval = nil
             webView.evaluateJavaScript(s, completionHandler: nil)
@@ -680,14 +698,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
     /// Runs once, when the panel's webview is ready. With SPLASHUI_SMOKE=1 this
     /// auto-shows the panel (so the smoke agent finds it), switches to
-    /// SPLASHUI_SMOKE_CHANNEL if set (channel switching in panel.html is a
-    /// scrollIntoView on the section's `data-channel`, as the first-run modal
-    /// does), then executes SPLASHUI_SMOKE_JS and writes the returned value
+    /// SPLASHUI_SMOKE_CHANNEL if set (06 selects Settings, other channels select
+    /// Status), then executes SPLASHUI_SMOKE_JS and writes the returned value
     /// (stringified) to SPLASHUI_SMOKE_OUT.
     private func smokeWebReady() {
         showPanel()
         if let c = smokeChannel, !c.isEmpty {
-            let script = "var s=document.querySelector('section[data-channel=\"\\(c)\"]'); if (s) s.scrollIntoView();"
+            let script = "window.showView('\(c == "06" ? "settings" : "status")'); var s=document.querySelector('section[data-channel=\"\(c)\"]'); if (s) s.scrollIntoView();"
             webView.evaluateJavaScript(script, completionHandler: nil)
         }
         guard let path = smokeJS, let code = try? String(contentsOfFile: path, encoding: .utf8) else { return }
@@ -792,7 +809,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         panel.setFrame(NSRect(x: f.minX, y: f.origin.y - (target - f.height), width: f.width, height: target), display: true)
     }
 
-    private func quitApp() {
+    @objc private func quitApp() {
         NSApplication.shared.terminate(nil)
     }
 

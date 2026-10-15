@@ -40,6 +40,20 @@
     await until(() => S.cfg.folders && S.cfg.folders.length === expected.folderCount &&
       S.cfg.folders.every(folder => !folder.scanning), 'folder scan');
     snapshot('baseline');
+    check('status opens with telemetry only', !$('statusView').hidden && $('settingsView').hidden &&
+      !$('statusView').querySelector('.settings-panel') &&
+      $('statusView').querySelectorAll('section').length === 5, $('statusView').hidden);
+    const geometry = { width: innerWidth, height: innerHeight };
+    $('btnSettings').click();
+    check('hamburger opens settings in the same viewport', $('statusView').hidden && !$('settingsView').hidden &&
+      innerWidth === geometry.width && innerHeight === geometry.height && $('settingsView').scrollTop === 0, geometry);
+    check('settings scrolls internally with shared footer reachable', getComputedStyle($('settingsView')).overflowY === 'auto' &&
+      $('btnRestart').getBoundingClientRect().bottom <= innerHeight && $('btnRestart').getBoundingClientRect().top >= 0,
+      { overflow: getComputedStyle($('settingsView')).overflowY, footerBottom: $('btnRestart').getBoundingClientRect().bottom });
+    $('btnStatus').click();
+    check('back cap returns to status without resizing', !$('statusView').hidden && $('settingsView').hidden &&
+      innerWidth === geometry.width && innerHeight === geometry.height, $('statusView').scrollTop);
+    $('btnSettings').click();
     check('form port populated', $('cfgPort').value === String(expected.port), $('cfgPort').value);
     check('draft manual path matches config', CF.draft.manualPath === expected.manualPath, CF.draft.manualPath);
     check('manual input matches draft', $('manualPath').value === CF.draft.manualPath, $('manualPath').value);
@@ -61,6 +75,8 @@
     }));
     check('folder rows populated', folders.length === expected.folderCount, folders);
     check('at least one configured folder present', folders.some(folder => folder.status === 'PRESENT'), folders);
+    check('lmstudio present with discovered models', folders.some(folder => folder.id === 'lmstudio' &&
+      folder.status === 'PRESENT' && folder.modelCount > 0), folders.find(folder => folder.id === 'lmstudio'));
     check('adoption stamps restart baseline', S.cfg.restart_required === false, S.cfg.restart_required);
     if (expected.roundTrips) {
       async function save(step, port, ane, restart) {

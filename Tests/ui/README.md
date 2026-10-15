@@ -21,7 +21,10 @@ not slept. It asserts draft/input population (including both manual-path reads),
 dirty comparison/revert, full ConfigDoc saves and preserved unknown fields/key,
 key masking (including input properties), rejected saves, restart-required display,
 folder status/count/add/delete/scan, browse callbacks, cfg retention across ticks,
-and first-run show-once/dismiss/CTA persistence commands. Every assertion and the
+and first-run show-once/dismiss/CTA persistence commands. Screen assertions cover
+telemetry-only status, hamburger/back navigation and scroll reset, settings control
+ownership, and the first-run CTA's settings target. Native menu labels/selectors
+are source-asserted (not synthesized mouse-event proof). Every assertion and the
 final count are JSON lines; any failure exits nonzero.
 
 The bridge fixture supplies computed restart state; it does **not** prove Swift's
@@ -45,9 +48,12 @@ The runner refuses to launch unless exactly one engine already owns the configur
 port and no SplashUI app is running. The round-trip fixture must begin on 8123 with
 ANE enabled. It launches the built binary **once** using the opt-in `SPLASHUI_SMOKE`
 hooks, awaits `live_assertions.js`, and asserts actual DOM/CF draft/Swift tick state:
-form population, manual path, external-engine PID, engine resolution, masked key,
-completed folder rows and at least one PRESENT folder. Polling waits for predicates,
-not arbitrary delays.
+status-only telemetry, hamburger/back navigation in the same viewport, internal
+settings scrolling with a reachable shared footer, form population, manual path,
+external-engine PID, engine resolution, masked key, completed folder rows and a
+PRESENT lmstudio row with models. The hook starts on status (channel 01), then
+switches to settings through the real hamburger handler. Polling waits for
+predicates, not arbitrary delays.
 
 The smoke-only JS captures and ignores trusted physical keyboard/click events so
 typing elsewhere cannot contaminate the key panel; synthetic test events still

@@ -80,7 +80,7 @@ try {
   const initialHealth = await engineHealth();
   const log = openSync(join(directory, 'app.log'), 'w', 0o600);
   try {
-    app = spawn(binary, [], { env: { ...process.env, SPLASHUI_SMOKE: '1', SPLASHUI_SMOKE_CHANNEL: '06',
+    app = spawn(binary, [], { env: { ...process.env, SPLASHUI_SMOKE: '1', SPLASHUI_SMOKE_CHANNEL: '01',
       SPLASHUI_SMOKE_JS: hookPath, SPLASHUI_SMOKE_OUT: output }, stdio: ['ignore', log, log] });
   } finally { closeSync(log); }
   const deadline = Date.now() + 45000;
@@ -104,7 +104,7 @@ try {
   for (const step of result.steps || []) console.log(JSON.stringify({ step }));
   assert.equal(result.suite, 'panel-live', `unexpected hook result: ${JSON.stringify(result)}`);
   assert.equal(result.failed, 0, 'live DOM assertions failed');
-  assert.ok(result.assertions >= (roundTrips ? 16 : 12), 'hook must execute every requested assertion');
+  assert.ok(result.assertions >= (roundTrips ? 21 : 17), 'hook must execute every requested assertion');
   execFileSync('screencapture', ['-x', evidence]); // Evidence only; never parsed or compared.
   await cleanup();
   assert.equal(hash(readFileSync(configPath)), originalHash, 'config must be restored byte-identical');
