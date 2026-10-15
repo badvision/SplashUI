@@ -25,11 +25,11 @@ MODEL_ROOT="${SPLASH_MODEL_ROOT:-$ROOT/models/incoai/Qwen3.8-27B-Splash}"
 [ -d "$KIT" ] || { echo "kit not found at $KIT — run ./install.sh first" >&2; exit 1; }
 [ -d "$MODEL_ROOT" ] || { echo "model not found (tried $ROOT/models and ~/.lmstudio/models) — run ./install.sh" >&2; exit 1; }
 
-export SPLASH_KIT_DIR="$KIT"
-export SPLASH_MODEL_ROOT="$MODEL_ROOT"
-export SPLASH_PORT="$PORT"
-export SPLASH_KEY="$KEY"
-export SPLASH_ANE="${SPLASH_ANE:-on}"
+# D9: the SPLASH_* env exports are retired — the menu-bar app (build/SplashUI.app)
+# now reads its configuration from config.json, not the process env (see README
+# "Configuration"). start.sh still launches its own engine directly from the
+# argv below; those values are not the app's source of truth.
+SPLASH_ANE="${SPLASH_ANE:-on}"
 ANE_ARGS=()
 if [ "$SPLASH_ANE" != "on" ]; then ANE_ARGS=(--disable-ane); fi
 

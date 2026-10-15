@@ -10,24 +10,20 @@ enum Cfg {
     static let logLink = "/tmp/splash-standalone.log"
 }
 
-// Resolve the engine paths + engine argv from the documented env contract
-// (README "Configuration (environment)"). Re-resolved on every launch attempt so a
-// user fixing the install while the app is running takes effect on the next try.
-// (`isDir`, `findBrewKeg`, and `kitVersion` live in ui_logic.swift: the config
-// store needs the same real-FS runtime detection for the D10 first-run seed.)
+// D9: the SPLASH_* env contract is retired. The engine launch is planned from
+// config.json by `planLaunch` (ui_logic.swift); AppDelegate wires it with the
+// real FS closures below. Nothing reads the process environment for engine
+// configuration.
 
-// The README ./install.sh default install root (SPLASHUI_HOME).
-let defaultRoot = NSHomeDirectory() + "/SplashUI"
+/// planLaunch's `fileContents`: the file's UTF-8 text, nil when absent.
+func fileContents(_ path: String) -> String? {
+    guard let d = FileManager.default.contents(atPath: path) else { return nil }
+    return String(data: d, encoding: .utf8)
+}
 
-func resolve() -> SplashPaths {
-    resolveSplashPaths(
-        env: ProcessInfo.processInfo.environment,
-        defaultRoot: defaultRoot,
-        home: NSHomeDirectory(),
-        isDir: isDir,
-        isExecutable: { access($0, X_OK) == 0 },
-        brewKeg: findBrewKeg,
-        kitVersion: kitVersion)
+/// planLaunch's `listDir`: the dir's entry names, nil when not a directory.
+func listDir(_ path: String) -> [String]? {
+    (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? nil
 }
 
 // MARK: - Process helpers
@@ -94,16 +90,21 @@ final class ServerProc {
     private var launchDate = Date()
     private var restartDates: [Date] = []
     private var outHandle: FileHandle?
+    // D13: the signature of the last plan the engine actually launched (nil before
+    // the first successful launch). restart_required = current signature != this.
+    var lastSuccessfulPlanSignature: String?
 
-    // Resolved engine paths/config. Re-resolved on every launch attempt so a fixed
-    // install takes effect; also read each tick for the poll endpoint's port.
-    var slash: SplashPaths
+    // The launch plan (S4/D9): planned from config.json by planLaunch, consumed
+    // here. Re-planned on every launch attempt + each tick so a user fixing the
+    // install while the app is running takes effect on the next try.
+    var plan: LaunchConfig = LaunchConfig(port: 8123)
 
-    init() { slash = resolve() }
+    /// The engine port (the config's global; the adopt ground truth reads it).
+    var port: Int { plan.port ?? 8123 }
 
     var pid: Int32? {
         if let p = process, p.isRunning { return p.processIdentifier }
-        return serverPids(port: slash.port).first
+        return serverPids(port: port).first
     }
 
     func upSeconds() -> Double {
@@ -121,9 +122,16 @@ final class ServerProc {
         launchFailRetries = 0
     }
 
+    /// Tag a plan error with the active profile's name (the S3 error style names the
+    /// profile + the actionable reason). A profile-less plan error (config parse) is
+    /// left untouched.
+    private func tag(_ message: String) -> String {
+        let name = plan.profileName ?? plan.profileId ?? ""
+        return name.isEmpty ? message : "[\(name)] " + message
+    }
+
     func launch() {
-        slash = resolve()
-        guard pid == nil, !portAlive(port: slash.port) else { return }
+        guard pid == nil, !portAlive(port: port) else { return }
         // Fresh engine log + tail symlink on every attempt, before the pre-flight,
         // so even a missing-install failure lands in /tmp (the panel + `tail -f`).
         let stamp = ISO8601DateFormatter().string(from: Date())
@@ -135,14 +143,19 @@ final class ServerProc {
         try? FileManager.default.removeItem(atPath: Cfg.logLink)
         try? FileManager.default.createSymbolicLink(atPath: Cfg.logLink, withDestinationPath: logPath)
 
-        // Pre-flight: if the install is missing/broken, record it and stop —
+        // Pre-flight: a failed plan (no kit / no model / eligibility blocked) —
         // no process is touched, and the app stays up showing the actionable error.
-        if let e = slash.error { recordLaunchFailure(e, logPath: logPath); return }
-        guard let executable = slash.executable else { return }
+        if let e = plan.error { recordLaunchFailure(tag(e), logPath: logPath); return }
+        guard let executable = plan.executable else { return }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: executable)
-        if let dir = slash.workDir { p.currentDirectoryURL = URL(fileURLWithPath: dir) }
-        p.arguments = slash.engineArgs
+        if let dir = plan.workDir { p.currentDirectoryURL = URL(fileURLWithPath: dir) }
+        p.arguments = plan.engineArgs
+        // D9: the API key rides the child env (inherited + the plan's engineEnv),
+        // NEVER on argv (the S2a anchor). Everything else is inherited verbatim.
+        var env = ProcessInfo.processInfo.environment
+        for (k, v) in plan.engineEnv { env[k] = v }
+        p.environment = env
         guard let out = FileHandle(forWritingAtPath: logPath) else {
             recordLaunchFailure("cannot write engine log: \(logPath)", logPath: logPath)
             return
@@ -174,6 +187,9 @@ final class ServerProc {
         lastLaunchError = nil
         launchFailRetries = 0
         launchDate = Date()
+        // D13: the engine now runs THIS plan — stamp it so a later config change is
+        // what flips restart_required (a rename does not; it shares the signature).
+        lastSuccessfulPlanSignature = plan.signature
     }
 
     // One line to NSLog (Console.app) and an append to the engine log stream, so
@@ -202,7 +218,7 @@ final class ServerProc {
         }
         outHandle?.closeFile()
         outHandle = nil
-        for pid in serverPids(port: slash.port) { kill(pid, SIGTERM) }
+        for pid in serverPids(port: port) { kill(pid, SIGTERM) }
         process = nil
     }
 
@@ -431,6 +447,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         // the first launch below. On a fresh seed this re-picks its own "Default"
         // (a no-op write: the seed IS the persistence).
         configStore.activateStartup()
+        // S4/D9: the first launch plan comes from config.json (planLaunch) — the
+        // env contract is retired. It must be set BEFORE the launch/adopt below:
+        // the pid/port probes read it (the adopt ground truth is the configured
+        // port).
+        server.plan = computePlan()
         setupStatusItem()
         setupPanel()
         if server.pid == nil {
@@ -617,13 +638,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         ])
     }
 
+    // ---- S4/D9: the launch plan + registry drift (the config-owned pipeline)
+
+    /// The launch plan (C3): planLaunch over the current config doc with the real
+    /// FS closures (the config is the single source of truth — no env, D9).
+    private func computePlan() -> LaunchConfig {
+        let data = configData(configStore.doc)
+        return planLaunch(data, home: NSHomeDirectory(),
+                          isDir: { isDir($0) },
+                          isExecutable: { access($0, X_OK) == 0 },
+                          brewKeg: { findBrewKeg() },
+                          kitVersion: { kitVersion($0) },
+                          fileContents: { fileContents($0) },
+                          listDir: { listDir($0) })
+    }
+
+    /// The registry drift report (S2b): the kit's serve_options.py table vs the
+    /// version contract. Re-read only when the kit's workDir+version changes
+    /// (the 20 KB file read stays out of the 1 s tick's hot path).
+    private var registryCacheKey: String?
+    private var registryCache: RegistryReport?
+    private func registryReport(for plan: LaunchConfig) -> RegistryReport? {
+        guard let workDir = plan.workDir else { return nil }
+        let key = workDir + "|" + (plan.version ?? "")
+        if key == registryCacheKey { return registryCache }
+        let path = workDir + "/server/serve_options.py"
+        guard let text = fileContents(path) else { registryCacheKey = key; registryCache = nil; return nil }
+        let (contract, _) = contractFor(plan.version, registry: launchRegistry)
+        let report = registryDiff(parseServeOptions(text), contract: contract, version: plan.version)
+        registryCacheKey = key
+        registryCache = report
+        return report
+    }
+
+    /// The tick's `registry_report` value (mirrors ui_logic's private
+    /// `registryTickValue`): NSNull when there is no report or the kit is inSync
+    /// (a known-good kit stays quiet — no churn on the change gate); else the
+    /// condensed dict, empty classifications omitted.
+    private func registryTickValueOverlay(_ report: RegistryReport?) -> Any {
+        guard let r = report, !r.inSync else { return NSNull() }
+        var d: [String: Any] = ["version": r.version ?? NSNull()]
+        if !r.missingInContract.isEmpty { d["missing_in_contract"] = r.missingInContract as Any }
+        if !r.missingInKit.isEmpty { d["missing_in_kit"] = r.missingInKit as Any }
+        if !r.envSecretMismatches.isEmpty { d["env_secret_mismatches"] = r.envSecretMismatches as Any }
+        if !r.unrecognized.isEmpty { d["unrecognized"] = r.unrecognized as Any }
+        return d
+    }
+
     // MARK: Polling
 
     private func get(_ path: String, _ done: @escaping (Data?) -> Void) {
-        guard let url = URL(string: server.slash.base + path) else { done(nil); return }
+        // D9: the port + key come from the launch plan (config.json), not env.
+        let port = server.port
+        let key = configStore.doc.globals.apiKey
+        guard let url = URL(string: "http://\(Cfg.host):\(port)\(path)") else { done(nil); return }
         var req = URLRequest(url: url)
         req.timeoutInterval = 2.5
-        req.setValue(server.slash.apiKey, forHTTPHeaderField: "x-api-key")
+        req.setValue(key, forHTTPHeaderField: "x-api-key")
         URLSession.shared.dataTask(with: req) { data, resp, _ in
             let ok = (resp as? HTTPURLResponse)?.statusCode == 200
             DispatchQueue.main.async { done(ok ? data : nil) }
@@ -663,8 +734,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     }
 
     private func tick() {
-        // Keep the resolved port/key fresh (env changes + user fixing the install).
-        server.slash = resolve()
+        // S4/D9: the launch plan is re-planned from config.json every tick — a
+        // user fixing the install (or saving the panel) while the app is running
+        // takes effect on the next launch attempt + this tick's restart state.
+        server.plan = computePlan()
         get("/status") { [weak self] data in
             let j = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
             DispatchQueue.main.async {
@@ -974,11 +1047,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             "t": now.timeIntervalSince1970,
             "state": state,
             "ready": ready,
-            "model": js(server.slash.modelId),
+            "model": js(server.plan.modelId),
             "ctx": js(fld("maximum_context_tokens")),
         ]
         j["engine"] = [
-            "version": js(server.slash.version),
+            "version": js(server.plan.version),
             "metal_healthy": js(metrics["splash_metal_healthy"]),
             "pressure": js(statusJSON?["memory_pressure"]),
             "loop_tick_ms": js(fld("loop", "max_tick_ms")),
@@ -1083,14 +1156,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             "launched_by_app": server.launchedByApp && server.pid != nil,
             "up_seconds": server.upSeconds(),
             "launch_error": js(server.lastLaunchError?.message),
-            "kit_dir": js(server.slash.workDir),
+            "kit_dir": js(server.plan.workDir),
         ]
 
         // ---- cfg (change gate: it ticks only when it changed; unchanged -> the
         // key is omitted and the JS keeps its last copy). In S1a it reflects the
         // config store; the fields later stories own ride along as stable nulls.
         let cfgInFlight = prefillCount + decodeCount + frontendCount
-        let cfgPayload = configTickPayload(
+        // S4/D9: the plan fills the launch-relevant cfg fields the pre-S4 nulls
+        // held (engine resolved/version/valid/error, the mapping fields, the
+        // restart state, the registry drift). The values are plan-stable, so the
+        // change gate stays quiet while the install is unchanged.
+        var cfgPayload = configTickPayload(
             doc: configStore.doc,
             loadError: configStore.loadError,
             versionTooNew: configStore.versionTooNew,
@@ -1098,6 +1175,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             firstRun: configStore.firstRun,
             inFlight: cfgInFlight,
             result: configStore.consumeSaveResult())
+        let plan = server.plan
+        var eng = (cfgPayload["engine"] as? [String: Any]) ?? [:]
+        eng["resolved"] = plan.workDir != nil
+        eng["version"] = plan.version ?? NSNull()
+        eng["tried"] = []
+        eng["valid"] = plan.error == nil
+        eng["error"] = plan.error ?? NSNull()
+        cfgPayload["engine"] = eng
+        cfgPayload["mapping_fallback"] = plan.mappingFallback
+        cfgPayload["mapping_used"] = plan.version ?? NSNull()
+        // D13: the running plan's signature vs the last one the engine actually
+        // launched. nil before the first launch; a rename shares the signature.
+        let restart = server.lastSuccessfulPlanSignature.map { plan.signature != $0 }
+        cfgPayload["restart_required"] = restart ?? NSNull()
+        cfgPayload["restart_reason"] = restart == true
+            ? (plan.error ?? "the configuration changed — restart the engine to apply")
+            : NSNull()
+        cfgPayload["registry_report"] = registryTickValueOverlay(registryReport(for: plan))
         let cfgJSON = jsonString(JSONValue(any: cfgPayload), indent: 0)
         if cfgJSON != lastCfgJSON {
             lastCfgJSON = cfgJSON

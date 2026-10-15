@@ -331,6 +331,10 @@ function render(){
   // footer
   $("pidNum").textContent = S.server && S.server.pid ? S.server.pid : "—";
   $("envPill").textContent = S.server && S.server.pid ? (S.server.launched_by_app ? "APP-MANAGED" : "EXTERNAL") : "NOT RUNNING";
+  // D13: a config change that the running engine doesn't yet apply flags
+  // cfg.restart_required — the footer button says so until a restart clears it.
+  const rr = S.cfg && S.cfg.restart_required === true;
+  $("btnRestart").textContent = rr ? "RESTART TO APPLY" : "Restart";
   const h = document.body.scrollHeight;
   if (h !== lastH) { lastH = h; try { window.webkit.messageHandlers.size.postMessage(h) } catch(e) {} }
 }

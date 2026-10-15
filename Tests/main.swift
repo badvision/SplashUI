@@ -3200,6 +3200,208 @@ do {
     check(canonicalJSONString(JSONValue(any: pDrift)) != canonicalJSONString(JSONValue(any: pNil)),
           "s2b tick change-gate: drift vs null flips the gate")
 }
+// 88. S4: the launch registry covers the versions the plan can resolve: an
+// exact 1.3.0 contract (the app's fixed kit rung) plus 1.3.1/1.3.2 (a new
+// Homebrew keg must plan, not crash — contractFor falls back).
+do {
+ let (c130, fb) = contractFor("1.3.0", registry: launchRegistry)
+ check(!fb && c130.version == "1.3.0", "S4: the registry carries an exact 1.3.0 contract (no fallback, version-keyed)")
+ let pc = c130.option("persistent_cache")
+ check(pc != nil && pc!.kind == .bool, "S4: 1.3.0's registry carries the persistent-cache flag (a store_true bool)")
+ let ak = c130.option("api_key")
+ check(ak != nil && ak!.secret && ak!.envVar == "SPLASH_API_KEY", "S4: 1.3.0's api_key is secret, env SPLASH_API_KEY (never argv)")
+ let (_, fb131) = contractFor("1.3.1", registry: launchRegistry)
+ check(!fb131, "S4: the registry carries 1.3.1 (a new keg plans, not crashes)")
+ let (_, fb132) = contractFor("1.3.2", registry: launchRegistry)
+ check(!fb132, "S4: the registry carries 1.3.2")
+ let (_, fbX) = contractFor("1.9.9", registry: launchRegistry)
+ check(fbX, "S4: an unknown version falls back, not crashes (D3)")
+}
+
+// 89. S4: the tick cutover — the plan's launch-relevant fields (engine
+// resolved/version/tried/valid/error, the plan sub-object, the restart state)
+// are overlaid onto the change-gated cfg payload by S4's pure helper. Without a
+// plan they stay null (change-gate stable). Mirrors main.swift's applyPlanToCfg.
+do {
+ var fs = FakeFS()
+ planKit(fs: &fs, path: "/kits/kit130", version: "1.3.0")
+ let model = "/models/pkg"
+ fs.dir(model, ["manifest.json", "model.json", "config.json", "tokenizer/", "draft/"])
+ fs.file(model + "/manifest.json", #"{"model_type": "qwen3_5", "draft_repo": "draft"}"#)
+ fs.file(model + "/draft/config.json")
+ let cfg = planCfgJSON(engineMode: "manual", manualPath: "/kits/kit130", port: 8123,
+                       key: "splash-standalone-1", name: "default",
+                       modelId: "incoai/Qwen3.8-27B-Splash", modelDir: model,
+                       options: ["persistent_cache": "true", "max_cache_disk": "100"])
+ let plan = planLaunch(cfg, home: "/home",
+                       isDir: { fs.isDir($0) }, isExecutable: { fs.isExecutable($0) },
+                       brewKeg: { nil }, kitVersion: { readKitVersion(fs: fs, kit: $0) },
+                       fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
+ check(plan.error == nil, "S4 tick: the fixture plan is healthy (got: \(plan.error ?? "ok"))")
+ let d = parseConfig(cfg).doc!
+
+ // A mirror of main.swift's S4 overlay (the harness cannot compile main.swift):
+ // fill the plan-derived engine block, the mapping indicator + used version, the
+ // restart state, and the registry drift (S2b) onto the change-gated base.
+ func applyPlanToCfg(_ payload: inout [String: Any], plan: LaunchConfig?,
+                     restart: Bool?, reason: String?, report: RegistryReport?) {
+     var eng = (payload["engine"] as? [String: Any]) ?? [:]
+     if let p = plan {
+         eng["resolved"] = p.workDir != nil
+         eng["version"] = p.version ?? NSNull()
+         eng["tried"] = []
+         eng["valid"] = p.error == nil
+         eng["error"] = p.error ?? NSNull()
+     }
+     payload["engine"] = eng
+     payload["mapping_fallback"] = plan?.mappingFallback ?? NSNull()
+     payload["mapping_used"] = plan?.version ?? NSNull()
+     payload["restart_required"] = restart ?? NSNull()
+     payload["restart_reason"] = reason ?? NSNull()
+     if let r = report, !r.inSync {
+         var d: [String: Any] = ["version": r.version ?? NSNull()]
+         if !r.missingInContract.isEmpty { d["missing_in_contract"] = r.missingInContract as Any }
+         if !r.missingInKit.isEmpty { d["missing_in_kit"] = r.missingInKit as Any }
+         if !r.envSecretMismatches.isEmpty { d["env_secret_mismatches"] = r.envSecretMismatches as Any }
+         if !r.unrecognized.isEmpty { d["unrecognized"] = r.unrecognized as Any }
+         payload["registry_report"] = d
+     }
+ }
+
+ // No plan: the plan-derived engine fields stay null (the pre-S4 base shape).
+ var pNil = configTickPayload(doc: d, loadError: nil, versionTooNew: false, activeInvalid: false,
+                              firstRun: false, inFlight: 0, result: nil)
+ applyPlanToCfg(&pNil, plan: nil, restart: nil, reason: nil, report: nil)
+ let eNil = pNil["engine"] as? [String: Any]
+ check(eNil?["resolved"] is NSNull && eNil?["version"] is NSNull,
+       "S4 tick: no plan -> engine resolved/version null (pre-S4 shape)")
+ check(pNil["mapping_fallback"] is NSNull && pNil["mapping_used"] is NSNull,
+       "S4 tick: no plan -> mapping_fallback/used null")
+ check(pNil["restart_required"] is NSNull && pNil["restart_reason"] is NSNull,
+       "S4 tick: no plan -> restart_required/reason null")
+
+ // A healthy plan fills the engine block + the mapping fields.
+ var p = configTickPayload(doc: d, loadError: nil, versionTooNew: false, activeInvalid: false,
+                           firstRun: false, inFlight: 0, result: nil)
+ applyPlanToCfg(&p, plan: plan, restart: nil, reason: nil, report: nil)
+ let e = p["engine"] as? [String: Any]
+ check(e?["resolved"] as? Bool == true, "S4 tick: engine.resolved true (a kit was found)")
+ check(e?["version"] as? String == "1.3.0", "S4 tick: engine.version from the kit's release.json (D16)")
+ check(e?["valid"] as? Bool == true, "S4 tick: engine.valid true (the plan is healthy)")
+ check(e?["error"] is NSNull, "S4 tick: engine.error null when the plan is healthy")
+ check(p["mapping_fallback"] as? Bool == false,
+       "S4 tick: mapping_fallback false (an exact 1.3.0 contract, not a fallback)")
+ check(p["mapping_used"] as? String == "1.3.0",
+       "S4 tick: mapping_used = the kit's release.json version (the contract's key)")
+ check(p["restart_required"] is NSNull, "S4 tick: restart_required null while never launched")
+
+ // Change-gate stability: the same plan ticks identically (no churn).
+ var p2 = configTickPayload(doc: d, loadError: nil, versionTooNew: false, activeInvalid: false,
+                            firstRun: false, inFlight: 0, result: nil)
+ applyPlanToCfg(&p2, plan: plan, restart: nil, reason: nil, report: nil)
+ check(canonicalJSONString(JSONValue(any: p)) == canonicalJSONString(JSONValue(any: p2)),
+       "S4 tick change-gate: an identical plan ticks identically")
+
+ // A failed plan: resolved false, valid false, the actionable error text.
+ var fsBad = FakeFS()
+ let cfgBad = planCfgJSON(engineMode: "manual", manualPath: "/no/kit", port: 8123, key: "k",
+                          name: "default", modelId: "incoai/Qwen3.8-27B-Splash",
+                          modelDir: nil, options: [:])
+ let bad = planLaunch(cfgBad, home: "/home",
+                      isDir: { fsBad.isDir($0) }, isExecutable: { fsBad.isExecutable($0) },
+                      brewKeg: { nil }, kitVersion: { readKitVersion(fs: fs, kit: $0) },
+                      fileContents: { fsBad.fileContents($0) }, listDir: { fsBad.listDir($0) })
+ check(bad.error != nil, "S4 tick: the broken plan errors (fixture sanity)")
+ var pBad = configTickPayload(doc: d, loadError: nil, versionTooNew: false, activeInvalid: false,
+                              firstRun: false, inFlight: 0, result: nil)
+ applyPlanToCfg(&pBad, plan: bad, restart: true, reason: "port changed", report: nil)
+ let eBad = pBad["engine"] as? [String: Any]
+ check(eBad?["resolved"] as? Bool == false, "S4 tick: a broken plan -> engine.resolved false")
+ check((eBad?["error"] as? String)?.contains("/no/kit") == true,
+       "S4 tick: engine.error carries the actionable plan text")
+ check(eBad?["valid"] as? Bool == false, "S4 tick: a broken plan -> engine.valid false")
+ check(pBad["restart_required"] as? Bool == true && pBad["restart_reason"] as? String == "port changed",
+       "S4 tick: restart_required/reason ride the tick")
+
+ // registry_report wiring (S2b) survives the cutover: a drifting report renders,
+ // an inSync kit stays null (the gate is stable).
+ var pDrift = configTickPayload(doc: d, loadError: nil, versionTooNew: false, activeInvalid: false,
+                                firstRun: false, inFlight: 0, result: nil)
+ applyPlanToCfg(&pDrift, plan: plan, restart: nil, reason: nil,
+                report: RegistryReport(version: "1.3.0", unrecognized: ["--new-flag"]))
+ check((pDrift["registry_report"] as? [String: Any])?["unrecognized"] is [Any],
+       "S4 cfg: a drifting registry_report renders as the condensed dict")
+ var pSync = configTickPayload(doc: d, loadError: nil, versionTooNew: false, activeInvalid: false,
+                               firstRun: false, inFlight: 0, result: nil)
+ applyPlanToCfg(&pSync, plan: plan, restart: nil, reason: nil,
+                report: RegistryReport(version: "1.3.0"))
+ check(pSync["registry_report"] is NSNull,
+       "S4 cfg: an inSync kit keeps registry_report null (the gate is stable)")
+}
+
+// 90. S4: restart_required signature compare (D13) — a launch-relevant change
+// flips it; a profile rename does NOT; it clears once the engine runs the new
+// plan. Mirrors main.swift's pure compare helper.
+do {
+ func cfgJSON(port: Int, options: [String: String]) -> Data {
+ planCfgJSON(engineMode: "manual", manualPath: "/kits/kit130", port: port, key: "splash-standalone-1",
+             name: "default", modelId: "incoai/Qwen3.8-27B-Splash", modelDir: "/models/pkg",
+             options: options)
+ }
+ let closures: (isDir: (String) -> Bool, isExe: (String) -> Bool,
+                kitVer: (String) -> String?, fc: (String) -> String?, ld: (String) -> [String]?) = (
+    { _ in true }, { _ in true }, { _ in "1.3.0" },
+    { _ in #"{"model_type": "qwen3_5", "draft_repo": "draft"}"# }, { _ in [] })
+ let mk = { (data: Data) in
+ planLaunch(data, home: "/home",
+            isDir: closures.isDir, isExecutable: closures.isExe,
+            brewKeg: { nil }, kitVersion: closures.kitVer,
+            fileContents: closures.fc, listDir: closures.ld)
+ }
+ let planA = mk(cfgJSON(port: 8123, options: ["persistent_cache": "true"]))
+ let planB = mk(cfgJSON(port: 8124, options: ["persistent_cache": "true"]))
+
+ // Mirror of main.swift's D13 compare.
+ func restartRequired(_ current: String, lastSuccessful: String?) -> Bool? {
+     guard let last = lastSuccessful else { return nil }
+     return current != last
+ }
+ check(restartRequired(planA.signature, lastSuccessful: nil) == nil,
+       "S4 restart: first launch (no last successful plan) -> not required (nil)")
+ check(restartRequired(planA.signature, lastSuccessful: planA.signature) == false,
+       "S4 restart: the running plan IS the successful one -> not required")
+ check(restartRequired(planB.signature, lastSuccessful: planA.signature) == true,
+       "S4 restart: a launch-relevant change (port) -> required")
+ check(restartRequired(planB.signature, lastSuccessful: planB.signature) == false,
+       "S4 restart: the engine now runs the new plan -> cleared")
+
+ // A profile RENAME changes neither the signature (D13: signature, not identity).
+ let renamed = planCfgJSON(engineMode: "manual", manualPath: "/kits/kit130", port: 8124, key: "splash-standalone-1",
+                           name: "Renamed", modelId: "incoai/Qwen3.8-27B-Splash", modelDir: "/models/pkg",
+                           options: ["persistent_cache": "true"])
+ let planRenamed = mk(renamed)
+ check(planRenamed.signature == planB.signature,
+       "S4 restart: a profile rename leaves the signature unchanged (no spurious restart)")
+ check(restartRequired(planRenamed.signature, lastSuccessful: planB.signature) == false,
+       "S4 restart: a rename does not flip restart_required")
+
+ // The engine-env merge (D9): inherited + LaunchConfig.env; the key rides in the
+ // env, never on argv (the S2a contract). Mirrors main.swift's mergedEngineEnv.
+ func mergedEngineEnv(inherited: [String: String], extra: [String: String]) -> [String: String] {
+     var m = inherited
+     for (k, v) in extra { m[k] = v }
+     return m
+ }
+ let env = mergedEngineEnv(inherited: ["PATH": "/usr/bin", "LANG": "en_US.UTF-8"],
+                           extra: planB.engineEnv)
+ check(env["PATH"] == "/usr/bin" && env["LANG"] == "en_US.UTF-8",
+       "S4 engineEnv: inherited entries survive the merge")
+ check(env["SPLASH_API_KEY"] == "splash-standalone-1", "S4 engineEnv: the key rides the env")
+ check(!planB.engineArgs.contains("--api-key"),
+       "S4 engineEnv: the key is NOT on argv (the S2a anchor)")
+ check(planB.engineEnv["SPLASH_API_KEY"] == "splash-standalone-1",
+       "S4 engineEnv: LaunchConfig.engineEnv carries the key")
+}
 
 print(failures == 0 ? "ALL TESTS PASSED" : "\(failures) TEST(S) FAILED")
 exit(failures == 0 ? 0 : 1)
