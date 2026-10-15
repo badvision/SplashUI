@@ -206,6 +206,437 @@ func versionGE(_ a: String, _ b: String) -> Bool {
     }
     return true
 }
+// MARK: - Versioned launch registry (contract C2, D3/D9/D16)
+//
+// The UI->CLI mapping is a HAND-AUTHORED registry keyed by the kit's release.json
+// version (D3): one VersionContract per version, every OptionDef verified against
+// the real kits' parsers (the 1.3.0 release kit, the 1.3.1 Homebrew keg, and the
+// 1.3.2 GitHub tag). The installed kit's server/serve_options.py may be parsed to
+// VALIDATE the mapping and pre-populate newly-detected flags (S2b) — it never
+// emits argv. The contract/version is detected from release.json (D16), never a
+// stored or user-set value.
+
+/// How a kit's server is launched from its directory.
+public enum LaunchFlavor: String, Equatable {
+    /// 1.3.0 style: `python -u -m server.server <MODEL_DIR> --model <ID> ...` —
+    /// the on-disk dir is the positional argument (reused, never re-downloaded).
+    case module
+    /// 1.3.1+: `python -u install/launcher.py serve --model <HF_ID> ...` — the
+    /// launcher downloads the model by id (one-time), then execs the server.
+    case launcher
+}
+
+/// One option a kit's server/launcher accepts, as the registry speaks it. The
+/// registry is the ONLY argv source (D3); the UI renders from these and the
+/// serve_options.py assist validates them (S2b).
+public struct OptionDef: Equatable {
+    public enum Kind: String, Equatable {
+        case value   // `--flag VALUE` — one pair per value
+        case bool    // `--flag` — bare when the key's value is true (argparse store_true)
+        case append  // `--flag V1 --flag V2 ...` — one pair per element
+    }
+    public let flag: String        // "--max-cache-disk"
+    public let key: String         // "max_cache_disk" (config.json options key; the UI field id)
+    public let kind: Kind
+    public let group: String       // the engine help group (network/memory/cache/api/requests/model)
+    public let defValue: String?   // the engine's effective default as CLI text; nil = none ("auto")
+    public let choices: [String]?  // allowed values (UI + save validation); nil = free-form
+    public let secret: Bool        // reaches the child via env, NEVER on argv
+    public let envVar: String?     // the env var name of a secret (SPLASH_API_KEY)
+    public let requires: [String]  // keys that must be effectively enabled for this option to
+                                   // be valid — the engine's own cross-checks (check_serve_arguments)
+    public let appDefault: String? // a value the app injects when unset (host 127.0.0.1)
+    public let alwaysEmit: Bool    // structural flags the app always passes (host/port)
+    public let builtFromModel: Bool // the model trio: emitted from the launch model, not the values map
+    public init(flag: String, key: String, kind: Kind, group: String,
+                defValue: String? = nil, choices: [String]? = nil,
+                secret: Bool = false, envVar: String? = nil,
+                requires: [String] = [], appDefault: String? = nil,
+                alwaysEmit: Bool = false, builtFromModel: Bool = false) {
+        self.flag = flag
+        self.key = key
+        self.kind = kind
+        self.group = group
+        self.defValue = defValue
+        self.choices = choices
+        self.secret = secret
+        self.envVar = envVar
+        self.requires = requires
+        self.appDefault = appDefault
+        self.alwaysEmit = alwaysEmit
+        self.builtFromModel = builtFromModel
+    }
+}
+
+/// One hand-authored entry of the versioned launch registry (D3): everything the
+/// app knows about driving a kit whose release.json says `version`.
+public struct VersionContract: Equatable {
+    public let version: String        // the release.json version ("1.3.0")
+    public let flavor: LaunchFlavor
+    public let options: [OptionDef]
+    /// Model family -> the DFlash2 draft repo (1.3.1/1.3.2: the kits' verified
+    /// install/families.py; 1.3.0: empty — no registry, the package bakes the draft).
+    public let familyRegistry: [String: String]
+    /// 1.3.2's suggested drafter models (1.3.0/1.3.1: none).
+    public let suggestedModels: [String]
+    public init(version: String, flavor: LaunchFlavor, options: [OptionDef],
+                familyRegistry: [String: String] = [:], suggestedModels: [String] = []) {
+        self.version = version
+        self.flavor = flavor
+        self.options = options
+        self.familyRegistry = familyRegistry
+        self.suggestedModels = suggestedModels
+    }
+    public func option(_ key: String) -> OptionDef? { options.first { $0.key == key } }
+    public subscript(key: String) -> OptionDef? { option(key) }
+}
+
+/// The hand-authored registry (D3): one contract per release.json version.
+public struct LaunchRegistry: Equatable {
+    public let contracts: [String: VersionContract]
+    public init(contracts: [String: VersionContract]) { self.contracts = contracts }
+}
+
+// The 23 shared flags exactly as the real kits declare them (the serve_options.py
+// SERVE_OPTIONS tuple + the parser's --port). 1.3.0 and 1.3.1 use THE SAME list —
+// verified: the installed keg's server/serve_options.py is byte-identical to the
+// 1.3.0 kit's. The order reproduces today's resolveSplashPaths argv: host, port,
+// key, then the cache axis as the app has always emitted it (persistent-cache,
+// max-cache-disk, idle-release), the rest in the engine's help order, ANE last.
+private let sharedOptions130_131: [OptionDef] = [
+    OptionDef(flag: "--host", key: "host", kind: .value, group: "network",
+              defValue: "127.0.0.1", appDefault: "127.0.0.1", alwaysEmit: true),
+    OptionDef(flag: "--port", key: "port", kind: .value, group: "network",
+              defValue: "8000", alwaysEmit: true),
+    OptionDef(flag: "--api-key", key: "api_key", kind: .value, group: "network",
+              secret: true, envVar: "SPLASH_API_KEY"),
+    OptionDef(flag: "--persistent-cache", key: "persistent_cache", kind: .bool, group: "cache",
+              defValue: "false", requires: ["max_cache_disk"]),
+    OptionDef(flag: "--max-cache-disk", key: "max_cache_disk", kind: .value, group: "cache",
+              defValue: "0"),
+    OptionDef(flag: "--idle-release", key: "idle_release", kind: .value, group: "memory",
+              defValue: "10m"),
+    OptionDef(flag: "--allowed-host", key: "allowed_host", kind: .append, group: "network"),
+    OptionDef(flag: "--allowed-origin", key: "allowed_origin", kind: .append, group: "network"),
+    OptionDef(flag: "--no-webui", key: "no_webui", kind: .bool, group: "network", defValue: "false"),
+    OptionDef(flag: "--max-memory", key: "max_memory", kind: .value, group: "memory", defValue: "auto"),
+    OptionDef(flag: "--max-context", key: "max_context", kind: .value, group: "memory", defValue: "auto"),
+    OptionDef(flag: "--kv-format", key: "kv_format", kind: .value, group: "memory",
+              defValue: "int8", choices: ["int8", "bf16"]),
+    OptionDef(flag: "--cache-dir", key: "cache_dir", kind: .value, group: "cache"),
+    OptionDef(flag: "--served-model-name", key: "served_model_name", kind: .append, group: "api"),
+    OptionDef(flag: "--announce-served-name", key: "announce_served_name", kind: .bool, group: "api",
+              defValue: "false", requires: ["served_model_name"]),
+    OptionDef(flag: "--default-reasoning-effort", key: "reasoning_effort", kind: .value, group: "api",
+              choices: ["none", "minimal", "low", "medium", "high", "xhigh"]),
+    OptionDef(flag: "--max-request-size", key: "max_request_size", kind: .value, group: "requests",
+              defValue: "128M"),
+    OptionDef(flag: "--max-image-pixels", key: "max_image_pixels", kind: .value, group: "requests",
+              defValue: "4194304"),
+    OptionDef(flag: "--request-timeout", key: "request_timeout", kind: .value, group: "requests"),
+    OptionDef(flag: "--queue-size", key: "queue_size", kind: .value, group: "requests", defValue: "32"),
+    OptionDef(flag: "--decode-share", key: "decode_share", kind: .value, group: "requests", defValue: "0.5"),
+    OptionDef(flag: "--disable-ane", key: "ane", kind: .bool, group: "requests", defValue: "true"),
+    OptionDef(flag: "--allow-idle-sleep", key: "allow_idle_sleep", kind: .bool, group: "requests",
+              defValue: "false"),
+]
+
+// The 1.3.2 shared set (the real 1.3.2 tag's serve_options.py, diffed against the
+// 1.3.1 keg): the same order with the 1.3.2 deltas in place — --max-cache-disk
+// default 0 -> auto (<=32G free; the engine now accepts persistent-cache on top
+// of it, so requires is dropped), + the 4 new flags inserted beside their
+// relatives (--state-format after --kv-format, --max-cache-disk-writes after
+// --max-cache-disk, the thinking pair after --default-reasoning-effort).
+private let sharedOptions132: [OptionDef] = [
+    OptionDef(flag: "--host", key: "host", kind: .value, group: "network",
+              defValue: "127.0.0.1", appDefault: "127.0.0.1", alwaysEmit: true),
+    OptionDef(flag: "--port", key: "port", kind: .value, group: "network",
+              defValue: "8000", alwaysEmit: true),
+    OptionDef(flag: "--api-key", key: "api_key", kind: .value, group: "network",
+              secret: true, envVar: "SPLASH_API_KEY"),
+    OptionDef(flag: "--persistent-cache", key: "persistent_cache", kind: .bool, group: "cache",
+              defValue: "false"),
+    OptionDef(flag: "--max-cache-disk", key: "max_cache_disk", kind: .value, group: "cache",
+              defValue: "auto"),
+    OptionDef(flag: "--max-cache-disk-writes", key: "max_cache_disk_writes", kind: .value, group: "cache",
+              defValue: "0", requires: ["max_cache_disk"]),
+    OptionDef(flag: "--idle-release", key: "idle_release", kind: .value, group: "memory",
+              defValue: "10m"),
+    OptionDef(flag: "--allowed-host", key: "allowed_host", kind: .append, group: "network"),
+    OptionDef(flag: "--allowed-origin", key: "allowed_origin", kind: .append, group: "network"),
+    OptionDef(flag: "--no-webui", key: "no_webui", kind: .bool, group: "network", defValue: "false"),
+    OptionDef(flag: "--max-memory", key: "max_memory", kind: .value, group: "memory", defValue: "auto"),
+    OptionDef(flag: "--max-context", key: "max_context", kind: .value, group: "memory", defValue: "auto"),
+    OptionDef(flag: "--kv-format", key: "kv_format", kind: .value, group: "memory",
+              defValue: "int8", choices: ["int8", "bf16"]),
+    OptionDef(flag: "--state-format", key: "state_format", kind: .value, group: "memory",
+              defValue: "fp32", choices: ["fp32", "bf16"]),
+    OptionDef(flag: "--cache-dir", key: "cache_dir", kind: .value, group: "cache"),
+    OptionDef(flag: "--served-model-name", key: "served_model_name", kind: .append, group: "api"),
+    OptionDef(flag: "--announce-served-name", key: "announce_served_name", kind: .bool, group: "api",
+              defValue: "false", requires: ["served_model_name"]),
+    OptionDef(flag: "--default-reasoning-effort", key: "reasoning_effort", kind: .value, group: "api",
+              choices: ["none", "minimal", "low", "medium", "high", "xhigh"]),
+    OptionDef(flag: "--thinking-token-budget", key: "thinking_token_budget", kind: .value, group: "api"),
+    OptionDef(flag: "--thinking-end-text", key: "thinking_end_text", kind: .value, group: "api"),
+    OptionDef(flag: "--max-request-size", key: "max_request_size", kind: .value, group: "requests",
+              defValue: "128M"),
+    OptionDef(flag: "--max-image-pixels", key: "max_image_pixels", kind: .value, group: "requests",
+              defValue: "4194304"),
+    OptionDef(flag: "--request-timeout", key: "request_timeout", kind: .value, group: "requests"),
+    OptionDef(flag: "--queue-size", key: "queue_size", kind: .value, group: "requests", defValue: "32"),
+    OptionDef(flag: "--decode-share", key: "decode_share", kind: .value, group: "requests", defValue: "0.5"),
+    OptionDef(flag: "--disable-ane", key: "ane", kind: .bool, group: "requests", defValue: "true"),
+    OptionDef(flag: "--allow-idle-sleep", key: "allow_idle_sleep", kind: .bool, group: "requests",
+              defValue: "false"),
+]
+
+// The model trio of each flavor. The model is always identified by its HF id
+// regardless of flavor; the on-disk dir is used ONLY by the module flavor (it
+// loads the dir positionally, never re-downloading; the launcher downloads).
+let moduleModelOptions: [OptionDef] = [
+    OptionDef(flag: "--model", key: "model", kind: .value, group: "model",
+              alwaysEmit: true, builtFromModel: true),
+    OptionDef(flag: "--tokenizer", key: "tokenizer", kind: .value, group: "model",
+              alwaysEmit: true, builtFromModel: true),
+    OptionDef(flag: "--binary", key: "binary", kind: .value, group: "model",
+              alwaysEmit: true, builtFromModel: true),
+]
+
+let launcherModelOptions: [OptionDef] = [
+    OptionDef(flag: "--model", key: "model", kind: .value, group: "model",
+              alwaysEmit: true, builtFromModel: true),
+    OptionDef(flag: "--revision", key: "revision", kind: .value, group: "model"),
+    OptionDef(flag: "--draft-model", key: "draft_model", kind: .value, group: "model"),
+    OptionDef(flag: "--language-only", key: "language_only", kind: .bool, group: "model", defValue: "false"),
+    OptionDef(flag: "--offline", key: "offline", kind: .bool, group: "model", defValue: "false"),
+]
+
+/// The 1.3.0 contract: the module flavor. 26 flags = the 23 shared + the model
+/// trio. No family registry (1.3.0 predates the DFlash2 registry: a package
+/// bakes its draft, an assembly needs draft/config.json).
+public let contract130 = VersionContract(
+    version: "1.3.0", flavor: .module,
+    options: sharedOptions130_131 + moduleModelOptions)
+
+/// The 1.3.1 contract: the launcher flavor. The shared 23 are byte-identical to
+/// 1.3.0's; + the launcher model-axis flags, + the 2 verified DFlash2 families
+/// (the keg's install/families.py).
+public let contract131 = VersionContract(
+    version: "1.3.1", flavor: .launcher,
+    options: sharedOptions130_131 + launcherModelOptions,
+    familyRegistry: [
+        "Qwen3.8-27B": "incoai/Qwen3.8-27B-DFlash2",
+        "Qwen3.6-35B-A3B": "incoai/Qwen3.6-35B-A3B-DFlash2",
+    ])
+
+/// The 1.3.2 contract: 1.3.1 + the 4 new flags; --max-cache-disk default
+/// auto; --persistent-cache stays a plain store_true on the Python CLI (the
+/// "on|off" of the issue matrix is the ENGINE's shape — the server passes it to
+/// the binary internally; the app maps UI options to the Python CLI, never to
+/// the C++ binary). The 1.3.2 tag's families.py is unchanged from 1.3.1's.
+public let contract132 = VersionContract(
+    version: "1.3.2", flavor: .launcher,
+    options: sharedOptions132 + launcherModelOptions,
+    familyRegistry: [
+        "Qwen3.8-27B": "incoai/Qwen3.8-27B-DFlash2",
+        "Qwen3.6-35B-A3B": "incoai/Qwen3.6-35B-A3B-DFlash2",
+    ])
+
+/// The default registry: every authored version.
+public let launchRegistry = LaunchRegistry(contracts: [
+    "1.3.0": contract130,
+    "1.3.1": contract131,
+    "1.3.2": contract132,
+])
+
+/// D16: the contract for a kit's release.json version. An exact hit when the
+/// version is authored; otherwise the LATEST authored contract with
+/// `fallback` = true (D3: launch proceeds on it; S7 shows the visible
+/// "FALLBACK MAPPING" indicator). A nil version (release.json unreadable) also
+/// falls back.
+public func contractFor(_ version: String?, registry: LaunchRegistry) -> (contract: VersionContract, fallback: Bool) {
+    if let version, let exact = registry.contracts[version] {
+        return (exact, false)
+    }
+    var latest: VersionContract?
+    for contract in registry.contracts.values {
+        if latest == nil || !versionGE(latest!.version, contract.version) {
+            latest = contract
+        }
+    }
+    precondition(latest != nil, "a launch registry must carry at least one contract")
+    return (latest!, true)
+}
+
+/// A buildArgv diagnostic. `.warning` = an option was dropped for a `requires`
+/// violation (D4: warn, never block — the launch proceeds; the engine would
+/// have hard-errored). `.error` = no argv can be built at all (the plan layer
+/// refuses pre-flight with the message).
+public struct ArgvIssue: Equatable {
+    public enum Severity: String, Equatable { case warning, error }
+    public let severity: Severity
+    public let message: String
+    public init(severity: Severity = .warning, message: String) {
+        self.severity = severity
+        self.message = message
+    }
+}
+
+/// A JSON value as engine CLI text: strings pass through, numbers in their
+/// shortest form, bools as true/false; nil for null/compound (malformed for a
+/// value option).
+private func jsonText(_ v: JSONValue) -> String? {
+    switch v {
+    case .string(let s): return s
+    case .number(let n): return n.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(n)) : String(n)
+    case .bool(let b): return b ? "true" : "false"
+    case .null, .array, .object: return nil
+    }
+}
+
+/// The profile's value for `opt` as engine CLI text (nil when unset).
+private func profileText(_ opt: OptionDef, _ values: [String: JSONValue]) -> String? {
+    jsonText(values[opt.key] ?? .null)
+}
+
+/// The engine-effective value of `ref` as CLI text: the profile value, else the
+/// contract's app default, else the engine default — what the engine would see
+/// (the `requires` check evaluates THIS, so a default that satisfies the
+/// engine's cross-check — 1.3.2's auto cache — satisfies it too). An append
+/// option is "set" iff its list is non-empty (its first element's text).
+private func effectiveText(_ ref: OptionDef, _ values: [String: JSONValue]) -> String? {
+    if ref.kind == .append {
+        return values[ref.key]?.array?.first.flatMap(jsonText)
+    }
+    return profileText(ref, values) ?? ref.appDefault ?? ref.defValue
+}
+
+/// A `requires` violation for `opt`, as a warning message (D4: warn, never
+/// block). The engine would refuse to start (check_serve_arguments); the app
+/// drops the offending flag instead and tells the user why.
+private func requiresViolation(_ opt: OptionDef, contract: VersionContract, _ values: [String: JSONValue]) -> String? {
+    for key in opt.requires {
+        guard let ref = contract.option(key) else {
+            return "\(opt.flag) requires \(key), which this kit's contract does not define"
+        }
+        guard let text = effectiveText(ref, values) else {
+            return "\(opt.flag) needs \(ref.flag) (not set — the engine would refuse to start)"
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        // "0"/"false" are the disabled states for a value/bool option (the
+        // engine's 0 = no SSD cache, store_true false = off). For an append
+        // option a "name" is never a disabled state — any non-empty list is set.
+        if ref.kind != .append && (trimmed == "0" || trimmed == "false") {
+            return "\(opt.flag) needs \(ref.flag) enabled (it is '\(text)' — the disabled state)"
+        }
+    }
+    return nil
+}
+
+/// Build the engine argv + child env for one launch. PURE (T1): the registry
+/// contract, the profile's option values, the model, and the globals in — no
+/// environment reads (D9: config.json is the single source of truth).
+///
+/// Emission rules (the registry is the only argv source, D3):
+/// - a SECRET (the api key) goes into the child env (SPLASH_API_KEY), NEVER on
+///   argv — uniform across both flavors (open item 5: the 1.3.0 server reads
+///   SPLASH_API_KEY from its environment, verified in its serve_options.py);
+/// - an effective value equal to the engine's default (defValue) is OMITTED —
+///   the engine reads it itself (1.3.2's thinking/state flags: emit only when
+///   set, their defValue is nil);
+/// - structural flags (alwaysEmit: host/port) are always emitted, even at their
+///   engine default — today's resolveSplashPaths passes `--host 127.0.0.1
+///   --port <port>` unconditionally, and the D9(b) anchor requires it;
+/// - a `requires`-unmet option is DROPPED with an ArgvIssue.warning (D4: warn,
+///   never block);
+/// - builtFromModel flags (model/tokenizer/binary) are emitted from the launch
+///   model in the structural prefix, never from the values map.
+///
+/// The argv excludes the python executable itself: the caller runs
+/// `<kit>/python/bin/python <args>` from the kit dir (today's engineArgs shape).
+public func buildArgv(_ contract: VersionContract,
+                      profileValues: [String: JSONValue],
+                      model: ProfileModel,
+                      globals: GlobalCfg) -> (args: [String], env: [String: String], issues: [ArgvIssue]) {
+    // D6: port + api key are service-level (globals), not per-profile options.
+    // They sit in the values map under their option keys, and a globals value
+    // overrides a stale same-named profile entry.
+    var values = profileValues
+    values["port"] = .string(String(globals.port))
+    if !globals.apiKey.isEmpty { values["api_key"] = .string(globals.apiKey) }
+
+    var env: [String: String] = [:]
+    var args: [String] = []
+    var issues: [ArgvIssue] = []
+
+    // The structural prefix — today's resolveSplashPaths shape, verbatim.
+    switch contract.flavor {
+    case .launcher:
+        guard let id = model.id else {
+            return (args: [], env: env, issues: [
+                ArgvIssue(severity: .error, message: "the launcher form needs a model id (a HF repo id such as owner/repo)")
+            ])
+        }
+        args = ["-u", "install/launcher.py", "serve", "--model", id]
+    case .module:
+        guard let dir = model.dir else {
+            return (args: [], env: env, issues: [
+                ArgvIssue(severity: .error, message: "the module form needs the model's on-disk directory (it loads the dir positionally, never re-downloading)")
+            ])
+        }
+        guard let id = model.id else {
+            return (args: [], env: env, issues: [
+                ArgvIssue(severity: .error, message: "the module form needs the model's id (server.py requires --model OWNER/REPO)")
+            ])
+        }
+        args = ["-u", "-m", "server.server", dir,
+                "--model", id,
+                "--tokenizer", dir + "/tokenizer",
+                "--binary", "./engine/splash"]
+    }
+
+    for opt in contract.options where !opt.builtFromModel {
+        if opt.kind == .append {
+            guard let list = values[opt.key]?.array, !list.isEmpty else { continue }
+            if let violation = requiresViolation(opt, contract: contract, values) {
+                issues.append(ArgvIssue(severity: .warning, message: violation))
+                continue
+            }
+            for item in list {
+                if let text = jsonText(item) {
+                    args.append(opt.flag)
+                    args.append(text)
+                }
+            }
+            continue
+        }
+        let profile = profileText(opt, values)
+        let effective = profile ?? (opt.alwaysEmit ? opt.appDefault : nil)
+        // A secret: env only, never argv (open item 5: both flavors).
+        if opt.secret {
+            if let text = effective, !text.isEmpty, let name = opt.envVar {
+                env[name] = text
+            }
+            continue
+        }
+        guard let text = effective else { continue }
+        // Omission: equal to the engine default — the engine reads it itself.
+        // alwaysEmit bypasses (host/port are always passed, today's behavior).
+        if !opt.alwaysEmit && text == opt.defValue { continue }
+        if let violation = requiresViolation(opt, contract: contract, values) {
+            issues.append(ArgvIssue(severity: .warning, message: violation))
+            continue
+        }
+        if opt.kind == .bool {
+            args.append(opt.flag)   // a store_true flag is bare
+        } else {
+            args.append(opt.flag)
+            args.append(text)
+        }
+    }
+    return (args: args, env: env, issues: issues)
+}
 
 // The UI never outlives the service — but only for a service that actually ran.
 // A server that was observed up (crashed, or an adopted external one died) → quit

@@ -1179,5 +1179,358 @@ do {
           "change-gate: first_run flips the gate (the one-shot is visible exactly once)")
 }
 
+// ---- S2a: versioned contract registry + argv builder (C2/D3/D9(b)) ---------
+
+// The golden 1.3.0 model dir (the install.sh layout: the default root's models/).
+let goldenModelDir = "/home/SplashUI/models/incoai/Qwen3.8-27B-Splash"
+
+// The EXACT argv today's resolveSplashPaths emits for the 1.3.0 kit under the
+// 9 vars' documented defaults (test 26 pins it pristine; test 32's D9(b) anchor
+// diffs the new builder's output against it).
+let golden130Args: [String] = [
+    "-u", "-m", "server.server", goldenModelDir,
+    "--model", "incoai/Qwen3.8-27B-Splash",
+    "--tokenizer", goldenModelDir + "/tokenizer",
+    "--binary", "./engine/splash",
+    "--host", "127.0.0.1", "--port", "8123",
+    "--api-key", "splash-standalone-1", "--persistent-cache",
+    "--max-cache-disk", "100g", "--idle-release", "240m",
+]
+
+// 26. GOLDEN BASELINE (D9(b)): drive the CURRENT resolveSplashPaths with every
+// one of the 9 documented vars UNSET (their documented defaults: port 8123, key
+// splash-standalone-1, 100g, 240m, ANE on, version 1.3.0, the install.sh layout)
+// and verify it produces exactly the golden argv. Captured BEFORE any new code
+// exists, so the baseline is pristine — if this ever fails, the baseline moved.
+do {
+    let (kd, ke) = kitPaths("/home/SplashUI/kit/splash-1.3.0-arm64-macos26")
+    let g = resolveSplashPaths(
+        env: [:],
+        defaultRoot: "/home/SplashUI", home: "/home",
+        isDir: { kd.contains($0) || $0 == goldenModelDir },
+        isExecutable: { ke.contains($0) },
+        kitVersion: { $0.hasPrefix("/home/SplashUI/kit") ? "1.3.0" : nil })
+    check(g.error == nil, "golden: kit + model resolve under the documented defaults")
+    check(g.workDir == "/home/SplashUI/kit/splash-1.3.0-arm64-macos26", "golden: workDir is the kit dir")
+    check(g.engineArgs == golden130Args, "golden: the EXACT current 1.3.0 module argv (pristine baseline)")
+}
+
+// 27. contractFor: exact hits for the three authored versions (D16: keyed to the
+// kit's release.json version; D3: fallback only for unseen versions).
+do {
+    let a = contractFor("1.3.0", registry: launchRegistry)
+    check(a.fallback == false && a.contract.version == "1.3.0" && a.contract.flavor == .module,
+          "contractFor: 1.3.0 -> the module contract, fallback false")
+    let b = contractFor("1.3.1", registry: launchRegistry)
+    check(b.fallback == false && b.contract.version == "1.3.1" && b.contract.flavor == .launcher,
+          "contractFor: 1.3.1 -> the launcher contract, fallback false")
+    let c = contractFor("1.3.2", registry: launchRegistry)
+    check(c.fallback == false && c.contract.version == "1.3.2" && c.contract.flavor == .launcher,
+          "contractFor: 1.3.2 -> the launcher contract, fallback false")
+}
+
+// 28. contractFor: unseen versions -> the LATEST authored (1.3.2) + fallback =
+// true (D3: launch proceeds; S7 shows the "FALLBACK MAPPING" cap).
+do {
+    let newer = contractFor("1.3.3", registry: launchRegistry)
+    check(newer.fallback == true && newer.contract.version == "1.3.2",
+          "contractFor: unseen 1.3.3 -> the latest authored (1.3.2) + fallback")
+    let older = contractFor("1.2.9", registry: launchRegistry)
+    check(older.fallback == true && older.contract.version == "1.3.2",
+          "contractFor: older 1.2.x -> the latest authored (1.3.2) + fallback")
+    let unreadable = contractFor(nil, registry: launchRegistry)
+    check(unreadable.fallback == true && unreadable.contract.version == "1.3.2",
+          "contractFor: unreadable release.json (nil) -> the latest authored + fallback")
+}
+
+// 29. The 1.3.0 contract content (ground truth: the real kit's server.py parser +
+// serve_options.py): 26 flags = the 23 shared (incl. --port) + the structural
+// model trio; no family registry (packages bake the draft; assembly needs draft/).
+do {
+    let c = contract130
+    check(c.version == "1.3.0" && c.flavor == .module, "contract 1.3.0: the module flavor")
+    check(c.options.count == 26, "contract 1.3.0: the 26 verified flags")
+    check(Set(c.options.map { $0.flag }) == [
+        "--host", "--allowed-host", "--allowed-origin", "--api-key", "--no-webui",
+        "--port", "--max-memory", "--max-context", "--kv-format", "--idle-release",
+        "--max-cache-disk", "--persistent-cache", "--cache-dir", "--served-model-name",
+        "--announce-served-name", "--default-reasoning-effort", "--max-request-size",
+        "--max-image-pixels", "--request-timeout", "--queue-size", "--decode-share",
+        "--disable-ane", "--allow-idle-sleep",
+        "--model", "--tokenizer", "--binary",
+    ], "contract 1.3.0: the exact flag set (23 shared + model/tokenizer/binary)")
+    check(c.familyRegistry.isEmpty, "contract 1.3.0: no family registry (1.3.0 has no DFlash2 registry)")
+    check(c.option("max_cache_disk")?.defValue == "0", "contract 1.3.0: --max-cache-disk engine default 0 (disabled)")
+    check(c.option("idle_release")?.defValue == "10m", "contract 1.3.0: --idle-release engine default 10m")
+    check(c.option("kv_format")?.defValue == "int8" && c.option("kv_format")?.choices == ["int8", "bf16"],
+          "contract 1.3.0: --kv-format default int8, choices int8/bf16")
+    check(c.option("api_key")?.secret == true && c.option("api_key")?.envVar == "SPLASH_API_KEY",
+          "contract 1.3.0: --api-key is secret, env SPLASH_API_KEY (open item 5: the 1.3.0 server reads it from env)")
+    check(c.option("host")?.alwaysEmit == true && c.option("host")?.defValue == "127.0.0.1",
+          "contract 1.3.0: --host always emitted (the app is local-only; today's code hard-codes it)")
+    check(c.option("port")?.alwaysEmit == true && c.option("port")?.defValue == "8000",
+          "contract 1.3.0: --port always emitted (engine default 8000)")
+    check(c.option("ane")?.flag == "--disable-ane" && c.option("ane")?.defValue == "true",
+          "contract 1.3.0: ANE default-on = the inverted --disable-ane flag")
+    check(c.option("persistent_cache")?.requires == ["max_cache_disk"],
+          "contract 1.3.0: --persistent-cache requires --max-cache-disk (the engine's check_serve_arguments)")
+}
+
+// 30. The 1.3.1 contract: the shared 23 flags byte-identical to 1.3.0's (verified:
+// the installed keg's serve_options.py is byte-identical to the 1.3.0 kit's), +
+// the launcher model-axis flags, + the 2 verified DFlash2 family entries.
+do {
+    let c = contract131
+    check(c.flavor == .launcher, "contract 1.3.1: the launcher flavor")
+    let shared = contract130.options.filter { !$0.builtFromModel }
+    let sharedKeys = Set(shared.map { $0.key })
+    check(c.options.filter { sharedKeys.contains($0.key) } == shared,
+          "contract 1.3.1: the shared 23 flags are byte-identical to 1.3.0's (keg == tag)")
+    check(c.options.count == 28, "contract 1.3.1: 23 shared + model/revision/draft-model/language-only/offline")
+    let axis = Set(["revision", "draft_model", "language_only", "offline"])
+    check(Set(c.options.map { $0.key }).subtracting(["model"]).subtracting(
+            Set(contract130.options.map { $0.key }).subtracting(["model", "tokenizer", "binary"])) == axis,
+          "contract 1.3.1: the launcher-only model-axis flags (revision/draft_model/language_only/offline)")
+    check(c.option("draft_model")?.group == "model" && c.option("revision")?.group == "model"
+          && c.option("language_only")?.kind == .bool && c.option("offline")?.kind == .bool,
+          "contract 1.3.1: the model-axis flags sit in the model group (language-only/offline are store_true)")
+    check(c.familyRegistry == [
+        "Qwen3.8-27B": "incoai/Qwen3.8-27B-DFlash2",
+        "Qwen3.6-35B-A3B": "incoai/Qwen3.6-35B-A3B-DFlash2",
+    ], "contract 1.3.1: the 2 verified DFlash2 family entries (the keg's install/families.py)")
+}
+
+// 31. The 1.3.2 contract (ground truth: the real 1.3.2 tag's serve_options.py):
+// 1.3.1 + the 4 new flags; --max-cache-disk default 0 -> auto; --persistent-cache
+// stays a plain store_true on the Python CLI (the "on|off" is the engine's shape).
+do {
+    let c = contract132
+    check(c.flavor == .launcher, "contract 1.3.2: the launcher flavor")
+    let newKeys = Set(["state_format", "max_cache_disk_writes", "thinking_token_budget", "thinking_end_text"])
+    check(Set(c.options.map { $0.key }) == Set(contract131.options.map { $0.key }) | newKeys,
+          "contract 1.3.2: 1.3.1's keys + exactly the 4 new flags")
+    check(c.option("max_cache_disk")?.defValue == "auto",
+          "contract 1.3.2: --max-cache-disk default auto (the 1.3.2 semantics change: <=32G free)")
+    check(c.option("state_format")?.defValue == "fp32" && c.option("state_format")?.choices == ["fp32", "bf16"],
+          "contract 1.3.2: --state-format {fp32,bf16}, engine default fp32")
+    check(c.option("max_cache_disk_writes")?.defValue == "0",
+          "contract 1.3.2: --max-cache-disk-writes default 0 (no limit)")
+    check(c.option("thinking_token_budget")?.defValue == nil && c.option("thinking_end_text")?.defValue == nil,
+          "contract 1.3.2: the thinking flags have no engine default (emit only when set)")
+    check(c.option("persistent_cache")?.kind == .bool && c.option("persistent_cache")?.requires.isEmpty == true,
+          "contract 1.3.2: --persistent-cache is still store_true and no longer requires --max-cache-disk (auto is non-zero)")
+    check(c.option("max_cache_disk_writes")?.requires == ["max_cache_disk"],
+          "contract 1.3.2: --max-cache-disk-writes requires the SSD cache (the 1.3.2 engine check)")
+    check(c.familyRegistry == contract131.familyRegistry,
+          "contract 1.3.2: the DFlash2 registry is the tag's families.py (unchanged from 1.3.1)")
+}
+
+// 32. THE D9(b) HEADLINE ANCHOR (amended per open item 5): with the seeded
+// default config, the 1.3.0 module argv is byte-identical to the golden baseline
+// EXCEPT the api key moves from argv to the child env as SPLASH_API_KEY.
+do {
+    let cfg = defaultConfig(home: "/home", now: now)
+    let (contract, fallback) = contractFor("1.3.0", registry: launchRegistry)
+    check(fallback == false, "anchor: the seeded-default engine (1.3.0) is an exact contract hit")
+    let res = buildArgv(contract,
+                        profileValues: cfg.profiles[0].options,
+                        model: ProfileModel(source: "lmstudio", id: "incoai/Qwen3.8-27B-Splash", dir: goldenModelDir),
+                        globals: cfg.globals)
+    var expected = golden130Args
+    if let i = expected.firstIndex(of: "--api-key") {
+        expected.removeSubrange(i..<(i + 2))   // the amended anchor: the key moves to env
+    }
+    check(res.args == expected,
+          "D9(b): the seeded-default 1.3.0 module argv is byte-identical EXCEPT --api-key moved to env")
+    check(res.env == ["SPLASH_API_KEY": "splash-standalone-1"], "D9(b): the key rides the child env as SPLASH_API_KEY")
+    check(!res.args.contains("splash-standalone-1"), "D9(b): the key never appears on argv")
+    check(res.issues.isEmpty, "D9(b): no issues on the seeded defaults (100g + persistent-cache satisfy requires)")
+}
+
+// 33. The .launcher (1.3.1) form: `launcher.py serve --model <ID>` + shared flags,
+// the key in env, NEVER on argv (open item 5: uniform across both flavors).
+do {
+    let res = buildArgv(contract131,
+                        profileValues: ["persistent_cache": .bool(true), "max_cache_disk": .string("100g"),
+                                        "idle_release": .string("240m"), "ane": .bool(true)],
+                        model: ProfileModel(source: "hfid", id: "mlx-community/Qwen3.8-27B-4bit"),
+                        globals: GlobalCfg(port: 8123, apiKey: "splash-standalone-1"))
+    check(res.args == [
+        "-u", "install/launcher.py", "serve", "--model", "mlx-community/Qwen3.8-27B-4bit",
+        "--host", "127.0.0.1", "--port", "8123",
+        "--persistent-cache", "--max-cache-disk", "100g", "--idle-release", "240m",
+    ], "launcher: the exact argv (model id + shared flags; the key is NOT on it)")
+    check(!res.args.contains("--api-key") && !res.args.contains("splash-standalone-1"),
+          "launcher: the api key is never on argv")
+    check(res.env == ["SPLASH_API_KEY": "splash-standalone-1"], "launcher: the api key goes into env as SPLASH_API_KEY")
+    check(res.issues.isEmpty, "launcher: no issues")
+}
+
+// 34. ANE: `true` -> NOTHING on argv (the split is default-on, today's behavior);
+// `false` -> --disable-ane; absent -> nothing.
+do {
+    let model = ProfileModel(source: "lmstudio", id: "incoai/Qwen3.8-27B-Splash", dir: goldenModelDir)
+    let globals = GlobalCfg(port: 8123, apiKey: "splash-standalone-1")
+    let on = buildArgv(contract130, profileValues: ["ane": .bool(true)], model: model, globals: globals)
+    check(!on.args.contains("--disable-ane"), "ane: true -> nothing on argv (default-on split)")
+    let off = buildArgv(contract130, profileValues: ["ane": .bool(false)], model: model, globals: globals)
+    check(off.args.last == "--disable-ane", "ane: false -> --disable-ane (last, as today)")
+    let absent = buildArgv(contract130, profileValues: [:], model: model, globals: globals)
+    check(!absent.args.contains("--disable-ane"), "ane: unset -> nothing (the engine default is on)")
+    let bOff = buildArgv(contract131, profileValues: ["ane": .bool(false)],
+                         model: ProfileModel(source: "hfid", id: "m/r"), globals: globals)
+    check(bOff.args.last == "--disable-ane", "ane: false -> --disable-ane (launcher form)")
+}
+
+// 35. defValue omission: a value equal to the engine default is OMITTED (the
+// engine reads it itself); a non-default value emits.
+do {
+    let model = ProfileModel(source: "hfid", id: "m/r")
+    let globals = GlobalCfg(port: 8123, apiKey: "k")
+    let def = buildArgv(contract131, profileValues: ["kv_format": .string("int8"), "max_memory": .string("auto"),
+                                                     "decode_share": .string("0.5")], model: model, globals: globals)
+    check(!def.args.contains("int8") && !def.args.contains("auto") && !def.args.contains("0.5"),
+          "omission: values equal to the engine defaults are omitted (kv-format int8, max-memory auto, decode-share 0.5)")
+    let non = buildArgv(contract131, profileValues: ["kv_format": .string("bf16"), "max_memory": .string("28G"),
+                                                     "decode_share": .string("0.7")], model: model, globals: globals)
+    check(non.args == ["-u", "install/launcher.py", "serve", "--model", "m/r",
+                        "--host", "127.0.0.1", "--port", "8123",
+                        "--max-memory", "28G", "--kv-format", "bf16", "--decode-share", "0.7"],
+          "omission: non-default values emit in registry order")
+}
+
+// 36. 1.3.2 flags emit ONLY when set (the design driver for the versioned registry).
+do {
+    let model = ProfileModel(source: "hfid", id: "m/r")
+    let globals = GlobalCfg(port: 8123, apiKey: "k")
+    let none = buildArgv(contract132, profileValues: [:], model: model, globals: globals)
+    for absent in ["--state-format", "--max-cache-disk-writes", "--thinking-token-budget", "--thinking-end-text"] {
+        check(!none.args.contains(absent), "1.3.2: \(absent) is absent when unset")
+    }
+    check(!none.args.contains("auto") && !none.args.contains("--max-cache-disk"),
+          "1.3.2: --max-cache-disk is absent when unset (the engine default auto)")
+    let endText = """
+Now the answer
+
+
+"""
+    let set = buildArgv(contract132, profileValues: ["state_format": .string("bf16"),
+                                                     "thinking_token_budget": .number(4096),
+                                                     "thinking_end_text": .string(endText),
+                                                     "max_cache_disk_writes": .string("200G")],
+                        model: model, globals: globals)
+    check(set.args.contains("--state-format") && set.args.contains("bf16"), "1.3.2: --state-format emits when set (bf16)")
+    check(set.args.contains("--thinking-token-budget") && set.args.contains("4096"), "1.3.2: --thinking-token-budget emits when set")
+    check(set.args.contains("--thinking-end-text"), "1.3.2: --thinking-end-text emits when set (multi-line text is a single argv element)")
+    check(set.args.contains("--max-cache-disk-writes") && set.args.contains("200G"), "1.3.2: --max-cache-disk-writes emits when set")
+    let atDefault = buildArgv(contract132, profileValues: ["state_format": .string("fp32")], model: model, globals: globals)
+    check(!atDefault.args.contains("--state-format"), "1.3.2: a value equal to the engine default (fp32) is still omitted")
+    let explicitAuto = buildArgv(contract132, profileValues: ["max_cache_disk": .string("auto")], model: model, globals: globals)
+    check(!explicitAuto.args.contains("--max-cache-disk"), "1.3.2: explicit 'auto' == the engine default -> omitted")
+}
+
+// 37. requires violations (D4: warn, never block — the offending flag is DROPPED,
+// the launch proceeds): mirrors the engine's own cross-checks, translated to
+// warning + drop instead of the engine's hard error.
+do {
+    let model = ProfileModel(source: "lmstudio", id: "incoai/Qwen3.8-27B-Splash", dir: goldenModelDir)
+    let globals = GlobalCfg(port: 8123, apiKey: "k")
+    // 1.3.0: persistent-cache needs max-cache-disk (engine default 0 = disabled).
+    let v1 = buildArgv(contract130, profileValues: ["persistent_cache": .bool(true)], model: model, globals: globals)
+    check(!v1.args.contains("--persistent-cache") && !v1.args.contains("--max-cache-disk"),
+          "requires 1.3.0: --persistent-cache dropped when --max-cache-disk is unset (engine default 0)")
+    check(v1.issues.count == 1 && v1.issues[0].severity == .warning && v1.issues[0].message.contains("--persistent-cache"),
+          "requires 1.3.0: an ArgvIssue.warning names the dropped flag")
+    check(!v1.args.isEmpty, "requires 1.3.0: the launch still proceeds (warn, never block)")
+    let v2 = buildArgv(contract130, profileValues: ["persistent_cache": .bool(true), "max_cache_disk": .string("0")],
+                       model: model, globals: globals)
+    check(!v2.args.contains("--persistent-cache") && v2.issues.count == 1,
+          "requires 1.3.0: explicit '0' is the disabled state -> --persistent-cache dropped + warn")
+    let ok = buildArgv(contract130, profileValues: ["persistent_cache": .bool(true), "max_cache_disk": .string("100g")],
+                       model: model, globals: globals)
+    check(ok.args.contains("--persistent-cache") && ok.issues.isEmpty,
+          "requires 1.3.0: a non-zero --max-cache-disk satisfies requires -> no issue")
+    // 1.3.2: auto (non-zero) satisfies; explicit 0 does not.
+    let w1 = buildArgv(contract132, profileValues: ["max_cache_disk_writes": .string("200G")],
+                       model: ProfileModel(source: "hfid", id: "m/r"), globals: globals)
+    check(w1.args.contains("--max-cache-disk-writes") && w1.issues.isEmpty,
+          "requires 1.3.2: --max-cache-disk-writes is fine on top of the auto cache")
+    let w2 = buildArgv(contract132, profileValues: ["max_cache_disk_writes": .string("200G"), "max_cache_disk": .string("0")],
+                       model: ProfileModel(source: "hfid", id: "m/r"), globals: globals)
+    check(!w2.args.contains("--max-cache-disk-writes") && w2.args.contains("--max-cache-disk") && w2.args.contains("0"),
+          "requires 1.3.2: a '0' cache disables --max-cache-disk-writes (dropped + warn), the '0' itself emits")
+    check(w2.issues.count == 1 && w2.issues[0].message.contains("--max-cache-disk-writes"),
+          "requires 1.3.2: the warning names --max-cache-disk-writes")
+    // announce-served-name needs a served-model-name (the other engine cross-check).
+    let a1 = buildArgv(contract130, profileValues: ["announce_served_name": .bool(true)], model: model, globals: globals)
+    check(!a1.args.contains("--announce-served-name") && a1.issues.count == 1,
+          "requires 1.3.0: --announce-served-name dropped without --served-model-name")
+    let a2 = buildArgv(contract130, profileValues: ["announce_served_name": .bool(true), "served_model_name": .array([.string("m1")])],
+                       model: model, globals: globals)
+    check(a2.args.contains("--announce-served-name") && a2.issues.isEmpty,
+          "requires 1.3.0: a served-model-name present -> announce kept, no issue")
+}
+
+// 38. host/port are structural: ALWAYS emitted, even when equal to the engine
+// defaults (today's code emits `--host 127.0.0.1 --port <port>` unconditionally).
+do {
+    let model = ProfileModel(source: "hfid", id: "m/r")
+    let res = buildArgv(contract131, profileValues: [:], model: model, globals: GlobalCfg(port: 8000, apiKey: "k"))
+    check(res.args.contains("--host") && res.args.contains("127.0.0.1"), "host: always emitted (the app is local-only)")
+    check(res.args.contains("--port") && res.args.contains("8000"),
+          "port: emitted even when equal to the engine default (alwaysEmit overrides the omission rule)")
+    let wide = buildArgv(contract131, profileValues: ["host": .string("0.0.0.0")], model: model,
+                         globals: GlobalCfg(port: 8123, apiKey: "k"))
+    check(wide.args.contains("0.0.0.0"), "host: a user-set non-loopback host emits")
+}
+
+// 39. The module structural prefix: exactly today's resolveSplashPaths shape
+// (the positional dir, --model id, --tokenizer <DIR>/tokenizer, --binary
+// ./engine/splash — in that order, before the shared flags).
+do {
+    let dir = "/opt/models/incoai/Qwen3.8-27B-Splash"
+    let res = buildArgv(contract130, profileValues: [:],
+                        model: ProfileModel(source: "lmstudio", id: "incoai/Qwen3.8-27B-Splash", dir: dir),
+                        globals: GlobalCfg(port: 8123, apiKey: "k"))
+    check(res.args.prefix(10) == ["-u", "-m", "server.server", dir,
+                                  "--model", "incoai/Qwen3.8-27B-Splash",
+                                  "--tokenizer", dir + "/tokenizer", "--binary", "./engine/splash"],
+          "module: the structural prefix is byte-identical to today's shape")
+}
+
+// 40. A module-flavor launch without an on-disk model dir cannot be built (the
+// dir is the positional argument): an error issue, no argv (D4's pre-flight
+// gate — the plan layer names the fix).
+do {
+    let res = buildArgv(contract130, profileValues: [:],
+                        model: ProfileModel(source: "hfid", id: "m/r"),
+                        globals: GlobalCfg(port: 8123, apiKey: "k"))
+    check(res.args.isEmpty, "module: no dir -> no argv")
+    check(res.issues.count == 1 && res.issues[0].severity == .error, "module: no dir -> an error issue (launch is refused pre-flight)")
+    let resId = buildArgv(contract130, profileValues: [:],
+                          model: ProfileModel(source: "lmstudio", id: nil, dir: "/opt/models/x"),
+                          globals: GlobalCfg(port: 8123, apiKey: "k"))
+    check(resId.args.isEmpty && resId.issues.first?.severity == .error, "module: a dir without an id cannot name --model -> error")
+    // The launcher needs only the id: a dir-less hfid is fine.
+    let l = buildArgv(contract131, profileValues: [:], model: ProfileModel(source: "hfid", id: "m/r"),
+                      globals: GlobalCfg(port: 8123, apiKey: "k"))
+    check(!l.args.isEmpty && l.issues.allSatisfy { $0.severity == .warning }, "launcher: an id-only model builds (dir ignored)")
+}
+
+// 41. Fallback in the builder: a 1.3.9 kit (no authored contract) runs the latest
+// authored mapping (1.3.2) with fallback = true — the launch proceeds (D3); S7
+// surfaces the cap.
+do {
+    let (contract, fallback) = contractFor("1.3.9", registry: launchRegistry)
+    check(fallback == true && contract.version == "1.3.2", "fallback: a 1.3.9 kit maps to the 1.3.2 contract")
+    let res = buildArgv(contract, profileValues: ["state_format": .string("bf16")],
+                        model: ProfileModel(source: "hfid", id: "m/r"),
+                        globals: GlobalCfg(port: 8123, apiKey: "k"))
+    check(res.args == ["-u", "install/launcher.py", "serve", "--model", "m/r",
+                       "--host", "127.0.0.1", "--port", "8123", "--state-format", "bf16"],
+          "fallback: the 1.3.2 mapping drives the argv (launch proceeds)")
+    check(res.env == ["SPLASH_API_KEY": "k"], "fallback: env built from the globals as usual")
+}
+
 print(failures == 0 ? "ALL TESTS PASSED" : "\(failures) TEST(S) FAILED")
 exit(failures == 0 ? 0 : 1)
