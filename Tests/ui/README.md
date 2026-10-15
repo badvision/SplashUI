@@ -24,7 +24,10 @@ folder status/count/add/delete/scan, browse callbacks, cfg retention across tick
 and first-run show-once/dismiss/CTA persistence commands. Screen assertions cover
 telemetry-only status, hamburger/back navigation and scroll reset, settings control
 ownership, and the first-run CTA's settings target. Native menu labels/selectors
-are source-asserted (not synthesized mouse-event proof). Every assertion and the
+are source-asserted (not synthesized mouse-event proof). Profile assertions cover
+list/ACTIVE caps, add/remove/clone/rename, duplicate-name rejection, metadata,
+scanned source/kind/verdict model choices, drafter overrides and validation facts,
+focused-input preservation and D15 metadata flushing. Every assertion and the
 final count are JSON lines; any failure exits nonzero.
 
 The bridge fixture supplies computed restart state; it does **not** prove Swift's
@@ -41,7 +44,7 @@ quit any existing **SplashUI app** without stopping the already-serving engine:
 ```sh
 ./build.sh
 Tests/ui/live_smoke.sh                 # read-only integration assertions
-Tests/ui/live_smoke.sh --round-trips   # S5: 8123 -> 8199 -> 8123, ANE on -> off -> on
+Tests/ui/live_smoke.sh --round-trips   # port/ANE round trips + S6a profile/model transaction
 ```
 
 The runner refuses to launch unless exactly one engine already owns the configured
@@ -73,6 +76,20 @@ simulating it. Adoption stamps the already-computed current plan in memory;
 subsequent port/ANE edits compare against that signature. Reverting a change or a
 successful explicit restart clears the comparison. Nothing is persisted to config,
 and neither adopting nor saving automatically restarts an external engine.
+
+S6a round trips also create a profile (restart stays **false**), clone/remove it
+in the draft, then edit the **current active profile's model** and save (restart
+becomes **true**). Reverting the profiles and model makes it **false** again.
+This distinguishes inert profile creation from a launch-relevant model edit;
+selection is never activation. Live assertions check the settings list, metadata,
+folder-derived picker and real package drafter outcome. The screenshot is taken
+with the profile area visible, but remains evidence only.
+
+S6b integration: `#profileDetailSlot` holds option groups; `#profileActivationSlot`
+holds activation/restart controls. `CF.profileId` selects an editor, not an active
+profile; `cfSelectedProfile()` exposes its draft and `cfBuildDoc()` builds the full
+candidate for commit-before-activate. Profiles already exist in schema v1; S6a
+adds no schema migration, parallel store, or new bridge command.
 
 A private `/tmp/splashui-live-*` directory retains JSON per-assertion results,
 step snapshots, app log, one screenshot **as evidence only**, and a final summary

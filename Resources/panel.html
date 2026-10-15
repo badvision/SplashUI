@@ -86,6 +86,16 @@ section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 
 .engpath { color: var(--teal); font-size: 11px; margin: 0 0 2px 6px; text-transform: none; letter-spacing: 0; font-family: "Avenir Next", "Helvetica Neue", sans-serif; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #cfgMsg { color: var(--gray); font-size: 11px; margin: 6px 0 0 6px; }
 #cfgMsg.ok { color: var(--green); } #cfgMsg.err { color: var(--red); }
+.profile-row { border-top: 3px solid var(--bg); padding: 6px 0; background: var(--bg2); }
+.profile-row .frow { gap: 8px; flex-wrap: wrap; }
+.profile-meta { color: var(--gray); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.profile-chip { color: var(--teal); font-size: 11px; overflow-wrap: anywhere; }
+.profile-cap { background: var(--peach); color: var(--bg); border-radius: 14px; padding: 2px 8px; font-size: 11px; }
+.profile-cap.runnable { background: var(--teal); }
+.profile-model { display: block; width: 100%; text-align: left; background: var(--track); color: var(--white); padding: 6px 8px; margin: 6px 0; border-radius: 0 14px 14px 0; }
+#profileModels { max-height: 220px; overflow-y: auto; }
+#profileModels[hidden], #profileEditor[hidden] { display: none; }
+#profileDrafter { margin: 6px 0; }
 #cfgModal { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; background: rgba(3,3,6,.72); }
 #cfgModal .card { width: 420px; background: var(--bg2); border-top: 6px solid #4455ff; padding: 18px 20px 14px; }
 #cfgModal .card h3 { color: #4455ff; font-family: var(--display); font-size: 18px; letter-spacing: .12em; margin-bottom: 8px; }
@@ -270,8 +280,26 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
     <span id="cfgMsg" style="min-width:0"></span>
   </div>
 </section>
-<!-- S6a profile list/CRUD and S6b detail/activation belong here, after Global Settings. -->
-<div id="profilesSlot"></div>
+<div id="profilesSlot">
+<section class="settings-panel" aria-label="Profiles">
+  <div class="sec-h">Profiles<button class="mini" id="btnProfileAdd">Add profile</button></div>
+  <div id="profileList"></div>
+  <div id="profileEditor" hidden>
+    <div class="sec-h">Profile editor<span>draft · Save to commit</span></div>
+    <div class="frow"><label for="profileName">Name</label><input type="text" id="profileName" aria-label="Profile name"><button class="mini" id="btnProfileClone">Clone</button><button class="mini del" id="btnProfileRemove">Remove</button></div>
+    <button class="mini" id="btnProfileModels" aria-expanded="false">Choose model</button>
+    <div id="profileModels" hidden></div>
+    <div class="profile-chip" id="profileDrafter"></div>
+    <div class="frow" id="profileDraftRow"><label for="profileDraftModel">Draft override</label><input type="text" id="profileDraftModel" placeholder="HF repo or local directory" data-tip="1.3.1+ --draft-model; family comes from the model config, never the repo name."></div>
+    <div class="profile-meta" id="profileLaunchMeta"></div>
+    <!-- S6b owns per-version option groups here; selected profile = cfSelectedProfile(). -->
+    <div id="profileDetailSlot"></div>
+    <!-- S6b activation commits cfBuildDoc() before config.activate; selection alone is not activation. -->
+    <div id="profileActivationSlot"></div>
+    <button class="mini" id="btnProfilesSave">Save configurations</button>
+  </div>
+</section>
+</div>
 </main>
 
 <div id="cfgModal">
@@ -471,7 +499,7 @@ const cmd = (c, args) => { try { window.webkit.messageHandlers.cmd.postMessage(O
 let cfgDoc = null, cfgSaveResult = null, cfgValidateResult = null;
 window.__cfgGet = d => { cfgDoc = d; cfInit(d); };
 window.__cfgSave = r => { cfgSaveResult = r; };
-window.__cfgValidate = r => { cfgValidateResult = r; };
+window.__cfgValidate = r => { cfgValidateResult = r; CF.verdicts = r.profiles || []; if (!r.ok) cfMsg((r.errors || []).join("; "), "err"); cfRenderProfiles(); };
 $("btnStart").onclick = () => cmd("start");
 $("btnStop").onclick = () => cmd("stop");
 $("btnRestart").onclick = () => cmd("restart");
@@ -486,7 +514,8 @@ function cfDraft(doc) {
            manualPath: (g.engine && g.engine.manual_path) || "",
            port: g.port || 8123,
            folders: (g.model_folders || []).map(f => Object.assign({}, f)),
-           ane: (p.options && p.options.ane !== undefined) ? p.options.ane : true };
+           ane: (p.options && p.options.ane !== undefined) ? p.options.ane : true,
+           profiles: JSON.parse(JSON.stringify(doc.profiles || [])), activeProfile: doc.active_profile };
 }
 
 // The whole doc, raw (the tick payload only carries the mask — the raw api_key
@@ -498,6 +527,9 @@ function cfBuildDoc() {
   d.globals.engine.manual_path = dr.engineMode === "manual" ? dr.manualPath : null;
   d.globals.port = dr.port;
   d.globals.model_folders = dr.folders;
+  d.profiles = JSON.parse(JSON.stringify(dr.profiles));
+  d.active_profile = dr.activeProfile;
+  d.profiles.forEach(p => { p.meta = cfProfileMeta(p); });
   if (d.profiles && d.profiles.length) {
     if (!d.profiles[0].options) d.profiles[0].options = {};
     d.profiles[0].options.ane = dr.ane;
@@ -557,7 +589,10 @@ function cfDebouncedValidate() {
 
 function cfSave() {
   if (!cfDirty()) { cfMsg("No changes", ""); return; }
-  cmd("config.save", { doc: cfBuildDoc() });
+  if (CF.saving) return;
+  CF.previousResult = S.cfg && S.cfg.result;
+  CF.pendingDoc = cfBuildDoc(); CF.pendingBaseline = JSON.stringify(CF.draft); CF.saving = true;
+  cmd("config.save", { doc: CF.pendingDoc });
   cfMsg("Saving…", "");
 }
 
@@ -585,13 +620,14 @@ function cfRender() {
   $("engPath").textContent = e.path || e.manual_path || "";
   const tried = Array.isArray(e.tried) ? e.tried : [];
   $("engTried").textContent = tried.length ? "ladder: " + tried.join(" → ") : "";
-  // The save/validate reply rides one tick as cfg.result.
-  if (cfg.result && cfg.result.ok === true) {
-    // The store now holds exactly cfBuildDoc(): re-base draft + doc on it.
-    CF.doc = cfBuildDoc();
-    CF.baseline = JSON.stringify(CF.draft);
+  // Only a pending save may rebase: telemetry retains cfg between change-gated ticks.
+  if (CF.saving && cfg.result && cfg.result !== CF.previousResult && cfg.result.ok === true) {
+    CF.saving = false;
+    CF.doc = CF.pendingDoc;
+    CF.baseline = CF.pendingBaseline;
     cfMsg("Saved — " + (cfg.restart_required === true ? "restart to apply" : "applied on next launch"), "ok");
-  } else if (cfg.result && cfg.result.ok === false) {
+  } else if (CF.saving && cfg.result && cfg.result !== CF.previousResult && cfg.result.ok === false) {
+    CF.saving = false;
     cfMsg((cfg.result.errors || []).join("; "), "err");
   }
   // A browse pick is consumed on exactly one tick.
@@ -601,6 +637,7 @@ function cfRender() {
     else if (pk.context === "model_folder") { $("folderPath").value = pk.path; }
   }
   cfRenderFolders();
+  cfRenderProfiles();
 }
 
 $("capAuto").onclick = () => { CF.draft.engineMode = "auto"; cfSyncForm(); cfDebouncedValidate(); };
@@ -608,8 +645,9 @@ $("capManual").onclick = () => { CF.draft.engineMode = "manual"; cfSyncForm(); c
 $("manualPath").onchange = () => { CF.draft.manualPath = $("manualPath").value; cfDebouncedValidate(); };
 $("btnBrowseEngine").onclick = () => cmd("browse", { context: "engine" });
 $("cfgPort").onchange = () => { const v = parseInt($("cfgPort").value, 10); if (v > 0 && v < 65536) { CF.draft.port = v; cfDebouncedValidate(); } };
-$("aneOn").onclick = () => { CF.draft.ane = true; cfSyncForm(); cfDebouncedValidate(); };
-$("aneOff").onclick = () => { CF.draft.ane = false; cfSyncForm(); cfDebouncedValidate(); };
+function cfSetAne(value) { CF.draft.ane = value; if (CF.draft.profiles[0]) CF.draft.profiles[0].options.ane = value; cfSyncForm(); cfProfileChanged(); }
+$("aneOn").onclick = () => cfSetAne(true);
+$("aneOff").onclick = () => cfSetAne(false);
 $("btnBrowseFolder").onclick = () => cmd("browse", { context: "model_folder" });
 $("btnAddFolder").onclick = () => {
   const p = $("folderPath").value.trim();
@@ -628,6 +666,74 @@ $("folderList").onclick = (ev) => {
   else if (b.dataset.act === "scan") { const f = CF.draft.folders[i]; if (f) cmd("config.scan", { id: f.id }); }
 };
 $("btnCfgSave").onclick = cfSave;
+
+// ---- S6a: profile draft CRUD; the only writer remains config.save. ----
+function cfSelectedProfile() { return CF.draft && CF.draft.profiles.find(p => p.id === CF.profileId); }
+function cfProfileMeta(p) {
+  const saved = S && S.cfg && (S.cfg.profiles || []).find(v => v.id === p.id);
+  return Object.assign({}, p.meta, saved ? saved.meta : {});
+}
+function cfEscape(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[c])); }
+function cfModels() {
+  const ids = new Set(CF.draft.folders.map(f => f.id));
+  return (S.cfg.folders || []).filter(f => ids.has(f.id)).flatMap(f => (f.models || []).filter(m => m && typeof m === "object"));
+}
+function cfProfileFacts(p) {
+  const preview = (CF.verdicts || []).find(v => v.id === p.id);
+  if (preview) return preview;
+  const saved = (S.cfg.profiles || []).find(v => v.id === p.id);
+  if (saved && ['source', 'id', 'dir'].every(k => (saved.model[k] || null) === (p.model[k] || null)) && JSON.stringify(saved.options) === JSON.stringify(p.options)) return saved;
+  return cfModels().find(m => m.id === p.model.id && m.source === p.model.source) || { eligibility: p.model.source === "none" ? "unrunnable" : "unknown", drafter: "UNKNOWN — validate to resolve drafter" };
+}
+function cfVerdict(facts) {
+  const verdict = facts.eligibility || "unknown", label = verdict === "blocked" ? "UNRUNNABLE" : verdict.toUpperCase();
+  return '<span class="profile-cap '+cfEscape(verdict)+'" data-tip="'+cfEscape(facts.eligibility_reason || "")+'">'+label+(facts.eligibility_reason ? ' — '+cfEscape(facts.eligibility_reason) : '')+'</span>';
+}
+function cfRenderProfiles() {
+  if (!CF.draft || !S || !S.cfg) return;
+  const esc = cfEscape;
+  const list = CF.draft.profiles.map(p => { const meta = cfProfileMeta(p); return '<div class="profile-row"><div class="frow"><button class="mini" data-profile-act="edit" data-id="'+esc(p.id)+'">'+esc(p.name)+'</button>'+(p.id === CF.draft.activeProfile ? '<span class="profile-cap runnable">ACTIVE</span>' : '')+'</div><div class="profile-chip">'+esc(p.model.id || "MODEL UNSET")+' · '+esc(p.model.source)+'</div>'+cfVerdict(cfProfileFacts(p))+'<div class="profile-meta">Created '+esc(meta.created_at || "—")+' · Last used '+esc(meta.last_used_at || "Never")+'</div></div>'; }).join("");
+  if ($("profileList").innerHTML !== list) $("profileList").innerHTML = list;
+  const p = cfSelectedProfile();
+  $("profileEditor").hidden = !p;
+  if (!p) return;
+  if (document.activeElement !== $("profileName") && $("profileName").value !== p.name) $("profileName").value = p.name;
+  const override = p.options.draft_model || "";
+  if (document.activeElement !== $("profileDraftModel") && $("profileDraftModel").value !== override) $("profileDraftModel").value = override;
+  $("profileDraftRow").hidden = S.cfg.engine.version === "1.3.0";
+  $("profileDrafter").textContent = "Drafter · " + (cfProfileFacts(p).drafter || "UNKNOWN — engine decides at load");
+  const meta = cfProfileMeta(p);
+  $("profileLaunchMeta").textContent = "Last successful launch · " + (meta.last_successful_launch || "Never") + " · Last failure · " + (meta.last_failure ? meta.last_failure.at + " — " + meta.last_failure.message : "None");
+  const models = cfModels().map((m, i) => '<button class="profile-model" data-model-index="'+i+'">'+esc(m.id)+' · '+esc(m.source)+' · '+esc(m.kind)+' '+cfVerdict(m)+'</button>').join("") || '<div class="profile-meta">No scanned models — add a model folder or Scan above.</div>';
+  if ($("profileModels").innerHTML !== models) $("profileModels").innerHTML = models;
+}
+function cfProfileChanged() { CF.verdicts = []; cfRenderProfiles(); cfDebouncedValidate(); }
+function cfNewProfile(cloneFrom) {
+  let id;
+  do { const random = new Uint16Array(1); crypto.getRandomValues(random); id = 'p-'+Date.now()+'-'+random[0].toString(16).padStart(4, '0'); } while (CF.draft.profiles.some(p => p.id === id));
+  const base = cloneFrom ? cloneFrom.name + " copy" : "New profile";
+  let name = base, n = 2;
+  while (CF.draft.profiles.some(p => p.name === name)) name = base + " " + n++;
+  const p = cloneFrom ? JSON.parse(JSON.stringify(cloneFrom)) : { model: { source: "none", id: null, dir: null }, options: { ane: true } };
+  Object.assign(p, { id, name, meta: { created_at: new Date().toISOString(), last_used_at: null, last_successful_launch: null, last_failure: null } });
+  CF.draft.profiles.push(p); CF.profileId = id; cfProfileChanged();
+}
+$("profileList").onclick = ev => { const b = ev.target.closest('[data-profile-act="edit"]'); if (b) { CF.profileId = b.dataset.id; CF.verdicts = []; cfRenderProfiles(); } };
+$("btnProfileAdd").onclick = () => cfNewProfile(null);
+$("btnProfileClone").onclick = () => { const p = cfSelectedProfile(); if (p) cfNewProfile(p); };
+$("btnProfileRemove").onclick = () => {
+  const p = cfSelectedProfile(); if (!p) return;
+  CF.draft.profiles = CF.draft.profiles.filter(v => v.id !== p.id);
+  CF.draft.ane = CF.draft.profiles[0]?.options.ane ?? true;
+  cfSyncForm();
+  if (CF.draft.activeProfile === p.id) CF.draft.activeProfile = null;
+  CF.profileId = CF.draft.profiles[0]?.id; cfProfileChanged();
+};
+$("profileName").onchange = () => { const p = cfSelectedProfile(); if (p) { p.name = $("profileName").value; cfProfileChanged(); } };
+$("profileDraftModel").onchange = () => { const p = cfSelectedProfile(); if (p) { const value = $("profileDraftModel").value.trim(); if (value) p.options.draft_model = value; else delete p.options.draft_model; cfProfileChanged(); } };
+$("btnProfileModels").onclick = () => { $("profileModels").hidden = !$("profileModels").hidden; $("btnProfileModels").setAttribute("aria-expanded", String(!$("profileModels").hidden)); };
+$("profileModels").onclick = ev => { const b = ev.target.closest('[data-model-index]'), p = cfSelectedProfile(); if (b && p) { const m = cfModels()[Number(b.dataset.modelIndex)]; p.model = { source: m.source, id: m.id, dir: m.dir || null }; cfProfileChanged(); } };
+$("btnProfilesSave").onclick = cfSave;
 
 // ---- D10: first-run modal (shown once; dismissal persists via the store) ----
 function cfFirstRun() {

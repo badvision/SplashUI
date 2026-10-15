@@ -57,8 +57,9 @@ function panel({ firstRun = false } = {}) {
       engine: { ...doc.globals.engine, path: doc.globals.engine.manual_path,
         version: '1.3.0', valid: true, tried: [doc.globals.engine.manual_path] },
       folders: doc.globals.model_folders.map(f => ({ ...f, present: f.id !== 'missing',
-        scanning: false, models: f.id === 'lmstudio' ? [{ id: 'org/model' }] : [] })),
+        scanning: false, models: f.id === 'lmstudio' ? [{ id: 'org/model', source: f.id, dir: '/fixture/models/org/model', kind: 'package', eligibility: 'runnable', drafter: 'PACKAGE — baked in' }, { id: 'org/assembly', source: f.id, dir: '/fixture/models/org/assembly', kind: 'assembly', eligibility: 'unrunnable', eligibility_reason: 'missing draft/config.json', drafter: 'MISSING — draft/config.json required' }] : [] })),
       api_key_masked: 'ui••••••me', first_run: firstRun && !doc.first_run_shown,
+      profiles: doc.profiles.map(p => ({ ...p, eligibility: p.model.source === 'none' ? 'unrunnable' : 'runnable', drafter: 'PACKAGE — baked in' })), active_profile: doc.active_profile,
       restart_required: signature(doc) !== baseline, result: null, ...overrides
     }, ...extra
   });
@@ -70,7 +71,9 @@ function panel({ firstRun = false } = {}) {
         if (m.cmd === 'config.get') w.__cfgGet(clone(doc));
         if (m.cmd === 'config.validate') w.__cfgValidate({ ok: true, errors: [], warnings: [] });
         if (m.cmd === 'config.save') {
-          const result = { ok: !rejectSave, errors: rejectSave ? ['rejected fixture'] : [], warnings: [] };
+          const names = m.doc.profiles.map(p => p.name);
+          const duplicate = new Set(names).size !== names.length;
+          const result = { ok: !rejectSave && !duplicate, errors: rejectSave ? ['rejected fixture'] : duplicate ? ['duplicate profile name(s)'] : [], warnings: [] };
           if (result.ok) doc = clone(m.doc);
           w.__cfgSave(result); tick({ result });
         }
@@ -78,7 +81,7 @@ function panel({ firstRun = false } = {}) {
       });
     } }
   } };
-  w.eval(scripts[0][1] + '\nwindow.__test = { draft: () => CF.draft, dirty: cfDirty, doc: cfBuildDoc };');
+  w.eval(scripts[0][1] + '\nwindow.__test = { draft: () => CF.draft, dirty: cfDirty, doc: cfBuildDoc, repeatTick: () => window.update({ ...S }) };');
   function drain() { while (replies.length) replies.shift()(); }
   function flushTimers() {
     const pending = [...timers.values()]; timers.clear();
@@ -144,7 +147,7 @@ try {
   check('adopted PID rendered without claiming app ownership', () => assert.ok($('pidNum').textContent === '17573' && $('envPill').textContent === 'EXTERNAL'));
   check('engine path/version/valid status populated', () => assert.ok($('engPath').textContent === '/fixture/kit-1.3.0' && $('vCfg').textContent === '1.3.0' && $('engValid').textContent === 'VALID'));
   check('folder rows match ConfigDoc', () => assert.equal(w.document.querySelectorAll('#folderList .frow').length, 2));
-  check('folder status/count reflects tick', () => assert.match($('folderList').textContent, /lmstudioPRESENT1 model.*missingMISSING0 models/));
+  check('folder status/count reflects tick', () => assert.match($('folderList').textContent, /lmstudioPRESENT2 models.*missingMISSING0 models/));
   tick({ folders: [{ id: 'lmstudio', scanning: true, present: true, models: [] }] });
   check('scanning folder uses SCANNING state', () => assert.match($('folderList').textContent, /SCANNING/));
   tick();
@@ -218,6 +221,73 @@ for (const button of ['modalDismiss', 'modalCta']) {
     if (button === 'modalCta') check('first-run CTA opens settings screen', () => assert.ok(!first.$('settingsView').hidden && first.$('statusView').hidden));
   } finally { first.close(); }
 }
+const profiles = panel();
+try {
+  const { w, $, change, tick, save } = profiles;
+  const rows = () => [...w.document.querySelectorAll('#profileList .profile-row')];
+  const action = (act, id) => w.document.querySelector(`#profileList [data-profile-act="${act}"][data-id="${id}"]`).click();
+  check('profiles follow Global Settings on settings screen', () => assert.ok($('settingsView').contains($('profileList')) && $('profilesSlot').previousElementSibling.classList.contains('settings-panel')));
+  check('profiles list renders names model eligibility and ACTIVE cap', () => { assert.equal(rows().length, 2); assert.match(rows()[0].textContent, /Default.*ACTIVE.*org\/model.*RUNNABLE/); });
+  check('profile row renders created and last-used metadata', () => assert.match(rows()[0].textContent, /Created.*Last used/));
+  action('edit', 'p1');
+  check('model picker uses scanned folders with source kind verdict', () => { assert.equal(w.document.querySelectorAll('#profileModels [data-model-index]').length, 2); assert.match($('profileModels').textContent, /org\/model.*lmstudio.*package.*RUNNABLE/); });
+  check('model picker carries actionable unrunnable reason', () => assert.match($('profileModels').textContent, /missing draft\/config.json/));
+  check('drafter availability displays package outcome', () => assert.match($('profileDrafter').textContent, /PACKAGE.*baked in/));
+  change('profileName', 'Renamed'); save();
+  check('rename persists without restart-required', () => assert.ok(profiles.doc().profiles[0].name === 'Renamed' && $('btnRestart').textContent === 'Restart'));
+  change('profileName', 'Unsaved rename');
+  w.__test.repeatTick();
+  check('retained save result never rebases later unsaved profile edits', () => assert.equal(w.__test.dirty(), true));
+  change('profileName', 'Renamed');
+  change('profileName', 'Untouched'); save();
+  check('duplicate name rejected at save and draft retained', () => assert.ok(w.__test.dirty() && $('cfgMsg').textContent.includes('duplicate') && profiles.doc().profiles[0].name === 'Renamed'));
+  change('profileName', 'Renamed');
+  $('btnProfileClone').click();
+  const copy = w.__test.doc().profiles.at(-1);
+  check('clone creates a distinct app-generated id and unique name', () => { assert.match(copy.id, /^p-\d+-[a-f0-9]{4}$/); assert.notEqual(copy.id, 'p1'); assert.notEqual(copy.name, 'Renamed'); });
+  check('clone preserves model and all options', () => { assert.deepEqual(clone(copy.model), profiles.doc().profiles[0].model); assert.deepEqual(clone(copy.options), profiles.doc().profiles[0].options); });
+  check('clone resets usage success failure and stamps creation', () => assert.ok(copy.meta.created_at && !copy.meta.last_used_at && !copy.meta.last_successful_launch && !copy.meta.last_failure));
+  save();
+  check('clone round-trips through config.save full ConfigDoc', () => assert.equal(profiles.doc().profiles.length, 3));
+  $('btnProfileRemove').click(); save();
+  check('remove deletes only selected profile', () => assert.ok(profiles.doc().profiles.length === 2 && !profiles.doc().profiles.some(p => p.id === copy.id)));
+  $('btnProfileAdd').click();
+  const added = w.__test.doc().profiles.at(-1);
+  check('add creates empty model ANE-enabled profile with metadata', () => assert.ok(added.model.source === 'none' && added.options.ane === true && added.meta.created_at));
+  w.document.querySelector('#profileModels [data-model-index="0"]').click();
+  check('model selection copies source id and local directory', () => assert.deepEqual(clone(w.__test.doc().profiles.at(-1).model), { source: 'lmstudio', id: 'org/model', dir: '/fixture/models/org/model' }));
+  save();
+  check('new profile model persists without activation', () => assert.ok(profiles.doc().active_profile === 'p1' && profiles.doc().profiles.at(-1).model.id === 'org/model'));
+  const pending = clone(w.__test.doc().profiles);
+  tick();
+  check('ticks preserve profile draft and selected editor', () => assert.deepEqual(clone(w.__test.doc().profiles), pending));
+  check('S6b detail and activation insertion seam exists', () => assert.ok($('profileDetailSlot') && $('profileActivationSlot')));
+  action('edit', 'p1');
+  $('profileName').focus(); $('profileName').value = 'Typing in progress'; tick();
+  check('tick never clobbers focused in-progress profile name', () => assert.equal($('profileName').value, 'Typing in progress'));
+  $('profileName').blur(); tick();
+  const fresh = profiles.doc().profiles.map(p => ({ ...p, meta: { ...p.meta, last_successful_launch: 'v1.3.0 · 2026-10-15T01:00:00Z' } }));
+  tick({ profiles: fresh });
+  check('last launch metadata renders from live tick', () => assert.match($('profileLaunchMeta').textContent, /v1.3.0/));
+  check('next explicit save carries latest launch metadata D15', () => assert.equal(w.__test.doc().profiles[0].meta.last_successful_launch, 'v1.3.0 · 2026-10-15T01:00:00Z'));
+  tick();
+  check('drafter override absent on module runtime', () => assert.equal($('profileDraftRow').hidden, true));
+  tick({ engine: { version: '1.3.1' } });
+  change('profileDraftModel', 'org/custom-dflash');
+  check('drafter override uses existing flat option field', () => assert.equal(w.__test.doc().profiles[0].options.draft_model, 'org/custom-dflash'));
+  w.__cfgValidate({ ok: true, profiles: [{ id: 'p1', eligibility: 'runnable', drafter: 'OVERRIDE — org/custom-dflash' }] });
+  check('validation response updates draft drafter verdict without saving', () => assert.match($('profileDrafter').textContent, /OVERRIDE.*custom-dflash/));
+  action('edit', 'p1'); change('profileName', '<img src=x onerror=alert(1)>'); tick();
+  check('profile names render as text never HTML', () => assert.equal($('profileList').querySelector('img'), null));
+  check('profile UI never renders raw API key', () => assert.ok(!w.document.documentElement.outerHTML.includes(secret)));
+  check('profile actions add no new bridge commands', () => assert.ok(profiles.commands.every(m => ['config.get', 'config.validate', 'config.save'].includes(m.cmd))));
+  action('edit', 'p1'); $('btnProfileRemove').click();
+  check('removing active clears persisted selection without activating another', () => assert.equal(w.__test.doc().active_profile, null));
+  check('removing first preserves remaining profile ANE option', () => assert.equal(w.__test.doc().profiles[0].options.ane, false));
+  while (w.__test.doc().profiles.length) { action('edit', w.__test.doc().profiles[0].id); $('btnProfileRemove').click(); }
+  check('empty list retains Add and hides profile editor', () => assert.ok($('btnProfileAdd') && $('profileEditor').hidden && rows().length === 0));
+} finally { profiles.close(); }
+
 const native = readFileSync(new URL('../../Sources/main.swift', import.meta.url), 'utf8');
 check('native menu exposes ordered status/settings/separator/quit actions', () => {
   assert.match(native, /sendAction\(on: \[\.leftMouseUp, \.rightMouseUp\]\)/);

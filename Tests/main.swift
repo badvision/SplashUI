@@ -3573,5 +3573,45 @@ do {
     }
 }
 
+// S6a: profile model facts reuse S3 verdicts; CRUD stays in schema v1.
+do {
+    let pkg = ProfileModel(source: "lmstudio", id: "org/pkg", dir: "/pkg")
+    let files: [String: String] = ["/pkg/manifest.json": "{}", "/assembly/model.json": "{}", "/assembly/config.json": "{}", "/hf/config.json": #"{"model_type":"qwen3_5"}"#]
+    func state(_ model: ProfileModel, _ version: String, _ draft: String? = nil) -> [String: Any] {
+        modelTickState(model: model, version: version, draftModel: draft,
+                       isDir: { ["/pkg", "/pkg/tokenizer", "/pkg/draft"].contains($0) },
+                       fileContents: { files[$0] })
+    }
+    let p = state(pkg, "1.3.0")
+    check(p["eligibility"] as? String == "runnable", "S6a package is runnable with the built-against kit")
+    check((p["drafter"] as? String)?.contains("baked") == true, "S6a package drafter is baked in")
+    check(state(pkg, "1.3.1")["eligibility"] as? String == "blocked", "S6a newer kit never falsely accepts package")
+    let assembly = state(ProfileModel(source: "manual", id: "org/a", dir: "/assembly"), "1.3.0")
+    check(assembly["eligibility"] as? String == "unrunnable", "S6a assembly requires draft/config.json")
+    check((assembly["eligibility_reason"] as? String)?.contains("draft/config.json") == true, "S6a missing drafter preserves engine fix text")
+    let hf = ProfileModel(source: "hfhub", id: "org/hf", dir: "/hf")
+    check((state(hf, "1.3.1")["drafter"] as? String)?.contains("DFlash2") == true, "S6a drafter is resolved from config family registry")
+    let unknown = ProfileModel(source: "hfid", id: "org/unknown")
+    check(state(unknown, "1.3.1")["eligibility"] as? String == "unknown", "S6a unknown family remains unknown")
+    check(state(unknown, "1.3.1", "org/draft")["eligibility"] as? String == "runnable", "S6a explicit drafter override uses S3 eligibility")
+    check(state(ProfileModel(source: "none"), "1.3.1")["eligibility"] as? String == "unrunnable", "S6a unset model cannot be runnable")
+    var doc = defaultConfig(home: "/home", now: now)
+    let original = doc.profiles[0]
+    var copy = original
+    copy.id = "p-1234-abcd"; copy.name = "Clone"
+    copy.meta = ProfileMeta(createdAt: "2026-10-15T00:00:00Z")
+    copy.model = pkg
+    doc.profiles.append(copy)
+    let roundtrip = parseConfig(configData(doc)).doc
+    check(roundtrip == doc, "S6a complete profile CRUD candidate persists through ConfigDoc schema v1")
+    check(roundtrip?.profiles.last?.options == original.options, "S6a clone options survive persistence")
+    check(roundtrip?.profiles.last?.meta.lastUsedAt == nil, "S6a clone usage metadata stays reset")
+    doc.profiles[1].name = original.name
+    check(!validateConfig(doc).ok, "S6a duplicate profile names use existing blocking validation")
+    doc.profiles.removeLast()
+    check(parseConfig(configData(doc)).doc?.profiles.count == 1, "S6a removal persists without parallel store")
+    check(configSchemaVersion == 1, "S6a needs no migration: all profile fields already exist")
+}
+
 print(failures == 0 ? "ALL TESTS PASSED" : "\(failures) TEST(S) FAILED")
 exit(failures == 0 ? 0 : 1)

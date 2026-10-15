@@ -78,6 +78,15 @@
     check('lmstudio present with discovered models', folders.some(folder => folder.id === 'lmstudio' &&
       folder.status === 'PRESENT' && folder.modelCount > 0), folders.find(folder => folder.id === 'lmstudio'));
     check('adoption stamps restart baseline', S.cfg.restart_required === false, S.cfg.restart_required);
+    const profileRows = () => Array.from(document.querySelectorAll('#profileList .profile-row'));
+    check('profiles list visible on settings screen', $('settingsView').contains($('profileList')) && profileRows().length === S.cfg.profiles.length, profileRows().length);
+    const activeId = S.cfg.active_profile;
+    const editProfile = id => document.querySelector('#profileList [data-profile-act="edit"][data-id="'+id+'"]').click();
+    editProfile(activeId);
+    $('btnProfileModels').click();
+    check('model picker reflects global scanned folders', document.querySelectorAll('#profileModels [data-model-index]').length === S.cfg.folders.reduce((n, f) => n + f.models.length, 0), document.querySelectorAll('#profileModels [data-model-index]').length);
+    check('profile metadata and ACTIVE cap rendered', profileRows().some(row => row.textContent.includes('ACTIVE') && row.textContent.includes('Created') && row.textContent.includes('Last used')), $('profileList').textContent);
+    check('drafter availability resolved for real package', $('profileDrafter').textContent.includes('PACKAGE') && $('profileDrafter').textContent.includes('baked'), $('profileDrafter').textContent);
     if (expected.roundTrips) {
       async function save(step, port, ane, restart) {
         if (CF.validateTimer) { clearTimeout(CF.validateTimer); CF.validateTimer = null; }
@@ -102,6 +111,37 @@
         await save('port_8123_restored', 8123, true, false);
         await save('ane_off_saved', 8123, false, true);
         await save('ane_on_restored', 8123, true, false);
+        const originalProfiles = JSON.parse(JSON.stringify(CF.draft.profiles));
+        const originalActive = CF.draft.activeProfile;
+        async function saveProfiles(step, count, restart) {
+          if (CF.validateTimer) { clearTimeout(CF.validateTimer); CF.validateTimer = null; }
+          cfSave();
+          await until(() => !cfDirty() && S.cfg.profiles.length === count && S.cfg.restart_required === restart && $('cfgMsg').textContent.startsWith('Saved'), step);
+          check(step, S.cfg.restart_required === restart && S.cfg.profiles.length === count, { count: S.cfg.profiles.length, restart_required: S.cfg.restart_required, enginePID: S.server.pid });
+        }
+        try {
+          check('before profile create restart remains false', S.cfg.restart_required === false, S.cfg.restart_required);
+          $('btnProfileAdd').click();
+          const added = cfSelectedProfile();
+          check('profile add renders creation metadata', profileRows().length === originalProfiles.length + 1 && !!added.meta.created_at, { id: added.id, meta: added.meta });
+          await saveProfiles('create alone saved without restart', originalProfiles.length + 1, false);
+          $('btnProfileClone').click();
+          const copy = cfSelectedProfile();
+          check('profile clone distinct with reset metadata', copy.id !== added.id && copy.name !== added.name && !copy.meta.last_used_at, { id: copy.id, name: copy.name });
+          $('btnProfileRemove').click();
+          check('profile remove disappears from list', !CF.draft.profiles.some(p => p.id === copy.id) && profileRows().length === originalProfiles.length + 1, profileRows().length);
+          editProfile(activeId);
+          const candidates = cfModels(), current = cfSelectedProfile().model;
+          const index = candidates.findIndex(m => m.id !== current.id || m.source !== current.source);
+          if (index < 0) throw new Error('profile smoke needs a distinct discovered model');
+          document.querySelector('#profileModels [data-model-index="'+index+'"]').click();
+          check('current profile model edited before save without activation', cfSelectedProfile().model.id === candidates[index].id && CF.draft.activeProfile === originalActive && S.cfg.restart_required === false, { model: cfSelectedProfile().model.id, restart_required: S.cfg.restart_required });
+          await saveProfiles('active model edit saved requires restart', originalProfiles.length + 1, true);
+        } finally {
+          CF.draft.profiles = originalProfiles; CF.draft.activeProfile = originalActive; CF.profileId = activeId;
+          cfRenderProfiles();
+          await saveProfiles('profiles and active model reverted clears restart', originalProfiles.length, false);
+        }
       } finally {
         // Best effort restore through the bridge; the runner always restores exact bytes.
         if (CF.draft.port !== expected.port || CF.draft.ane !== expected.ane) {
@@ -111,6 +151,7 @@
       await until(() => S.server.pid === expected.enginePID, 'original engine still adopted');
       snapshot('final');
     }
+    $('profilesSlot').scrollIntoView({ block: 'start' });
   } catch (error) { check('live hook completed', false, error.message); }
   const failed = checks.filter(item => !item.pass).length;
   return JSON.stringify({ suite: 'panel-live', checks, steps, ignoredInput, assertions: checks.length,

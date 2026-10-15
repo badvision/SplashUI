@@ -461,18 +461,18 @@ public func enumerateModels(folder: ModelFolder,
 
 /// S5: the tick state of one model folder — pure (T1): `present` is a cheap
 /// isDir on the folder path; `models` is `enumerateModels` (every FS access
-/// through the injected closures), rendered as model ids — EMPTY when the
-/// folder is absent (nothing to count). `scanning` is false here (a synchronous
-/// snapshot); the app-level background scanner stamps it true while its own
-/// scan of THIS helper is in flight. `error` is null on this pure path.
+/// through injected closures), with S6a picker facts, empty for absent folders.
+/// The app scanner stamps `scanning` true while a snapshot is in flight.
 public func folderTickState(folder: ModelFolder,
                             isDir: (String) -> Bool,
                             fileContents: (String) -> String?,
-                            listDir: (String) -> [String]?) -> [String: Any] {
+                            listDir: (String) -> [String]?,
+                            version: String? = nil) -> [String: Any] {
     let present = isDir(folder.path)
     let models: [Any] = present
         ? enumerateModels(folder: folder, isDir: isDir, fileContents: fileContents, listDir: listDir)
-            .map { $0.id as Any }
+            .map { modelTickState(model: ProfileModel(source: $0.source, id: $0.id, dir: $0.dir),
+                                 version: version, isDir: isDir, fileContents: fileContents) }
         : []
     return ["id": folder.id, "path": folder.path, "source": folder.source,
             "models": models, "scanning": false, "present": present,
@@ -1433,6 +1433,32 @@ public func eligibility(kind: ModelKind,
         return Eligibility(verdict: .unrunnable, reason:
             "the v\(v) engine serves models by Hugging Face id — this local directory has no repo id to serve by")
     }
+}
+
+/// Shared scan/profile/validation presentation of S3's conservative verdict.
+/// No repo-name family guesses and no second eligibility table in JavaScript.
+public func modelTickState(model: ProfileModel, version: String?, draftModel: String? = nil,
+                           isDir: (String) -> Bool,
+                           fileContents: (String) -> String?) -> [String: Any] {
+    let contract = contractFor(version, registry: launchRegistry).contract
+    let kind = classifyModelDir(dir: model.dir, id: model.id, isDir: isDir, fileContents: fileContents)
+    let files = modelDirFiles(model.dir, isDir: isDir, fileContents: fileContents)
+    let family = deriveFamily(config: model.dir.flatMap { fileContents($0 + "/config.json") }, contract: contract)
+    let verdict = model.source == "none"
+        ? Eligibility(verdict: .unrunnable, reason: "select a model from a registered model folder")
+        : eligibility(kind: kind, contract: contract, modelId: model.id, modelDir: model.dir,
+                      draftModel: draftModel, family: family, files: files)
+    let drafter: String
+    if model.source == "none" { drafter = "UNSET — select a model" }
+    else if kind == .package { drafter = files.draft ? "PACKAGE — baked in draft/" : "MISSING — draft/ required" }
+    else if contract.flavor == .module {
+        drafter = files.draftConfig ? "LOCAL — draft/config.json" : "MISSING — draft/config.json required"
+    } else if let draftModel, !draftModel.isEmpty { drafter = "OVERRIDE — --draft-model " + draftModel }
+    else if let family, let draft = contract.familyRegistry[family] { drafter = "DFlash2 — " + draft }
+    else { drafter = verdict.reason ?? "UNKNOWN — engine decides at load" }
+    return ["id": model.id ?? NSNull(), "dir": model.dir ?? NSNull(), "source": model.source,
+            "kind": kind.rawValue, "eligibility": verdict.verdict.rawValue,
+            "eligibility_reason": verdict.reason ?? NSNull(), "drafter": drafter]
 }
 
 /// The launch result (C3): everything `ServerProc.launch` consumes, + the plan

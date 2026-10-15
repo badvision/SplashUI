@@ -656,7 +656,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     private func respondConfigSave(_ body: [String: Any]) {
         guard let docObj = body["doc"] as? [String: Any],
               let data = try? JSONSerialization.data(withJSONObject: docObj) else { return }
-        let r = configStore.saveCandidate(data)
+        var r = configStore.saveCandidate(data)
+        if let candidate = parseConfig(data).doc { r.warnings += profileStates(candidate).compactMap { $0["eligibility_reason"] as? String } }
         sendConfigResult(r, to: "window.__cfgSave")
     }
 
@@ -666,7 +667,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         guard let docObj = body["doc"] as? [String: Any],
               let data = try? JSONSerialization.data(withJSONObject: docObj) else { return }
         let r = configStore.validateCandidate(data)
-        sendConfigResult(r, to: "window.__cfgValidate")
+        let states = parseConfig(data).doc.map { profileStates($0) } ?? []
+        let res: [String: Any] = ["ok": r.ok, "errors": r.errors, "warnings": r.warnings, "profiles": states]
+        if let json = try? JSONSerialization.data(withJSONObject: res), let str = String(data: json, encoding: .utf8) {
+            evalOnReady("window.__cfgValidate(\(str))", oneShot: true)
+        }
     }
 
     private func sendConfigResult(_ r: ConfigSaveResult, to fn: String) {
@@ -674,6 +679,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         guard let data = try? JSONSerialization.data(withJSONObject: res),
               let str = String(data: data, encoding: .utf8) else { return }
         evalOnReady("\(fn)(\(str))", oneShot: true)
+    }
+
+    /// Same S3 verdict for every profile, including inactive/unsaved candidates.
+    private func profileStates(_ doc: ConfigDoc) -> [[String: Any]] {
+        return doc.profiles.map { p in
+            var model = p.model
+            let scanned = folderScanCache[model.source]?["models"] as? [[String: Any]]
+            if let found = scanned?.first(where: { $0["id"] as? String == model.id }) { model.dir = found["dir"] as? String }
+            var state = modelTickState(model: model, version: server.plan.version,
+                                       draftModel: p.options["draft_model"]?.string,
+                                       isDir: { isDir($0) },
+                                       fileContents: { try? String(contentsOfFile: $0, encoding: .utf8) })
+            state["id"] = p.id
+            return state
+        }
     }
 
     // MARK: WKNavigationDelegate
@@ -766,7 +786,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     /// The scan cache key = the sorted "id path" pairs: a re-scan happens when
     /// the folder SET changes (add / delete / path edit), never per tick.
     private func folderSetKey(_ folders: [ModelFolder]) -> String {
-        folders.map { "\($0.id) \($0.path)" }.sorted().joined(separator: "\n")
+        (server.plan.version ?? "") + "\n" + folders.map { "\($0.id) \($0.path)" }.sorted().joined(separator: "\n")
     }
 
     /// Kick the background folder scan (main-thread callers only). The cache
@@ -774,10 +794,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     /// (bounded, shallow listings) runs on the utility queue, then the result
     /// is committed back on main. `scanning` rides the tick while in flight.
     private func runFolderScan() {
+        guard !folderScanInFlight else { return }
+        folderScanInFlight = true
         let folders = configStore.doc.globals.modelFolders
         let fm = FileManager.default
+        let version = server.plan.version
+        let scanKey = folderSetKey(folders)
+        if folderSetKey(folders) != folderScanKey { folderScanCache.removeAll() }
         let todo = folders.filter { folderScanCache[$0.id] == nil }
-        folderScanQueue.async {
+        folderScanQueue.async { [weak self] in
             let results = todo.map { f -> (String, [String: Any]) in
                 (f.id, folderTickState(
                     folder: f,
@@ -789,12 +814,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                     listDir: { d -> [String]? in
                         guard d == f.path || d.hasPrefix(f.path + "/") else { return nil }
                         return (try? fm.contentsOfDirectory(atPath: d))
-                    }))
+                    }, version: version))
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
                 for (id, st) in results { self.folderScanCache[id] = st }
-                self.folderScanKey = self.folderSetKey(self.configStore.doc.globals.modelFolders)
+                self.folderScanKey = scanKey
                 self.folderScanInFlight = false
             }
         }
@@ -1422,6 +1447,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             folders.append(st)
         }
         cfgPayload["folders"] = folders
+        let states = profileStates(doc)
+        cfgPayload["profiles"] = (cfgPayload["profiles"] as? [[String: Any]] ?? []).map { profile in
+            var merged = profile
+            if let state = states.first(where: { $0["id"] as? String == profile["id"] as? String }) {
+                for key in ["eligibility", "eligibility_reason", "drafter", "kind"] { merged[key] = state[key] }
+            }
+            return merged
+        }
         // S5: a browse pick rides exactly ONE tick as `picked` (the base
         // payload's `picked` null is overridden here; consumed one tick).
         if let p = pendingPicked {
