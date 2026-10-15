@@ -935,13 +935,12 @@ public func defaultConfig(home: String, now: Date = Date()) -> ConfigDoc {
         "idle_release": .string("240m"),
         "ane": .bool(true),
     ]
-    let iso = ISO8601DateFormatter()
     let id = appProfileId(now: now)
     let profile = Profile(
         id: id, name: "Default",
         model: ProfileModel(source: "lmstudio", id: "incoai/Qwen3.8-27B-Splash", dir: nil),
         options: options,
-        meta: ProfileMeta(createdAt: iso.string(from: now)))
+        meta: ProfileMeta(createdAt: iso8601(now)))
     return ConfigDoc(globals: globals, profiles: [profile], activeProfile: id, reserved: [:])
 }
 
@@ -955,6 +954,74 @@ private func appProfileId(now: Date) -> String {
         suffix.append(hex[hex.index(hex.startIndex, offsetBy: Int.random(in: 0..<16, using: &g))])
     }
     return "p-\(ms)-\(suffix)"
+}
+
+/// ISO-8601 (UTC, whole seconds) — the timestamp form config.json uses for
+/// `created_at` / `last_used_at` / … and the form `startupActivation` parses.
+public func iso8601(_ date: Date) -> String {
+    ISO8601DateFormatter().string(from: date)
+}
+
+/// The first-run seed (D10): the doc the app writes when `config.json` is ABSENT
+/// at load (a corrupt file is S1a's last-good path, not this one).
+///
+/// Documented defaults (port / key / the 5 auto roots / the per-profile options —
+/// `defaultConfig`) plus the runtime-dependent parts, detected (never user-set,
+/// D16):
+/// - a Homebrew keg is present -> engine **auto** (the D2 ladder; the detected
+///   runtime becomes the default) and one "Default" profile (D11) preconfigured
+///   with that runtime's default model: 1.3.1+ -> the MLX id `mlx-community/
+///   Qwen3.8-27B-4bit` (hfid; the 1.3.0 package it cannot read is NOT the keg
+///   default); 1.3.0-style, or an unreadable version -> the local 1.3.0 package
+///   (the module flavor, as `resolveSplashPaths` does).
+/// - no runtime found -> engine **manual** + empty path + model unset
+///   (unrunnable until the user configures an engine).
+/// `active_profile` = the "Default" profile's id; `created_at` stamped.
+/// Pure: FS/detection go through injected closures (T1), `now` is injectable.
+public func firstRunConfig(home: String,
+                           brewKeg: () -> String?,
+                           kitVersion: (String) -> String?,
+                           isDir: (String) -> Bool,
+                           now: Date = Date()) -> ConfigDoc {
+    var d = defaultConfig(home: home, now: now)   // the documented defaults (D10)
+    if let keg = brewKeg(), keg != "", isDir(keg + "/libexec") {
+        // The keg's libexec IS the engine kit (same layout as the release kit).
+        d.globals.engine = EngineCfg(mode: "auto", manualPath: nil, brew: true)
+        let version = kitVersion(keg + "/libexec")
+        if let v = version, versionGE(v, "1.3.1") {
+            d.profiles[0].model = ProfileModel(source: "hfid", id: "mlx-community/Qwen3.8-27B-4bit", dir: nil)
+        }
+        // else: 1.3.0-style (or version unreadable) -> the local package, as seeded.
+    } else {
+        d.globals.engine = EngineCfg(mode: "manual", manualPath: nil, brew: true)
+        d.profiles[0].model = ProfileModel(source: "none", id: nil, dir: nil)
+    }
+    return d
+}
+
+/// D12 startup activation: the profile the app should run on start.
+/// 1. the most recent `meta.last_used_at` wins (nil or unparseable = unused);
+/// 2. a tie on the most recent, or all-nil -> the persisted `active_profile`
+///    id, if it still references an existing profile;
+/// 3. still none -> the first profile in array order.
+/// Pure; an empty profile list -> nil. The caller stamps `last_used_at` (D13).
+public func startupActivation(_ profiles: [Profile], persistedActive: String?) -> String? {
+    guard !profiles.isEmpty else { return nil }
+    let fmt = ISO8601DateFormatter()
+    var best: (date: Date, id: String)? = nil
+    var tied = false
+    for p in profiles {
+        guard let s = p.meta.lastUsedAt, let date = fmt.date(from: s) else { continue }
+        if let b = best {
+            if date > b.date { best = (date, p.id); tied = false }
+            else if date == b.date { tied = true }
+        } else {
+            best = (date, p.id)
+        }
+    }
+    if let b = best, !tied { return b.id }
+    if let a = persistedActive, profiles.contains(where: { $0.id == a }) { return a }
+    return profiles[0].id
 }
 
 // MARK: - Save validation / normalization / masking
@@ -1077,18 +1144,55 @@ public func configTickPayload(
     }
     return out
 }
+// MARK: - Real-FS runtime detection (moved from main.swift)
+
+/// A path is a directory.
+public func isDir(_ path: String) -> Bool {
+    var values = [FileAttributeKey: Any]()
+    do { try values = FileManager.default.attributesOfItem(atPath: path) } catch { return false }
+    return values[.type] as? FileAttributeType == .typeDirectory
+}
+
+/// The Homebrew keg of the splash formula, if installed. The formula versions
+/// its Cellar path per release, so the newest version dir is picked.
+public func findBrewKeg() -> String? {
+    for base in ["/opt/homebrew", "/usr/local"] {
+        let cellar = base + "/Cellar/splash"
+        let versions = (try? FileManager.default.contentsOfDirectory(atPath: cellar)) ?? []
+        if let v = versions.sorted().last {
+            let keg = cellar + "/" + v
+            if access(keg + "/bin/splash", X_OK) == 0 { return keg }
+        }
+    }
+    return nil
+}
+
+/// A kit's on-disk engine version, from its release.json — the flavor
+/// discriminator the launch contract is keyed to. nil when absent (the test
+/// harness injects its own).
+public func kitVersion(_ kit: String) -> String? {
+    guard let data = FileManager.default.contents(atPath: kit + "/release.json") else { return nil }
+    guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+    return obj["version"] as? String
+}
+
 // MARK: - ConfigStore: the single owner of config.json (D1, R8)
 
 /// Owns `~/Library/Application Support/SplashUI/config.json`:
-/// - loads at app start, BEFORE the first engine launch (D1 — load must not block
-///   launch; the file is small and read synchronously once);
+/// - loads at app start, BEFORE the first engine launch (D1 — load must not
+///   block launch; the file is small and read synchronously once);
+/// - first run (file absent, not corrupt): seeds `firstRunConfig` synchronously
+///   and writes it 0600 exactly once, before the first launch/adopt (D10, R10);
+/// - startup activation: after load/seed, picks the D12 profile, stamps
+///   `last_used_at` (D13), and persists a changed choice (D15);
 /// - keeps the in-memory doc as the single source of truth (D9);
 /// - is the ONLY code path that writes the file (R8 single-writer; the API key
 ///   makes this a 0600 file in a 0700 dir);
 /// - writes atomically: tmp in the same dir -> fsync -> chmod 0600 -> rename(2).
 ///
-/// All FS access goes through injected closures (T1), so the whole load/save/
-/// corrupt/last-good/version-too-new state machine is unit-testable without AppKit.
+/// All FS/detection access goes through injected closures (T1), so the whole
+/// load/seed/save/corrupt/last-good/version-too-new state machine is
+/// unit-testable without AppKit.
 /// Main-thread only (the app reads it from the bridge handler and the 1 s tick).
 public final class ConfigStore {
     public static let dirName = "SplashUI"
@@ -1119,39 +1223,57 @@ public final class ConfigStore {
     private let read: (String) -> Data?
     private let write: (Data, String) -> Bool
     private let ensureDir: (String, Int) -> Bool
+    /// First-run runtime detection (D10): the Homebrew keg prefix or nil, the
+    /// kit version from release.json, directory existence — injected so the seed
+    /// is testable (T1); the real-FS implementations are the defaults. (Names
+    /// differ from the free functions so those stay reachable unqualified.)
+    private let detectKeg: () -> String?
+    private let detectKitVersion: (String) -> String?
+    private let detectIsDir: (String) -> Bool
 
     public init(home: String,
                 path: String? = nil,
                 read: @escaping (String) -> Data? = ConfigStore.defaultRead,
                 write: @escaping (Data, String) -> Bool = ConfigStore.defaultWrite,
-                ensureDir: @escaping (String, Int) -> Bool = ConfigStore.defaultEnsureDir) {
+                ensureDir: @escaping (String, Int) -> Bool = ConfigStore.defaultEnsureDir,
+                brewKeg: @escaping () -> String? = ConfigStore.defaultBrewKeg,
+                kitVersion: @escaping (String) -> String? = ConfigStore.defaultKitVersion,
+                isDir: @escaping (String) -> Bool = ConfigStore.defaultIsDir) {
         self.home = home
         self.path = path ?? home + "/Library/Application Support/SplashUI/" + ConfigStore.fileName
         self.dir = (self.path as NSString).deletingLastPathComponent
         self.read = read
         self.write = write
         self.ensureDir = ensureDir
+        self.detectKeg = brewKeg
+        self.detectKitVersion = kitVersion
+        self.detectIsDir = isDir
         self.doc = defaultConfig(home: home)
         self.load()
     }
 
     // MARK: Load
 
-    /// (Re)load the file. Absent file -> in-memory documented defaults, no write
-    /// (the first-run seed write is S1b; single-writer rule: only config.save writes).
+    /// (Re)load the file. Absent file -> first-run seed (D10): `firstRunConfig`
+    /// (documented defaults + detected runtime) is written 0600 atomically,
+    /// exactly once this launch (R10 — this load is synchronous in
+    /// applicationDidFinishLaunching, ahead of the first server.launch/adopt and
+    /// of any config command), and `firstRun` = true; it is derived from "file
+    /// absent at load" (T12), so a deleted file re-arms the next launch (intended).
     /// Corrupt file -> last-good (or the defaults) + `loadError`; the file is left
     /// untouched (a next valid save repairs it). Newer version -> read-only doc.
     public func load() {
         _ = ensureDir(dir, 0o700)
         guard let data = read(path) else {
-            doc = defaultConfig(home: home)
-            loadError = nil
+            doc = firstRunConfig(home: home, brewKeg: detectKeg, kitVersion: detectKitVersion, isDir: detectIsDir)
+            firstRun = true
+            let ok = commit(doc)
+            loadError = ok ? nil : "could not write config.json (first-run seed): \(path)"
             versionTooNew = false
-            fileVersion = nil
-            activeInvalid = false
-            lastGood = doc
+            fileVersion = ok ? configSchemaVersion : nil
             return
         }
+        firstRun = false
         let (parsed, error, dropped) = parseConfig(data)
         for k in dropped where !loggedDropped.contains(k) {
             loggedDropped.insert(k)
@@ -1189,10 +1311,29 @@ public final class ConfigStore {
 
     // MARK: Save (the single write path)
 
+    /// The shared write core: normalize + ensureDir + the atomic 0600 write
+    /// (tmp -> fsync -> chmod -> rename) + the in-memory state update. `save()`
+    /// runs strict validation first and stamps a result; the startup activation
+    /// (D12) reuses it WITHOUT a result stamp — it is not a user action
+    /// (`cfg.result` replies to config.save/config.validate only).
+    @discardableResult
+    private func commit(_ candidate: ConfigDoc) -> Bool {
+        let (normalized, invalid) = normalizeConfig(candidate)
+        _ = ensureDir(dir, 0o700)
+        guard write(configData(normalized), path) else { return false }
+        doc = normalized
+        activeInvalid = invalid
+        loadError = nil
+        versionTooNew = false
+        lastGood = normalized
+        return true
+    }
+
     /// Validate a candidate doc and write it atomically (tmp -> fsync -> 0600 ->
-    /// rename). The ONLY path that writes the file (R8). A version-too-new store
-    /// refuses (never destroy forward data). Returns the result stamp, which also
-    /// rides one tick of `cfg.result` (consumed via `consumeSaveResult`).
+    /// rename). The ONLY path that writes the file on user action (R8). A
+    /// version-too-new store refuses (never destroy forward data). Returns the
+    /// result stamp, which also rides one tick of `cfg.result` (consumed via
+    /// `consumeSaveResult`).
     @discardableResult
     public func save(candidate: ConfigDoc) -> ConfigSaveResult {
         if versionTooNew {
@@ -1208,20 +1349,35 @@ public final class ConfigStore {
             saveResult = v
             return v
         }
-        let (normalized, invalid) = normalizeConfig(candidate)
-        _ = ensureDir(dir, 0o700)
-        guard write(configData(normalized), path) else {
+        guard commit(candidate) else {
             let r = ConfigSaveResult(ok: false, errors: ["cannot write config file: \(path)"], warnings: v.warnings)
             saveResult = r
             return r
         }
-        doc = normalized
-        activeInvalid = invalid
-        loadError = nil
-        versionTooNew = false
-        lastGood = normalized
         saveResult = ConfigSaveResult(ok: true, errors: [], warnings: v.warnings)
         return saveResult!
+    }
+
+    // MARK: Startup activation (D12 — after load/seed, before the first launch)
+
+    /// D12: pick the profile the app runs on — most-recent `last_used_at` -> the
+    /// persisted `active_profile` -> the first profile — stamp it (D13), and
+    /// persist the choice with one explicit save when it changed the active
+    /// profile, before the first planLaunch/launch. On a fresh seed the pick is
+    /// the seeded "Default" itself, already on disk via the seed write (R10: one
+    /// write); a pick matching the persisted active profile stamps in memory
+    /// only and flushes with the next explicit save (D15: no background writes).
+    /// A corrupt file stays untouched (S1a) and a forward file (version-too-new)
+    /// stays sacred: the pick applies in memory.
+    public func activateStartup(now: Date = Date()) {
+        guard let pick = startupActivation(doc.profiles, persistedActive: doc.activeProfile) else { return }
+        if let i = doc.profiles.firstIndex(where: { $0.id == pick }) {
+            doc.profiles[i].meta.lastUsedAt = iso8601(now)   // D13: activation stamps last_used_at
+        }
+        guard pick != doc.activeProfile else { return }   // choice unchanged: already persisted (or a fresh seed)
+        doc.activeProfile = pick
+        guard validateConfig(doc).ok, loadError == nil, !versionTooNew else { return }
+        _ = commit(doc)   // the single explicit save of the D12 choice (no result stamp)
     }
 
     /// Save the current in-memory doc (metadata flush, D15).
@@ -1279,6 +1435,13 @@ public final class ConfigStore {
     public static func defaultRead(_ path: String) -> Data? {
         FileManager.default.contents(atPath: path)
     }
+
+    /// The real runtime detection (the free functions above, which main.swift's
+    /// `resolve()` uses as well): the Homebrew keg prefix or nil, the kit
+    /// version from release.json, directory existence.
+    public static func defaultBrewKeg() -> String? { findBrewKeg() }
+    public static func defaultKitVersion(_ kit: String) -> String? { kitVersion(kit) }
+    public static func defaultIsDir(_ path: String) -> Bool { isDir(path) }
 
     public static func defaultEnsureDir(_ path: String, _ mode: Int) -> Bool {
         var isDir: ObjCBool = false

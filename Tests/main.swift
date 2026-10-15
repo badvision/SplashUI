@@ -745,16 +745,23 @@ do {
           "store: corrupt, no last-good -> Default profile from defaults")
 }
 
-// 10. Store: absent file -> in-memory defaults, no write (single-writer rule).
+// 10. Store: absent file -> first-run seed (S1b, D10/R10): written exactly once,
+// first_run true; the next load with the file present does not re-seed.
 do {
     var writes = 0
+    var fileData: Data? = nil
     let store = ConfigStore(home: "/home", path: "/h/x/config.json",
-                            read: { _ in nil },
-                            write: { _, _ in writes += 1; return true },
-                            ensureDir: { _, _ in true })
-    check(store.loadError == nil && !store.versionTooNew, "store: absent file -> no error, not version-too-new")
-    check(store.doc.globals.port == 8123, "store: absent file -> documented defaults in memory")
-    check(writes == 0, "store: absent file is not written (only config.save writes; first-run seed is S1b)")
+                            read: { _ in fileData },
+                            write: { d, _ in writes += 1; fileData = d; return true },
+                            ensureDir: { _, _ in true },
+                            brewKeg: { nil }, kitVersion: { _ in nil }, isDir: { _ in false })
+    check(store.firstRun, "store: absent file -> first_run true (the seed ran)")
+    check(writes == 1, "store: absent file -> the seed is written exactly once (R10, single owner)")
+    check(fileData == configData(store.doc), "store: the seeded bytes == the canonical serialization of the in-memory doc")
+    check(store.loadError == nil && !store.versionTooNew, "store: seed -> healthy load state")
+    store.load()
+    check(writes == 1, "store: the next load finds the seeded file -> no re-seed")
+    check(!store.firstRun, "store: the next launch -> first_run false (one-shot per launch)")
 }
 
 // 11. Store save: validate + atomic write + in-memory update + result stamping.
@@ -800,11 +807,12 @@ do {
      "active_profile":"p1"}
     """
     var writes = 0
-    var fileData: Data? = nil
+    var fileData: Data? = Data(txt.utf8)   // present at load: no first-run seed in this test
     let store = ConfigStore(home: "/home", path: "/h/x/config.json",
                             read: { _ in fileData },
                             write: { d, _ in writes += 1; fileData = d; return true },
-                            ensureDir: { _, _ in true })
+                            ensureDir: { _, _ in true },
+                            brewKeg: { nil }, kitVersion: { _ in nil }, isDir: { _ in false })
     let r = store.saveCandidate(Data(txt.utf8))
     check(r.ok && writes == 1, "store: saveCandidate parses + writes a valid doc")
     check(store.doc.globals.port == 8200, "store: candidate values land in memory")
@@ -901,7 +909,7 @@ do {
 do {
     let home = "/tmp/splashui-s1a-\(ProcessInfo.processInfo.processIdentifier)"
     try? FileManager.default.removeItem(atPath: home)
-    let store = ConfigStore(home: home)   // the real default FS closures
+    let store = ConfigStore(home: home, brewKeg: { nil }, kitVersion: { _ in nil }, isDir: { _ in false })   // real FS closures; fake detection (hermetic seed)
     var cand = defaultConfig(home: home, now: now)
     cand.globals.port = 8124
     let r = store.save(candidate: cand)
@@ -918,9 +926,257 @@ do {
     } else {
         check(false, "store(fs): the saved file re-parses with the change")
     }
-    let s2 = ConfigStore(home: home)
+    let s2 = ConfigStore(home: home, brewKeg: { nil }, kitVersion: { _ in nil }, isDir: { _ in false })
     check(s2.doc == cand && s2.loadError == nil, "store(fs): a fresh store reloads the saved file cleanly")
     try? FileManager.default.removeItem(atPath: home)
+}
+
+// ---- first-run seed + startup activation (S1b: D10/D11/D12) ----------------
+
+// 17. firstRunConfig: a Homebrew keg (1.3.1+) -> engine auto + one "Default"
+// profile preconfigured with that runtime's default model (MLX hfid).
+do {
+    let d = firstRunConfig(home: "/home",
+                           brewKeg: { "/opt/homebrew/Cellar/splash/1.3.1" },
+                           kitVersion: { $0 == "/opt/homebrew/Cellar/splash/1.3.1/libexec" ? "1.3.1" : nil },
+                           isDir: { $0 == "/opt/homebrew/Cellar/splash/1.3.1/libexec" },
+                           now: now)
+    check(d.globals.engine.mode == "auto" && d.globals.engine.manualPath == nil && d.globals.engine.brew,
+          "firstRun: keg detected -> engine auto (D2 ladder), brew rung on")
+    check(d.globals.port == 8123 && d.globals.apiKey == "splash-standalone-1", "firstRun: documented defaults")
+    let ids = d.globals.modelFolders.map { $0.id }
+    check(ids == ["lmstudio", "ollama", "hfhub", "splash", "installroot"], "firstRun: the 5 auto model roots")
+    check(d.globals.modelFolders.allSatisfy { $0.source == "auto" }, "firstRun: roots tagged source auto")
+    check(d.profiles.count == 1 && d.profiles[0].name == "Default", "firstRun: one profile named Default (D11)")
+    check(d.profiles[0].model.source == "hfid" && d.profiles[0].model.id == "mlx-community/Qwen3.8-27B-4bit"
+          && d.profiles[0].model.dir == nil, "firstRun: 1.3.1+ keg -> the runtime's default MLX model by id")
+    check(d.profiles[0].options["ane"]?.bool == true, "firstRun: ANE on (binding decision)")
+    check(d.profiles[0].options["max_cache_disk"]?.string == "100g"
+          && d.profiles[0].options["idle_release"]?.string == "240m"
+          && d.profiles[0].options["persistent_cache"]?.bool == true, "firstRun: the documented per-profile defaults")
+    check(d.activeProfile == d.profiles[0].id && d.profiles[0].id.hasPrefix("p-"), "firstRun: active = the Default profile")
+    check(d.profiles[0].meta.createdAt != nil && d.profiles[0].meta.lastUsedAt == nil,
+          "firstRun: created_at stamped, not yet used")
+    check(d.reserved.isEmpty, "firstRun: no reserved keys")
+}
+
+// 18. firstRunConfig: a 1.3.0-style keg -> the 1.3.0 package (the module flavor
+// default); an unreadable version defaults to the module flavor too.
+do {
+    func make(_ version: String?) -> ConfigDoc {
+        firstRunConfig(home: "/home",
+                       brewKeg: { "/brew/Cellar/splash/1.3.0" },
+                       kitVersion: { _ in version },
+                       isDir: { $0 == "/brew/Cellar/splash/1.3.0/libexec" },
+                       now: now)
+    }
+    let d = make("1.3.0")
+    check(d.globals.engine.mode == "auto", "firstRun: 1.3.0 keg -> engine auto")
+    check(d.profiles[0].model.source == "lmstudio" && d.profiles[0].model.id == "incoai/Qwen3.8-27B-Splash"
+          && d.profiles[0].model.dir == nil, "firstRun: 1.3.0 keg -> the local package (the 1.3.0 flavor's default)")
+    let dn = make(nil)   // resolveSplashPaths does the same: unknown version -> module flavor
+    check(dn.globals.engine.mode == "auto" && dn.profiles[0].model.source == "lmstudio"
+          && dn.profiles[0].model.id == "incoai/Qwen3.8-27B-Splash",
+          "firstRun: keg with an unreadable version -> the 1.3.0 flavor")
+}
+
+// 19. firstRunConfig: no runtime detected -> engine manual + empty path + model
+// unset (unrunnable until the user configures an engine, D10).
+do {
+    let d = firstRunConfig(home: "/home", brewKeg: { nil }, kitVersion: { _ in nil },
+                           isDir: { _ in false }, now: now)
+    check(d.globals.engine.mode == "manual" && d.globals.engine.manualPath == nil,
+          "firstRun: no runtime -> manual + empty path (D10)")
+    check(d.profiles[0].model.source == "none" && d.profiles[0].model.id == nil && d.profiles[0].model.dir == nil,
+          "firstRun: no runtime -> model unset (unrunnable until configured)")
+    check(d.activeProfile == d.profiles[0].id && d.profiles[0].name == "Default", "firstRun: active = the unrunnable Default")
+    check(d.profiles[0].meta.createdAt != nil, "firstRun: created_at stamped")
+    let stale = firstRunConfig(home: "/home", brewKeg: { "/stale/keg" }, kitVersion: { _ in "1.3.1" },
+                               isDir: { _ in false }, now: now)
+    check(stale.globals.engine.mode == "manual" && stale.globals.engine.manualPath == nil
+          && stale.profiles[0].model.source == "none",
+          "firstRun: a keg that is not a real directory is treated as absent")
+}
+
+// 20. startupActivation (D12): most-recent last_used_at -> tie -> persisted id -> first.
+do {
+    func p(_ id: String, _ used: String?) -> Profile {
+        Profile(id: id, name: id, model: ProfileModel(source: "none"), meta: ProfileMeta(lastUsedAt: used))
+    }
+    let a = p("p-a", "2026-01-01T00:00:00Z")
+    let b = p("p-b", "2026-01-02T00:00:00Z")
+    let c = p("p-c", "2026-01-03T00:00:00Z")
+    check(startupActivation([a, b, c], persistedActive: "p-a") == "p-c", "activate: the most recent last_used_at wins")
+    check(startupActivation([a, p("p-b2", "2026-01-03T00:00:00Z"), c], persistedActive: "p-a") == "p-a",
+          "activate: tie on the most recent -> the persisted id")
+    check(startupActivation([p("p-b2", "2026-01-03T00:00:00Z"), c], persistedActive: nil) == "p-b2",
+          "activate: tie + no persisted id -> first in array order")
+    check(startupActivation([a, p("p-b", nil), c], persistedActive: "p-a") == "p-c",
+          "activate: a nil last_used_at never beats a dated one")
+    let nils = [p("p-x", nil), p("p-y", nil)]
+    check(startupActivation(nils, persistedActive: "p-y") == "p-y", "activate: all-nil -> the persisted id")
+    check(startupActivation(nils, persistedActive: nil) == "p-x", "activate: all-nil + no persisted -> first profile")
+    check(startupActivation(nils, persistedActive: "p-nope") == "p-x", "activate: a dangling persisted id -> first profile")
+    check(startupActivation([a], persistedActive: nil) == "p-a"
+          && startupActivation([a], persistedActive: "p-other") == "p-a",
+          "activate: a single profile is always the pick")
+    check(startupActivation([], persistedActive: "p-a") == nil, "activate: no profiles -> nil")
+    check(startupActivation([p("p-bad", "not-a-timestamp"), c], persistedActive: "p-a") == "p-c",
+          "activate: an unparseable timestamp is treated as unused")
+    // created_at never participates in the recency rule.
+    let createdOnly = Profile(id: "p-cr", name: "cr", model: ProfileModel(source: "none"),
+                              meta: ProfileMeta(createdAt: "2026-12-31T00:00:00Z"))
+    check(startupActivation([createdOnly, a], persistedActive: "p-a") == "p-a",
+          "activate: created_at (without last_used_at) does not win recency")
+}
+
+// 21. Store: file absent + keg detected -> the seed is written once (R10) with
+// the detected runtime; startup activation on a fresh seed writes nothing extra.
+do {
+    var writes = 0
+    var fileData: Data? = nil
+    let store = ConfigStore(home: "/home", path: "/h/x/config.json",
+                            read: { _ in fileData },
+                            write: { d, _ in writes += 1; fileData = d; return true },
+                            ensureDir: { _, _ in true },
+                            brewKeg: { "/brew/keg" },
+                            kitVersion: { _ in "1.3.1" },
+                            isDir: { $0 == "/brew/keg/libexec" })
+    check(store.firstRun && writes == 1, "store: keg seed -> first_run true + exactly one write")
+    check(store.doc.globals.engine.mode == "auto" && store.doc.profiles[0].model.id == "mlx-community/Qwen3.8-27B-4bit",
+          "store: the seed carries the detected runtime (auto + MLX hfid)")
+    store.activateStartup(now: now)
+    check(writes == 1, "store: activation on a fresh seed writes nothing extra (the seed IS the persistence)")
+    check(store.doc.profiles[0].meta.lastUsedAt != nil, "store: the startup pick stamps last_used_at (D13)")
+    check(store.doc.activeProfile == store.doc.profiles[0].id, "store: the fresh seed stays on its own Default")
+    // A real FS round-trip of the same scenario (0600 file, re-armed only on deletion).
+    let home = "/tmp/splashui-s1b-\(ProcessInfo.processInfo.processIdentifier)"
+    try? FileManager.default.removeItem(atPath: home)
+    let fs = ConfigStore(home: home, brewKeg: { "/brew/keg" }, kitVersion: { _ in "1.3.1" }, isDir: { $0 == "/brew/keg/libexec" })
+    let path = home + "/Library/Application Support/SplashUI/config.json"
+    let mode = ((try? FileManager.default.attributesOfItem(atPath: path))?[.posixPermissions] as? Int) ?? -1
+    check(FileManager.default.fileExists(atPath: path) && mode == 0o600, "store(fs): the first-run seed lands 0600")
+    check(fs.firstRun, "store(fs): first_run true on the seeded launch")
+    let s2 = ConfigStore(home: home, brewKeg: { "/brew/keg" }, kitVersion: { _ in "1.3.1" }, isDir: { $0 == "/brew/keg/libexec" })
+    check(!s2.firstRun, "store(fs): the seeded file present -> the next launch is not first-run")
+    try? FileManager.default.removeItem(atPath: home)
+}
+
+// 22. Store: startup activation picks by recency and persists the changed choice
+// (one explicit save before the first launch, D12/D13); an unchanged pick stamps
+// in memory only (D15: no background writes).
+do {
+    let tNow = Date(timeIntervalSince1970: 2_000_000_000)   // after every fixture timestamp below
+    func iso(_ d: Date) -> String { ISO8601DateFormatter().string(from: d) }
+    var writes = 0
+    var fileData: Data? = nil
+    let store = ConfigStore(home: "/home", path: "/h/x/config.json",
+                            read: { _ in fileData },
+                            write: { d, _ in writes += 1; fileData = d; return true },
+                            ensureDir: { _, _ in true },
+                            brewKeg: { nil }, kitVersion: { _ in nil }, isDir: { _ in false })
+    check(writes == 1, "store: the no-runtime seed wrote once")
+    // The user's history so far: two profiles, "Work" last used after "Default".
+    var d = store.doc
+    var work = d.profiles[0]
+    work.id = "p-second-aaa1"; work.name = "Work"
+    work.meta.lastUsedAt = "2026-01-05T00:00:00Z"
+    d.profiles.append(work)
+    d.profiles[0].meta.lastUsedAt = "2026-01-01T00:00:00Z"
+    d.activeProfile = "p-second-aaa1"   // as persisted by a previous config.save
+    check(store.save(candidate: d).ok, "store: the history save succeeds")
+    store.activateStartup(now: tNow)
+    check(store.doc.activeProfile == "p-second-aaa1", "store: the recency pick stays the active profile")
+    check(store.doc.profiles[1].meta.lastUsedAt == iso(tNow), "store: the pick stamps last_used_at (D13)")
+    check(writes == 2, "store: pick == persisted active -> the stamp flushes with no extra write (D15)")
+    // Now the persisted active is the OLDER profile: the pick flips it.
+    var d2 = store.doc
+    d2.activeProfile = d.profiles[0].id   // "Default" (older) is what the file persists
+    check(store.save(candidate: d2).ok, "store: the flip-back save succeeds")
+    let before = writes
+    store.activateStartup(now: tNow)
+    check(store.doc.activeProfile == "p-second-aaa1", "store: the D12 recency pick wins over the persisted id")
+    check(writes == before + 1, "store: the changed choice is persisted with one explicit save")
+    let (re, err, _) = parseConfig(fileData!)
+    check(err == nil && re?.activeProfile == "p-second-aaa1", "store: the file on disk carries the D12 pick")
+    check(re?.profiles[1].meta.lastUsedAt == iso(tNow), "store: the file carries the stamped last_used_at")
+}
+
+// 23. Store: activation never writes a corrupt file (S1a contract) or a
+// version-too-new file (forward data is sacred); the pick still applies in memory.
+do {
+    let tNow = Date(timeIntervalSince1970: 2_000_000_000)
+    var d = defaultConfig(home: "/home", now: now)
+    var work = d.profiles[0]
+    work.id = "p-second-aaa1"; work.name = "Work"; work.meta.lastUsedAt = "2026-01-05T00:00:00Z"
+    d.profiles.append(work)
+    d.profiles[0].meta.lastUsedAt = "2026-01-01T00:00:00Z"
+    d.activeProfile = d.profiles[0].id   // the file persists the OLDER profile active
+    var writes = 0
+    var fileData: Data? = configData(d)
+    let store = ConfigStore(home: "/home", path: "/h/x/config.json",
+                            read: { _ in fileData },
+                            write: { dd, _ in writes += 1; fileData = dd; return true },
+                            ensureDir: { _, _ in true },
+                            brewKeg: { nil }, kitVersion: { _ in nil }, isDir: { _ in false })
+    check(!store.firstRun && writes == 0, "store: a present file never re-seeds")
+    fileData = Data("}{ corrupt".utf8)
+    store.load()
+    store.activateStartup(now: tNow)
+    check(writes == 0, "store: activation on a corrupt file never writes (the file is untouched)")
+    check(store.doc.activeProfile == "p-second-aaa1", "store: the pick still applies in memory over a corrupt file")
+    check(store.loadError != nil, "store: the corrupt load_error stays surfaced")
+    let fwdTxt = "{\"schema_version\":9,\"globals\":{\"port\":8123,\"api_key\":\"k\",\"model_folders\":[],\"engine\":{\"mode\":\"auto\",\"brew\":true}},"
+        + "\"profiles\":[{\"id\":\"p-x\",\"name\":\"X\",\"model\":{\"source\":\"none\"},\"options\":{},\"meta\":{\"last_used_at\":\"2026-01-01T00:00:00Z\"}},"
+        + "{\"id\":\"p-y\",\"name\":\"Y\",\"model\":{\"source\":\"none\"},\"options\":{},\"meta\":{\"last_used_at\":\"2026-01-05T00:00:00Z\"}}],"
+        + "\"active_profile\":\"p-x\"}"
+    let fwd = Data(fwdTxt.utf8)
+    fileData = fwd
+    store.load()
+    store.activateStartup(now: tNow)
+    check(writes == 0, "store: activation on a version-too-new file never writes")
+    check(store.doc.activeProfile == "p-y" && fileData == fwd, "store: the pick applies in memory; the forward file is byte-identical")
+}
+
+// 24. S1a-QA carry-over: UNKNOWN PROFILE OPTION KEYS (bool/number/string/null/
+// object values) survive the load -> save round-trip (a value stored under a
+// newer mapping must survive a downgrade; S7 shows them stale, never drops them).
+do {
+    let txt = """
+    {"schema_version":1,
+     "globals":{"port":8123,"api_key":"k","model_folders":[],"engine":{"mode":"auto","brew":true}},
+     "profiles":[{"id":"p1","name":"A",
+       "model":{"source":"hfid","id":"x/y","dir":null},
+       "options":{"kv_format":"int8","future_flag":"2026","future_count":3.5,"future_bool":true,"future_null":null,"future_obj":{"a":1}},
+       "meta":{}}],
+     "active_profile":"p1"}
+    """
+    let (d, err, dropped) = parseConfig(Data(txt.utf8))
+    check(err == nil, "options: unknown option keys parse")
+    check(dropped.isEmpty, "options: unknown option keys are kept, not reported as dropped")
+    let (d2, err2, _) = parseConfig(configData(d!))
+    check(err2 == nil, "options: the round-trip re-parses")
+    let o = d2!.profiles[0].options
+    check(o["kv_format"] == .string("int8"), "options: the known key survives load->save")
+    check(o["future_flag"] == .string("2026"), "options: unknown STRING value survives load->save")
+    check(o["future_count"] == .number(3.5), "options: unknown NUMBER value survives load->save")
+    check(o["future_bool"] == .bool(true), "options: unknown BOOL value survives load->save")
+    check(o["future_null"] == .null, "options: unknown NULL value survives load->save")
+    check(o["future_obj"] == .object(["a": .number(1)]), "options: unknown OBJECT value survives load->save")
+    check(o.count == 6, "options: nothing was dropped from the flat options map")
+}
+
+// 25. cfg.first_run in the tick payload (one-shot per launch; S5 consumes it).
+do {
+    let d = defaultConfig(home: "/home", now: now)
+    let pTrue = configTickPayload(doc: d, loadError: nil, versionTooNew: false, activeInvalid: false,
+                                  firstRun: true, inFlight: 0, result: nil)
+    let pFalse = configTickPayload(doc: d, loadError: nil, versionTooNew: false, activeInvalid: false,
+                                   firstRun: false, inFlight: 0, result: nil)
+    check(pTrue["first_run"] as? Bool == true, "cfg payload: first_run true rides the tick")
+    check(pFalse["first_run"] as? Bool == false, "cfg payload: first_run false on a normal launch")
+    check(canonicalJSONString(JSONValue(any: pTrue)) != canonicalJSONString(JSONValue(any: pFalse)),
+          "change-gate: first_run flips the gate (the one-shot is visible exactly once)")
 }
 
 print(failures == 0 ? "ALL TESTS PASSED" : "\(failures) TEST(S) FAILED")

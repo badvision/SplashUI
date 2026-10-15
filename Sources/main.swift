@@ -13,37 +13,11 @@ enum Cfg {
 // Resolve the engine paths + engine argv from the documented env contract
 // (README "Configuration (environment)"). Re-resolved on every launch attempt so a
 // user fixing the install while the app is running takes effect on the next try.
-func isDir(_ path: String) -> Bool {
-    var values = [FileAttributeKey: Any]()
-    do { try values = FileManager.default.attributesOfItem(atPath: path) } catch { return false }
-    return values[.type] as? FileAttributeType == .typeDirectory
-}
+// (`isDir`, `findBrewKeg`, and `kitVersion` live in ui_logic.swift: the config
+// store needs the same real-FS runtime detection for the D10 first-run seed.)
 
 // The README ./install.sh default install root (SPLASHUI_HOME).
 let defaultRoot = NSHomeDirectory() + "/SplashUI"
-
-// The Homebrew keg of the splash formula, if installed. The formula versions
-// its Cellar path per release, so the newest version dir is picked.
-func findBrewKeg() -> String? {
-    for base in ["/opt/homebrew", "/usr/local"] {
-        let cellar = base + "/Cellar/splash"
-        let versions = (try? FileManager.default.contentsOfDirectory(atPath: cellar)) ?? []
-        if let v = versions.sorted().last {
-            let keg = cellar + "/" + v
-            if access(keg + "/bin/splash", X_OK) == 0 { return keg }
-        }
-    }
-    return nil
-}
-
-// A kit's on-disk engine version, from its release.json — the flavor
-// discriminator the launch contract is keyed to. nil when absent (the test
-// harness injects its own).
-func kitVersion(_ kit: String) -> String? {
-    guard let data = FileManager.default.contents(atPath: kit + "/release.json") else { return nil }
-    guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-    return obj["version"] as? String
-}
 
 func resolve() -> SplashPaths {
     resolveSplashPaths(
@@ -448,8 +422,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
     func applicationDidFinishLaunching(_ note: Notification) {
         // The config loads first (small file, one synchronous read) — before any
-        // engine launch reads the configuration it replaces (D1).
+        // engine launch reads the configuration it replaces (D1). If the file was
+        // absent, the load SEEDS it (D10): that write happens synchronously here,
+        // ahead of the launch/adopt below and of any config command (R10).
         configStore = ConfigStore(home: NSHomeDirectory())
+        // D12: pick the startup profile (most-recent last_used_at -> the persisted
+        // active id -> first), stamp it (D13), and persist the choice — still before
+        // the first launch below. On a fresh seed this re-picks its own "Default"
+        // (a no-op write: the seed IS the persistence).
+        configStore.activateStartup()
         setupStatusItem()
         setupPanel()
         if server.pid == nil {
