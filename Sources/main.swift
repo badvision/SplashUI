@@ -685,24 +685,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             webView.evaluateJavaScript(script, completionHandler: nil)
         }
         guard let path = smokeJS, let code = try? String(contentsOfFile: path, encoding: .utf8) else { return }
-        // Wrap in an IIFE so any expression returns its value; serialize the
-        // result (JSON for objects, raw text for strings) so the smoke agent
-        // always reads a stable file.
-        webView.evaluateJavaScript("(function(){ return (\(code)); })()") { [weak self] result, error in
-            DispatchQueue.main.async {
-                let out = self?.smokeOut ?? "/tmp/splashui_smoke_out.json"
-                var text: String
-                if let r = result as? String {
-                    text = r
-                } else if let r = result, let d = try? JSONSerialization.data(withJSONObject: [r], options: [.fragmentsAllowed]),
-                          let s = String(data: d, encoding: .utf8) {
-                    text = s
-                } else if let error = error {
-                    text = "{\"error\": \"JS evaluation failed\"}"
-                } else {
-                    text = "null"
+        // callAsyncJavaScript's first argument is a FUNCTION BODY (not an
+        // expression): the hook file is a single expression (e.g. bare
+        // JSON.stringify(...) or new Promise(...)), often with a trailing ';'.
+        // Wrap as `return (<expr>);` — the file's trailing ';' is trimmed first so
+        // it can't land inside the parens. evaluateJavaScript would reject a
+        // returned Promise (WKErrorDomain 5); callAsyncJavaScript AWAITS it, so
+        // both sync and async hook scripts resolve to their value.
+        let expr = code.replacingOccurrences(of: "[\\s;]+$", with: "", options: .regularExpression)
+        let body = "return (\(expr));"
+        webView.callAsyncJavaScript(body, arguments: [:], in: nil, in: .page) { [weak self] result in
+            switch result {
+            case .success(let r):
+                if let s = r as? String {
+                    try? s.data(using: .utf8)?.write(to: URL(fileURLWithPath: self?.smokeOut ?? "/tmp/splashui_smoke_out.json"))
+                } else if let data = try? JSONSerialization.data(withJSONObject: r, options: [.fragmentsAllowed]) {
+                    try? data.write(to: URL(fileURLWithPath: self?.smokeOut ?? "/tmp/splashui_smoke_out.json"))
                 }
-                try? text.data(using: .utf8)?.write(to: URL(fileURLWithPath: out))
+            case .failure(let e):
+                let error = ["error": "JS evaluation failed: \(e.localizedDescription)"]
+                if let data = try? JSONSerialization.data(withJSONObject: error) {
+                    try? data.write(to: URL(fileURLWithPath: self?.smokeOut ?? "/tmp/splashui_smoke_out.json"))
+                }
             }
         }
     }

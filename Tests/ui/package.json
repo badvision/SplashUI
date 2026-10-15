@@ -1,0 +1,8 @@
+{
+  "name": "splashui-panel-tests",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node panel.test.mjs" },
+  "devDependencies": { "jsdom": "26.1.0" },
+  "engines": { "node": ">=18" }
+}
