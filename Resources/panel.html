@@ -530,7 +530,8 @@ function cfSave() {
 
 // One-time population from the raw doc (config.get), then the draft is ours.
 function cfInit(doc) {
-  if (CF.draft) return;
+  if (CF.draft) { window.__cfgReady = true; return; }
+  window.__cfgReady = true;
   CF.doc = doc;
   CF.draft = cfDraft(doc);
   CF.baseline = JSON.stringify(CF.draft);

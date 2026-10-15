@@ -403,13 +403,18 @@ final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate {
     var statusItem: NSStatusItem!
     var panel: KeyablePanel!
     var webView: WKWebView!
     let server = ServerProc()
     let tail = LogTail()
     private var timer: Timer?
+    // The panel's page finished loading: JS evals (tick payloads, config.get /
+    // save / validate replies) land on a live page, not a loading one — an eval
+    // before load is a silent no-op (the form would render empty forever).
+    private var webReady = false
+    private var pendingTick: String?
     private var globalMonitor: Any?
 
     private var lastDecodeOut: Double?
@@ -510,6 +515,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         cfg.userContentController.add(self, name: "cmd")
         cfg.userContentController.add(self, name: "size")
         webView = WKWebView(frame: panel.contentView!.bounds, configuration: cfg)
+        webView.navigationDelegate = self
         webView.autoresizingMask = [.width, .height]
         panel.contentView = webView
         if let url = Bundle.main.url(forResource: "panel", withExtension: "html") {
@@ -583,12 +589,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
     // MARK: Config bridge (config.get / config.save / config.validate)
 
+    // Pre-didFinish evals queue here (one-shot) and flush on page load.
+    private var pendingConfigEval: String?
+
+    /// JS evals on the webview silently no-op while the page is still loading, so
+    /// every one-stage eval is gated on webReady (didFinish): pre-ready evals are
+    /// queued (one-shot) and flushed the instant the page lands.
+    private func evalOnReady(_ script: String, oneShot: Bool) {
+        if webReady {
+            webView.evaluateJavaScript(script, completionHandler: nil)
+        } else if oneShot || pendingConfigEval == nil {
+            pendingConfigEval = script
+        }
+    }
+
     /// The whole doc, raw (the edit form needs the unmasked api_key to round-trip
     /// it — the tick payload only ever carries the mask, D6).
     private func respondConfigGet() {
         let data = configData(configStore.doc)
         guard let str = String(data: data, encoding: .utf8) else { return }
-        webView.evaluateJavaScript("window.__cfgGet(\(str))", completionHandler: nil)
+        // cfInit marks __cfgReady. The retry is scheduled FIRST so it survives
+        // an eval that lands before the page script defines __cfgGet (a direct
+        // call there would throw and abort the statement). cfInit no-ops once
+        // the draft is set, so the double-call is safe.
+        let script = "(function(){ if (!window.__cfgRetryT) { window.__cfgRetryT = 1; setTimeout(function(){ if (!window.__cfgReady) { try { window.webkit.messageHandlers.cmd.postMessage({cmd: \"config.get\"}) } catch(e) {} } }, 500); } if (window.__cfgGet) { window.__cfgGet(\(str)); } })()"
+        evalOnReady(script, oneShot: true)
     }
 
     /// Parse the candidate strictly, validate, write (the single-writer path).
@@ -612,7 +637,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         let res: [String: Any] = ["ok": r.ok, "errors": r.errors, "warnings": r.warnings]
         guard let data = try? JSONSerialization.data(withJSONObject: res),
               let str = String(data: data, encoding: .utf8) else { return }
-        webView.evaluateJavaScript("\(fn)(\(str))", completionHandler: nil)
+        evalOnReady("\(fn)(\(str))", oneShot: true)
+    }
+
+    // MARK: WKNavigationDelegate
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        webReady = true
+        if let s = pendingConfigEval {
+            pendingConfigEval = nil
+            webView.evaluateJavaScript(s, completionHandler: nil)
+        }
+        if let s = pendingTick {
+            pendingTick = nil
+            webView.evaluateJavaScript(s, completionHandler: nil)
+        }
     }
 
     // MARK: S5 — directory picker (browse) + background folder scanner
@@ -1316,7 +1355,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         }
         if let data = try? JSONSerialization.data(withJSONObject: j),
            let str = String(data: data, encoding: .utf8) {
-            webView.evaluateJavaScript("window.update(\(str))")
+            // A tick that fires before the page has loaded would no-op; keep the
+            // latest one and flush it in didFinish (the next tick self-heals).
+            if webReady {
+                webView.evaluateJavaScript("window.update(\(str))")
+            } else {
+                pendingTick = str
+            }
         }
     }
 }
