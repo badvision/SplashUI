@@ -326,6 +326,89 @@ try {
   check('downgrade visibility never drops saved option values', () => assert.equal(w.__test.doc().profiles[1].options.kv_format, 'bf16'));
 } finally { optionsPanel.close(); }
 
+const warningsPanel = panel();
+try {
+  const { w, $, tick } = warningsPanel;
+  // --- FALLBACK MAPPING CAP (S7 GWT) ---
+  check('no fallback cap when the mapping is exact', () => assert.ok($('engFallback').hidden && !$('engFallback').querySelector('.warn-cap')));
+  tick({ mapping_fallback: true, mapping_used: '1.3.2', engine: { path: '/fixture/kit', version: '1.3.9', valid: true, tried: ['/fixture/kit'] }, registry_report: { version: '1.3.9', missing_in_contract: ['--state-format'], missing_in_kit: ['--allow-idle-sleep'], unrecognized: [3] } });
+  check('fallback renders persistent peach cap with both versions', () => {
+    assert.ok(!$('engFallback').hidden);
+    const cap = $('engFallback').querySelector('.warn-cap');
+    assert.ok(cap);
+    assert.match(cap.textContent, /FALLBACK MAPPING v1\.3\.2 for engine v1\.3\.9/);
+  });
+  check('fallback cap carries registry report and actionable fix in data-tip', () => {
+    const tip = $('engFallback').querySelector('.warn-cap').dataset.tip || '';
+    assert.match(tip, /1\.3\.2/);
+    assert.match(tip, /1\.3\.9/);
+    assert.match(tip, /--state-format/);
+    assert.match(tip, /allow-idle-sleep/);
+    assert.match(tip, /unrecognized/);
+    assert.match(tip, /Run a matching engine v1\.3\.2|update the mapping registry/);
+  });
+  tick({ mapping_fallback: false, mapping_used: '1.3.0', registry_report: null, engine: { path: '/fixture/kit-1.3.0', version: '1.3.0', valid: true, tried: ['/fixture/kit-1.3.0'] } });
+  check('fallback cap clears when the mapping is exact again', () => assert.ok($('engFallback').hidden && !$('engFallback').querySelector('.warn-cap')));
+  // --- UNRUNNABLE CAP (S7 GWT) ---
+  w.document.querySelector('[data-profile-act="edit"][data-id="p2"]').click();
+  w.document.querySelector('#profileModels [data-model-index="1"]').click(); // assembly model with a reason
+  const unrunnableRow = [...w.document.querySelectorAll('#profileList .profile-row')].find(r => r.textContent.includes('Untouched'));
+  check('unrunnable profile row shows peach UNRUNNABLE cap with reason', () => {
+    const cap = unrunnableRow.querySelector('.profile-cap.unrunnable');
+    assert.ok(cap);
+    assert.match(cap.textContent, /UNRUNNABLE/);
+    assert.match(cap.textContent, /missing draft\/config\.json/);
+  });
+  check('unrunnable cap data-tip carries the actionable fix', () => {
+    const cap = unrunnableRow.querySelector('.profile-cap.unrunnable');
+    assert.match(cap.dataset.tip || '', /missing draft\/config\.json/);
+    assert.ok(!cap.classList.contains('runnable'));
+  });
+  // --- STALE OPTIONS (S7 GWT: preserved, dimmed, warning cap) ---
+  check('stale option key renders dimmed disabled in its own group', () => {
+    const group = w.document.querySelector('.stale-group');
+    assert.ok(group);
+    const row = group.querySelector('.stale-row');
+    assert.match(row.textContent, /ane/);
+    const input = row.querySelector('input');
+    assert.ok(input.disabled);
+    assert.match(input.value, /false/);
+    assert.ok(row.querySelector('.profile-cap'), 'preserved-kept marker');
+  });
+  check('stale group bar carries peach STALE warn-cap and actionable fix tip', () => {
+    const group = w.document.querySelector('.stale-group');
+    const cap = group.querySelector('.warn-cap');
+    assert.match(cap.textContent, /STALE/);
+    assert.match(group.dataset.tip || '', /preserved/i);
+  });
+  check('stale option value is preserved in the commit candidate, not dropped', () => assert.ok('ane' in w.__test.doc().profiles[1].options));
+  check('stale group toggles with its launcher bar', () => {
+    const group = w.document.querySelector('.stale-group');
+    const bar = group.querySelector('.stale-bar');
+    bar.click();
+    assert.ok(group.classList.contains('open'));
+    bar.click();
+    assert.ok(!group.classList.contains('open'));
+  });
+  tick({ option_defs: [{ key: 'kv_format', flag: '--kv-format', kind: 'value', group: 'memory', default: 'int8', choices: ['int8', 'bf16'], requires: [] }, { key: 'ane', flag: '--disable-ane', kind: 'bool', group: 'compute', default: true, choices: [], requires: [] }] });
+  check('stale option clears when the mapping comes to know the key', () => assert.equal(w.document.querySelector('.stale-group'), null));
+  // --- THEME INARIANTS (D3/D4, D9) ---
+  check('settings accent stays channel-06 blue #4455ff', () => assert.match(html, /\.settings-panel\s*\{[^}]*--accent:\s*#4455ff/));
+  check('warning caps use the peach warning color at 14px pill geometry', () => {
+    assert.match(html, /\.warn-cap\s*\{[^}]*var\(--peach\)/);
+    assert.match(html, /\.warn-cap\s*\{[^}]*border-radius:\s*14px/);
+    assert.match(html, /\.profile-cap\s*\{[^}]*border-radius:\s*14px/);
+  });
+  check('no ENV OVERRIDE cap exists (D9)', () => {
+    assert.ok(!w.document.documentElement.outerHTML.includes('ENV OVERRIDE'));
+    assert.ok(!/env\s*override/i.test(html));
+  });
+  check('no exact-duplicate .section-heading rule (theme dedup)', () => {
+    const matches = html.match(/\.section-heading, section > \.label:first-child/g);
+    assert.equal((matches || []).length, 1);
+  });
+} finally { warningsPanel.close(); }
+
 const native = readFileSync(new URL('../../Sources/main.swift', import.meta.url), 'utf8');
 check('native menu exposes ordered status/settings/separator/quit actions', () => {
   assert.match(native, /sendAction\(on: \[\.leftMouseUp, \.rightMouseUp\]\)/);

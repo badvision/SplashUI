@@ -169,8 +169,41 @@
       }
       await until(() => S.server.pid === expected.enginePID, 'original engine still adopted');
       snapshot('final');
+      // S7: theme spot-checks, then a live warning state left visible for the evidence screenshot.
+      $('btnSettings').click();
+      check('S7 theme: settings accent is channel-06 blue #4455ff', () => getComputedStyle($('settingsView').querySelector('.settings-panel')).getPropertyValue('--accent').trim() === '#4455ff', getComputedStyle($('settingsView').querySelector('.settings-panel')).getPropertyValue('--accent'));
+      check('S7 theme: caps and bars keep LCARS pill geometry (14px caps, 0 14px 14px 0 bars)', () => { const s = [...document.styleSheets].map(sh => { try { return [...sh.cssRules].map(r => r.cssText).join(' '); } catch { return ''; } }).join(' '); return /\.warn-cap[^}]*border-radius:\s*14px/.test(s) && /\.profile-cap[^}]*border-radius:\s*14px/.test(s) && /\.stale-bar[^}]*border-radius:\s*0 14px 14px 0/.test(s); });
+      check('S7 no fallback cap while the mapping is exact', () => $('engFallback').hidden === true, { fallbackHidden: $('engFallback').hidden, version: S.cfg.engine.version });
+      const engine = S.cfg.engine, actualVersion = engine.version;
+      S.cfg.mapping_fallback = true; S.cfg.mapping_used = '1.3.2'; engine.version = '9.9.9';
+      window.update({ ...S });
+      await until(() => !$('engFallback').hidden && $('engFallback').querySelector('.warn-cap'), 'fallback cap renders');
+      const warnCap = $('engFallback').querySelector('.warn-cap');
+      check('S7 fallback cap live with real values: peach cap names mapping and engine version', () => warnCap.textContent.includes('FALLBACK MAPPING v1.3.2') && warnCap.textContent.includes('for engine v9.9.9') && !warnCap.classList.contains('runnable'), warnCap.textContent);
+      check('S7 fallback cap data-tip carries the actionable registry fix', () => /update the mapping registry|Run a matching engine v1\.3\.2/.test(warnCap.dataset.tip || ''), warnCap.dataset.tip);
+      check('S7 warnings non-blocking: panel still renders all status sections', () => $('statusView').querySelectorAll('section').length === 5 && S.server.pid === expected.enginePID && S.cfg.restart_required === false, { sections: $('statusView').querySelectorAll('section').length });
+      S.cfg.mapping_fallback = false; S.cfg.mapping_used = null; S.cfg.registry_report = null; engine.version = actualVersion;
+      window.update({ ...S });
+      await until(() => $('engFallback').hidden, 'fallback cap cleared');
+      check('S7 fallback cap clears when the mapping is exact again, engine version restored, no restart', () => $('engFallback').hidden && engine.version === actualVersion && S.cfg.restart_required === false, { version: engine.version });
+      // A real 1s tick can fire between the hook end and the runner's screencapture;
+      // wrap window.update to re-assert the warning on every subsequent payload so the
+      // evidence screenshot deterministically shows the cap. JS-only; config.json is
+      // already restored, the engine is never touched.
+      const realUpdate = window.update;
+      window.update = payload => { realUpdate(payload);
+        if (payload && payload.cfg) { payload.cfg.mapping_fallback = true; payload.cfg.mapping_used = '1.3.2';
+          if (payload.cfg.engine) payload.cfg.engine.version = '9.9.9'; realUpdate(payload); } };
+      S.cfg.mapping_fallback = true; S.cfg.mapping_used = '1.3.2'; engine.version = '9.9.9';
+      $('vCfg').textContent = '9.9.9';
+      realUpdate({ ...S });
+      await until(() => !$('engFallback').hidden && $('engFallback').querySelector('.warn-cap'), 'fallback cap re-shown for evidence');
+      await sleep(200);
+      // Leave the warning visible at the top of the settings view for the evidence screenshot.
+      $('engFallback').scrollIntoView({ block: 'start' });
+      snapshot('s7_warning_visible');
     }
-    $('profilesSlot').scrollIntoView({ block: 'start' });
+    if (!expected.roundTrips) $('profilesSlot').scrollIntoView({ block: 'start' });
   } catch (error) { check('live hook completed', false, error.message); }
   const failed = checks.filter(item => !item.pass).length;
   return JSON.stringify({ suite: 'panel-live', checks, steps, ignoredInput, assertions: checks.length,
