@@ -1,0 +1,421 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { JSDOM, VirtualConsole } from 'jsdom';
+
+// Execute the shipped script, not a reimplementation of its state machine.
+const html = readFileSync(new URL('../../Resources/panel.html', import.meta.url), 'utf8');
+const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)];
+assert.equal(scripts.length, 1, 'the panel has one inline application script');
+const clone = value => JSON.parse(JSON.stringify(value));
+const secret = 'ui-test-secret-never-render-me';
+const fixture = {
+  schema_version: 1, active_profile: 'p1', first_run_shown: false,
+  future_extension: { preserved: true },
+  globals: {
+    engine: { mode: 'manual', manual_path: '/fixture/kit-1.3.0', brew: false },
+    port: 8123, api_key: secret,
+    model_folders: [
+      { id: 'lmstudio', path: '/fixture/models', source: 'auto' },
+      { id: 'missing', path: '/fixture/missing', source: 'manual' }
+    ]
+  },
+  profiles: [
+    { id: 'p1', name: 'Default', model: { source: 'lmstudio', id: 'org/model', dir: null },
+      options: { ane: true, persistent_cache: true, max_cache_disk: '100g' }, meta: { last_used_at: null } },
+    { id: 'p2', name: 'Untouched', options: { ane: false }, model: { source: 'none' }, meta: {} }
+  ]
+};
+
+// This bridge fixture models D13; Swift tests + live smoke prove the real producer.
+const signature = doc => { const p = doc.profiles.find(p => p.id === doc.active_profile) || doc.profiles[0]; return JSON.stringify([doc.globals.engine, doc.globals.port,
+  doc.globals.api_key, p?.id, p?.model, p?.options]); };
+const results = [];
+function check(name, body) {
+  try { body(); results.push({ assertion: name, pass: true }); }
+  catch (error) { results.push({ assertion: name, pass: false, error: error.message }); }
+  console.log(JSON.stringify(results.at(-1)));
+}
+function panel({ firstRun = false } = {}) {
+  let doc = clone(fixture), baseline = signature(doc), rejectSave = false;
+  const commands = [], replies = [], timers = new Map(), errors = [];
+  let timerID = 0;
+  const virtualConsole = new VirtualConsole();
+  virtualConsole.on('jsdomError', error => errors.push(error.message));
+  const dom = new JSDOM(html.replace(scripts[0][0], ''), {
+    url: 'https://splashui.test/', runScripts: 'outside-only', virtualConsole
+  });
+  const w = dom.window, $ = id => w.document.getElementById(id);
+  w.HTMLCanvasElement.prototype.getContext = () => ({
+    clearRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}
+  });
+  w.HTMLElement.prototype.scrollIntoView = function () { this.dataset.scrolled = 'true'; };
+  w.setTimeout = callback => { timers.set(++timerID, callback); return timerID; };
+  w.clearTimeout = id => timers.delete(id);
+  const tick = (overrides = {}, extra = {}) => w.update({
+    state: 'idle', ready: true, server: { pid: 17573, launched_by_app: false },
+    cfg: {
+      engine: { ...doc.globals.engine, path: doc.globals.engine.manual_path,
+        version: '1.3.0', valid: true, tried: [doc.globals.engine.manual_path] },
+      folders: doc.globals.model_folders.map(f => ({ ...f, present: f.id !== 'missing',
+        scanning: false, models: f.id === 'lmstudio' ? [{ id: 'org/model', source: f.id, dir: '/fixture/models/org/model', kind: 'package', eligibility: 'runnable', drafter: 'PACKAGE — baked in' }, { id: 'org/assembly', source: f.id, dir: '/fixture/models/org/assembly', kind: 'assembly', eligibility: 'unrunnable', eligibility_reason: 'missing draft/config.json', drafter: 'MISSING — draft/config.json required' }] : [] })),
+      api_key_masked: 'ui••••••me', first_run: firstRun && !doc.first_run_shown,
+      profiles: doc.profiles.map(p => ({ ...p, eligibility: p.model.source === 'none' ? 'unrunnable' : 'runnable', drafter: 'PACKAGE — baked in' })), active_profile: doc.active_profile,
+      in_flight: 3,
+      option_defs: [{ key: 'kv_format', flag: '--kv-format', kind: 'value', group: 'memory', default: 'int8', choices: ['int8', 'bf16'], requires: [] }, { key: 'cache_dir', flag: '--cache-dir', kind: 'value', group: 'cache', default: null, requires: ['persistent_cache'] }],
+      restart_required: signature(doc) !== baseline, result: null, ...overrides
+    }, ...extra
+  });
+  w.webkit = { messageHandlers: {
+    size: { postMessage() {} },
+    cmd: { postMessage(message) {
+      const m = clone(message); commands.push(m);
+      replies.push(() => {
+        if (m.cmd === 'config.get') w.__cfgGet(clone(doc));
+        if (m.cmd === 'config.validate') {
+          const invalid = m.doc.profiles.find(p => p.options.kv_format && !['int8', 'bf16'].includes(p.options.kv_format));
+          w.__cfgValidate({ ok: !invalid, errors: invalid ? [`profile ${invalid.id} option kv_format: invalid syntax`] : [], warnings: [], validation_id: m.validation_id });
+        }
+        if (m.cmd === 'config.save' || m.cmd === 'config.activate') {
+          const names = m.doc.profiles.map(p => p.name);
+          const duplicate = new Set(names).size !== names.length;
+          const result = { ok: !rejectSave && !duplicate, errors: rejectSave ? ['rejected fixture'] : duplicate ? ['duplicate profile name(s)'] : [], warnings: [] };
+          if (result.ok) { doc = clone(m.doc); if (m.cmd === 'config.activate') { doc.active_profile = m.profileId; doc.profiles.find(p => p.id === m.profileId).meta.last_used_at = new Date().toISOString(); } }
+          w.__cfgSave(result); tick({ result });
+        }
+        if (m.cmd === 'config.firstRunDone') doc.first_run_shown = true;
+      });
+    } }
+  } };
+  w.eval(scripts[0][1] + '\nwindow.__test = { draft: () => CF.draft, dirty: cfDirty, doc: cfBuildDoc, repeatTick: () => window.update({ ...S }) };');
+  function drain() { while (replies.length) replies.shift()(); }
+  function flushTimers() {
+    const pending = [...timers.values()]; timers.clear();
+    for (const callback of pending) callback();
+    drain();
+  }
+  function change(id, value) { $(id).value = String(value); $(id).dispatchEvent(new w.Event('change')); }
+  function save() { $('btnCfgSave').click(); drain(); }
+  drain(); tick();
+  return { w, $, tick, commands, drain, flushTimers, change, save, errors,
+    doc: () => clone(doc), reject: value => { rejectSave = value; },
+    restarted: () => { baseline = signature(doc); tick(); }, close: () => dom.window.close() };
+}
+
+const p = panel();
+try {
+  const { w, $, tick, commands, drain, change, save } = p;
+  check('default screen is telemetry-only status', () => {
+    assert.ok(!$('statusView').hidden && $('settingsView').hidden);
+    assert.equal($('statusView').querySelector('.settings-panel'), null);
+    assert.deepEqual([...$('statusView').querySelectorAll('section')].map(s => s.dataset.channel), ['01', '02', '03', '04', '05']);
+  });
+  check('telemetry performance, engine and requests remain intact', () => {
+    assert.equal($('toks').closest('section').dataset.channel, '01');
+    assert.equal($('ane').closest('section').dataset.channel, '02');
+    assert.equal($('recentTable').querySelectorAll('th').length, 6);
+  });
+  check('hamburger switches views without bridging or losing draft', () => {
+    const count = commands.length, draft = w.__test.draft();
+    $('statusView').scrollTop = 90;
+    $('btnSettings').click();
+    assert.ok($('statusView').hidden && !$('settingsView').hidden);
+    assert.equal($('settingsView').scrollTop, 0);
+    assert.equal(commands.length, count);
+    assert.equal(w.__test.draft(), draft);
+    assert.equal($('btnSettings').querySelectorAll('span').length, 3);
+  });
+  check('all S5 controls live on the settings screen', () => {
+    for (const id of ['capAuto', 'capManual', 'manualPath', 'engValid', 'folderList', 'cfgPort', 'cfgKey', 'aneOn', 'btnCfgSave', 'cfgMsg'])
+      assert.ok($('settingsView').contains($(id)), id);
+    assert.ok($('settingsView').contains($('profilesSlot')));
+    assert.ok(!$('settingsView').contains($('footer')) && !$('statusView').contains($('footer')));
+  });
+  check('STATUS back cap resets scroll and returns to telemetry', () => {
+    $('settingsView').scrollTop = 120;
+    $('btnStatus').click();
+    assert.ok(!$('statusView').hidden && $('settingsView').hidden);
+    assert.equal($('statusView').scrollTop, 0);
+    $('btnSettings').click();
+    assert.equal($('settingsView').scrollTop, 0);
+  });
+  check('config.get uses the object-body bridge', () => assert.deepEqual(commands[0], { cmd: 'config.get' }));
+  check('draft populated from the raw ConfigDoc', () => assert.equal(w.__test.draft().manualPath, '/fixture/kit-1.3.0'));
+  check('manual input agrees with draft immediately after cfInit', () => assert.equal($('manualPath').value, w.__test.draft().manualPath));
+  check('manual input enabled and radio selected', () => assert.ok(!$('manualPath').disabled && $('capManual').classList.contains('on')));
+  check('port and ANE populated', () => assert.ok($('cfgPort').value === '8123' && $('aneOn').classList.contains('on')));
+  check('initial draft is clean', () => assert.equal(w.__test.dirty(), false));
+  check('raw API key absent from DOM text, attributes and input properties', () => {
+    assert.ok(!w.document.documentElement.outerHTML.includes(secret));
+    assert.ok([...w.document.querySelectorAll('input')].every(input => !input.value.includes(secret)));
+  });
+  check('API key is masked and readonly', () => assert.ok($('cfgKey').readOnly && $('cfgKey').value.length > 0 && $('cfgKey').value !== secret));
+  check('adopted PID rendered without claiming app ownership', () => assert.ok($('pidNum').textContent === '17573' && $('envPill').textContent === 'EXTERNAL'));
+  check('engine path/version/valid status populated', () => assert.ok($('engPath').textContent === '/fixture/kit-1.3.0' && $('vCfg').textContent === '1.3.0' && $('engValid').textContent === 'VALID'));
+  check('folder rows match ConfigDoc', () => assert.equal(w.document.querySelectorAll('#folderList .frow').length, 2));
+  check('folder status/count reflects tick', () => assert.match($('folderList').textContent, /lmstudioPRESENT2 models.*missingMISSING0 models/));
+  tick({ folders: [{ id: 'lmstudio', scanning: true, present: true, models: [] }] });
+  check('scanning folder uses SCANNING state', () => assert.match($('folderList').textContent, /SCANNING/));
+  tick();
+  w.document.querySelector('#folderList [data-act="scan"]').click(); drain();
+  check('scan bridges the selected folder ID', () => assert.deepEqual(commands.at(-1), { cmd: 'config.scan', id: 'lmstudio' }));
+  change('cfgPort', 8199);
+  check('port edit makes draft dirty', () => assert.equal(w.__test.dirty(), true));
+  change('cfgPort', 8123);
+  check('returning to baseline clears dirty without saving', () => assert.equal(w.__test.dirty(), false));
+  const savesBefore = commands.filter(m => m.cmd === 'config.save').length;
+  save();
+  check('clean save does not send a write', () => assert.equal(commands.filter(m => m.cmd === 'config.save').length, savesBefore));
+  change('cfgPort', 8199); p.flushTimers();
+  check('debounced validation sends the candidate ConfigDoc', () => assert.equal(commands.findLast(m => m.cmd === 'config.validate').doc.globals.port, 8199));
+  save();
+  const saved = commands.findLast(m => m.cmd === 'config.save').doc;
+  check('save emits full ConfigDoc shape, not tick cfg shape', () => assert.ok(saved.schema_version === 1 && saved.profiles.length === 2 && saved.active_profile === 'p1' && !('restart_required' in saved)));
+  check('save preserves raw key without rendering it', () => assert.equal(saved.globals.api_key, secret));
+  check('save preserves extensions, metadata, options and other profiles', () => {
+    assert.deepEqual(saved.future_extension, fixture.future_extension);
+    assert.deepEqual(saved.profiles[1], fixture.profiles[1]);
+    assert.deepEqual(saved.profiles[0], fixture.profiles[0]);
+  });
+  check('successful save rebases draft', () => assert.equal(w.__test.dirty(), false));
+  check('changed running plan shows restart-required footer', () => assert.equal($('btnRestart').textContent, 'RESTART TO APPLY'));
+  check('successful save reports restart to apply', () => assert.match($('cfgMsg').textContent, /restart to apply/));
+  change('cfgPort', 8123); save();
+  check('restoring adopted port clears restart-required', () => assert.equal($('btnRestart').textContent, 'Restart'));
+  $('aneOff').click(); save();
+  check('ANE off round-trips false and requires restart', () => assert.ok(p.doc().profiles[0].options.ane === false && $('btnRestart').textContent === 'RESTART TO APPLY'));
+  $('aneOn').click(); save();
+  check('ANE on restores baseline and clears restart-required', () => assert.ok(p.doc().profiles[0].options.ane === true && $('btnRestart').textContent === 'Restart'));
+  $('aneOff').click(); save(); p.restarted();
+  check('successful restart baseline clears the footer', () => assert.equal($('btnRestart').textContent, 'Restart'));
+  change('cfgPort', 8199); p.reject(true); save();
+  check('failed save retains dirty draft and renders errors', () => assert.ok(w.__test.dirty() && $('cfgMsg').textContent.includes('rejected fixture')));
+  check('failed save does not mutate persisted config', () => assert.equal(p.doc().globals.port, 8123));
+  p.reject(false);
+  const edited = clone(w.__test.draft());
+  w.__cfgGet(clone(fixture));
+  check('repeated config.get cannot clobber unsaved edits', () => assert.deepEqual(clone(w.__test.draft()), edited));
+  $('capAuto').click();
+  check('Auto disables manual input and saves null manual_path', () => assert.ok($('manualPath').disabled && w.__test.doc().globals.engine.manual_path === null));
+  $('capManual').click(); change('manualPath', '/fixture/another-kit');
+  check('manual path change updates draft and candidate', () => assert.equal(w.__test.doc().globals.engine.manual_path, '/fixture/another-kit'));
+  $('btnBrowseEngine').click(); drain();
+  check('engine browse uses correct context', () => assert.deepEqual(commands.at(-1), { cmd: 'browse', context: 'engine' }));
+  tick({ picked: { context: 'engine', path: '/fixture/picked-kit' } });
+  check('engine picker synchronizes draft and input', () => assert.ok(w.__test.draft().manualPath === '/fixture/picked-kit' && $('manualPath').value === '/fixture/picked-kit'));
+  $('btnBrowseFolder').click(); drain();
+  check('folder browse uses correct context', () => assert.deepEqual(commands.at(-1), { cmd: 'browse', context: 'model_folder' }));
+  tick({ picked: { context: 'model_folder', path: '/fixture/added-models' } });
+  $('btnAddFolder').click(); tick();
+  check('folder add creates manual row and clears path', () => assert.ok(w.__test.draft().folders.at(-1).source === 'manual' && $('folderPath').value === '' && $('folderList').textContent.includes('folder3')));
+  w.document.querySelector('#folderList [data-act="del"][data-i="2"]').click(); tick();
+  check('folder delete removes the selected draft row', () => assert.equal(w.__test.draft().folders.length, 2));
+  w.update({ state: 'idle', ready: true, server: { pid: 17573, launched_by_app: false } });
+  check('telemetry-only tick retains cfg state', () => assert.equal($('vCfg').textContent, '1.3.0'));
+  check('ordinary session does not show first-run modal', () => assert.notEqual($('cfgModal').style.display, 'flex'));
+  check('no unhandled DOM errors', () => assert.deepEqual(p.errors, []));
+} finally { p.close(); }
+
+for (const button of ['modalDismiss', 'modalCta']) {
+  const first = panel({ firstRun: true });
+  try {
+    check(`${button}: first-run modal appears`, () => assert.equal(first.$('cfgModal').style.display, 'flex'));
+    first.$(button).click(); first.drain();
+    check(`${button}: dismissal bridges persistence`, () => assert.ok(first.doc().first_run_shown && first.commands.at(-1).cmd === 'config.firstRunDone'));
+    first.tick({ first_run: true });
+    check(`${button}: stale first_run tick cannot reopen modal`, () => assert.equal(first.$('cfgModal').style.display, 'none'));
+    if (button === 'modalCta') check('first-run CTA opens settings screen', () => assert.ok(!first.$('settingsView').hidden && first.$('statusView').hidden));
+  } finally { first.close(); }
+}
+const profiles = panel();
+try {
+  const { w, $, change, tick, save } = profiles;
+  const rows = () => [...w.document.querySelectorAll('#profileList .profile-row')];
+  const action = (act, id) => w.document.querySelector(`#profileList [data-profile-act="${act}"][data-id="${id}"]`).click();
+  check('profiles follow Global Settings on settings screen', () => assert.ok($('settingsView').contains($('profileList')) && $('profilesSlot').previousElementSibling.classList.contains('settings-panel')));
+  check('profiles list renders names model eligibility and ACTIVE cap', () => { assert.equal(rows().length, 2); assert.match(rows()[0].textContent, /Default.*ACTIVE.*org\/model.*RUNNABLE/); });
+  check('profile row renders created and last-used metadata', () => assert.match(rows()[0].textContent, /Created.*Last used/));
+  action('edit', 'p1');
+  check('model picker uses scanned folders with source kind verdict', () => { assert.equal(w.document.querySelectorAll('#profileModels [data-model-index]').length, 2); assert.match($('profileModels').textContent, /org\/model.*lmstudio.*package.*RUNNABLE/); });
+  check('model picker carries actionable unrunnable reason', () => assert.match($('profileModels').textContent, /missing draft\/config.json/));
+  check('drafter availability displays package outcome', () => assert.match($('profileDrafter').textContent, /PACKAGE.*baked in/));
+  change('profileName', 'Renamed'); save();
+  check('rename persists without restart-required', () => assert.ok(profiles.doc().profiles[0].name === 'Renamed' && $('btnRestart').textContent === 'Restart'));
+  change('profileName', 'Unsaved rename');
+  w.__test.repeatTick();
+  check('retained save result never rebases later unsaved profile edits', () => assert.equal(w.__test.dirty(), true));
+  change('profileName', 'Renamed');
+  change('profileName', 'Untouched'); save();
+  check('duplicate name rejected at save and draft retained', () => assert.ok(w.__test.dirty() && $('cfgMsg').textContent.includes('duplicate') && profiles.doc().profiles[0].name === 'Renamed'));
+  change('profileName', 'Renamed');
+  $('btnProfileClone').click();
+  const copy = w.__test.doc().profiles.at(-1);
+  check('clone creates a distinct app-generated id and unique name', () => { assert.match(copy.id, /^p-\d+-[a-f0-9]{4}$/); assert.notEqual(copy.id, 'p1'); assert.notEqual(copy.name, 'Renamed'); });
+  check('clone preserves model and all options', () => { assert.deepEqual(clone(copy.model), profiles.doc().profiles[0].model); assert.deepEqual(clone(copy.options), profiles.doc().profiles[0].options); });
+  check('clone resets usage success failure and stamps creation', () => assert.ok(copy.meta.created_at && !copy.meta.last_used_at && !copy.meta.last_successful_launch && !copy.meta.last_failure));
+  save();
+  check('clone round-trips through config.save full ConfigDoc', () => assert.equal(profiles.doc().profiles.length, 3));
+  $('btnProfileRemove').click(); save();
+  check('remove deletes only selected profile', () => assert.ok(profiles.doc().profiles.length === 2 && !profiles.doc().profiles.some(p => p.id === copy.id)));
+  $('btnProfileAdd').click();
+  const added = w.__test.doc().profiles.at(-1);
+  check('add creates empty model ANE-enabled profile with metadata', () => assert.ok(added.model.source === 'none' && added.options.ane === true && added.meta.created_at));
+  w.document.querySelector('#profileModels [data-model-index="0"]').click();
+  check('model selection copies source id and local directory', () => assert.deepEqual(clone(w.__test.doc().profiles.at(-1).model), { source: 'lmstudio', id: 'org/model', dir: '/fixture/models/org/model' }));
+  save();
+  check('new profile model persists without activation', () => assert.ok(profiles.doc().active_profile === 'p1' && profiles.doc().profiles.at(-1).model.id === 'org/model'));
+  const pending = clone(w.__test.doc().profiles);
+  tick();
+  check('ticks preserve profile draft and selected editor', () => assert.deepEqual(clone(w.__test.doc().profiles), pending));
+  check('S6b detail and activation insertion seam exists', () => assert.ok($('profileDetailSlot') && $('profileActivationSlot')));
+  action('edit', 'p1');
+  $('profileName').focus(); $('profileName').value = 'Typing in progress'; tick();
+  check('tick never clobbers focused in-progress profile name', () => assert.equal($('profileName').value, 'Typing in progress'));
+  $('profileName').blur(); tick();
+  const fresh = profiles.doc().profiles.map(p => ({ ...p, meta: { ...p.meta, last_successful_launch: 'v1.3.0 · 2026-10-15T01:00:00Z' } }));
+  tick({ profiles: fresh });
+  check('last launch metadata renders from live tick', () => assert.match($('profileLaunchMeta').textContent, /v1.3.0/));
+  check('next explicit save carries latest launch metadata D15', () => assert.equal(w.__test.doc().profiles[0].meta.last_successful_launch, 'v1.3.0 · 2026-10-15T01:00:00Z'));
+  tick();
+  check('drafter override absent on module runtime', () => assert.equal($('profileDraftRow').hidden, true));
+  tick({ engine: { version: '1.3.1' } });
+  change('profileDraftModel', 'org/custom-dflash');
+  check('drafter override uses existing flat option field', () => assert.equal(w.__test.doc().profiles[0].options.draft_model, 'org/custom-dflash'));
+  w.__cfgValidate({ ok: true, profiles: [{ id: 'p1', eligibility: 'runnable', drafter: 'OVERRIDE — org/custom-dflash' }] });
+  check('validation response updates draft drafter verdict without saving', () => assert.match($('profileDrafter').textContent, /OVERRIDE.*custom-dflash/));
+  action('edit', 'p1'); change('profileName', '<img src=x onerror=alert(1)>'); tick();
+  check('profile names render as text never HTML', () => assert.equal($('profileList').querySelector('img'), null));
+  check('profile UI never renders raw API key', () => assert.ok(!w.document.documentElement.outerHTML.includes(secret)));
+  check('profile actions add no new bridge commands', () => assert.ok(profiles.commands.every(m => ['config.get', 'config.validate', 'config.save'].includes(m.cmd))));
+  action('edit', 'p1'); $('btnProfileRemove').click();
+  check('removing active clears persisted selection without activating another', () => assert.equal(w.__test.doc().active_profile, null));
+  check('removing first preserves remaining profile ANE option', () => assert.equal(w.__test.doc().profiles[0].options.ane, false));
+  while (w.__test.doc().profiles.length) { action('edit', w.__test.doc().profiles[0].id); $('btnProfileRemove').click(); }
+  check('empty list retains Add and hides profile editor', () => assert.ok($('btnProfileAdd') && $('profileEditor').hidden && rows().length === 0));
+} finally { profiles.close(); }
+
+const optionsPanel = panel();
+try {
+  const { w, $, change, flushTimers, drain, tick } = optionsPanel;
+  w.document.querySelector('[data-profile-act="edit"][data-id="p2"]').click();
+  check('versioned KV cache option renders', () => assert.ok($('option-kv_format')));
+  check('all option groups initially collapsed', () => assert.ok([...w.document.querySelectorAll('.option-group')].length > 0 && [...w.document.querySelectorAll('.option-group')].every(g => !g.classList.contains('open'))));
+  check('absent version option hidden', () => assert.equal($('option-state_format'), null));
+  check('requires unmet is disabled with actionable tip', () => assert.ok($('option-cache_dir').disabled && $('option-cache_dir').closest('[data-tip]').dataset.tip.includes('persistent_cache')));
+  const bars = [...w.document.querySelectorAll('.option-bar')]; bars[0].click();
+  check('option group toggles independently with transition', () => assert.ok(bars[0].parentElement.classList.contains('open') && !bars[1].parentElement.classList.contains('open') && html.includes('transition:max-height .45s')));
+  change('option-kv_format', 'invalid'); flushTimers();
+  check('invalid syntax blocks commit and marks field', () => assert.ok($('btnProfilesSave').disabled && $('option-kv_format').getAttribute('aria-invalid') === 'true'));
+  change('option-kv_format', 'bf16');
+  check('option edit reflected in full commit candidate', () => assert.equal(w.__test.doc().profiles[1].options.kv_format, 'bf16'));
+  check('group summary counts non-default edited values', () => assert.equal($('option-kv_format').closest('.option-group').querySelector('.option-count').textContent, '1 SET'));
+  check('commit disabled until debounce validation', () => assert.equal($('btnProfilesSave').disabled, true));
+  flushTimers();
+  check('valid dirty commit enabled', () => assert.equal($('btnProfilesSave').disabled, false));
+  $('btnProfileActivate').click(); drain();
+  check('activation commits draft and active id together', () => assert.ok(optionsPanel.doc().active_profile === 'p2' && optionsPanel.doc().profiles[1].options.kv_format === 'bf16'));
+  check('activation stamps last used and moves ACTIVE cap', () => assert.ok(optionsPanel.doc().profiles[1].meta.last_used_at && w.document.querySelectorAll('#profileList .profile-row')[1].textContent.includes('ACTIVE')));
+  check('activation immediately prompts with in-flight count', () => assert.ok(!$('profileRestartPrompt').hidden && $('profileRestartPrompt').textContent.includes('3 in-flight')));
+  check('activation changed plan requires restart without restarting', () => assert.ok($('btnRestart').textContent === 'RESTART TO APPLY' && !optionsPanel.commands.some(c => c.cmd === 'restart')));
+  $('btnProfileRestart').click();
+  check('explicit restart confirmation uses existing bridge', () => assert.equal(optionsPanel.commands.at(-1).cmd, 'restart'));
+  w.document.querySelector('[data-profile-act="edit"][data-id="p1"]').click();
+  $('btnProfileActivate').click(); drain();
+  check('reverting activation clears restart prompt', () => assert.ok(optionsPanel.doc().active_profile === 'p1' && $('profileRestartPrompt').hidden && $('btnRestart').textContent === 'Restart'));
+  tick({ option_defs: [{ key: 'state_format', flag: '--state-format', kind: 'value', group: 'memory', default: 'fp32', choices: ['fp32', 'bf16'], requires: [] }] });
+  check('runtime contract change refreshes visible options', () => assert.ok($('option-state_format') && !$('option-kv_format')));
+  check('downgrade visibility never drops saved option values', () => assert.equal(w.__test.doc().profiles[1].options.kv_format, 'bf16'));
+} finally { optionsPanel.close(); }
+
+const warningsPanel = panel();
+try {
+  const { w, $, tick } = warningsPanel;
+  // --- FALLBACK MAPPING CAP (S7 GWT) ---
+  check('no fallback cap when the mapping is exact', () => assert.ok($('engFallback').hidden && !$('engFallback').querySelector('.warn-cap')));
+  tick({ mapping_fallback: true, mapping_used: '1.3.2', engine: { path: '/fixture/kit', version: '1.3.9', valid: true, tried: ['/fixture/kit'] }, registry_report: { version: '1.3.9', missing_in_contract: ['--state-format'], missing_in_kit: ['--allow-idle-sleep'], unrecognized: [3] } });
+  check('fallback renders persistent peach cap with both versions', () => {
+    assert.ok(!$('engFallback').hidden);
+    const cap = $('engFallback').querySelector('.warn-cap');
+    assert.ok(cap);
+    assert.match(cap.textContent, /FALLBACK MAPPING v1\.3\.2 for engine v1\.3\.9/);
+  });
+  check('fallback cap carries registry report and actionable fix in data-tip', () => {
+    const tip = $('engFallback').querySelector('.warn-cap').dataset.tip || '';
+    assert.match(tip, /1\.3\.2/);
+    assert.match(tip, /1\.3\.9/);
+    assert.match(tip, /--state-format/);
+    assert.match(tip, /allow-idle-sleep/);
+    assert.match(tip, /unrecognized/);
+    assert.match(tip, /Run a matching engine v1\.3\.2|update the mapping registry/);
+  });
+  tick({ mapping_fallback: false, mapping_used: '1.3.0', registry_report: null, engine: { path: '/fixture/kit-1.3.0', version: '1.3.0', valid: true, tried: ['/fixture/kit-1.3.0'] } });
+  check('fallback cap clears when the mapping is exact again', () => assert.ok($('engFallback').hidden && !$('engFallback').querySelector('.warn-cap')));
+  // --- UNRUNNABLE CAP (S7 GWT) ---
+  w.document.querySelector('[data-profile-act="edit"][data-id="p2"]').click();
+  w.document.querySelector('#profileModels [data-model-index="1"]').click(); // assembly model with a reason
+  const unrunnableRow = [...w.document.querySelectorAll('#profileList .profile-row')].find(r => r.textContent.includes('Untouched'));
+  check('unrunnable profile row shows peach UNRUNNABLE cap with reason', () => {
+    const cap = unrunnableRow.querySelector('.profile-cap.unrunnable');
+    assert.ok(cap);
+    assert.match(cap.textContent, /UNRUNNABLE/);
+    assert.match(cap.textContent, /missing draft\/config\.json/);
+  });
+  check('unrunnable cap data-tip carries the actionable fix', () => {
+    const cap = unrunnableRow.querySelector('.profile-cap.unrunnable');
+    assert.match(cap.dataset.tip || '', /missing draft\/config\.json/);
+    assert.ok(!cap.classList.contains('runnable'));
+  });
+  // --- STALE OPTIONS (S7 GWT: preserved, dimmed, warning cap) ---
+  check('stale option key renders dimmed disabled in its own group', () => {
+    const group = w.document.querySelector('.stale-group');
+    assert.ok(group);
+    const row = group.querySelector('.stale-row');
+    assert.match(row.textContent, /ane/);
+    const input = row.querySelector('input');
+    assert.ok(input.disabled);
+    assert.match(input.value, /false/);
+    assert.ok(row.querySelector('.profile-cap'), 'preserved-kept marker');
+  });
+  check('stale group bar carries peach STALE warn-cap and actionable fix tip', () => {
+    const group = w.document.querySelector('.stale-group');
+    const cap = group.querySelector('.warn-cap');
+    assert.match(cap.textContent, /STALE/);
+    assert.match(group.dataset.tip || '', /preserved/i);
+  });
+  check('stale option value is preserved in the commit candidate, not dropped', () => assert.ok('ane' in w.__test.doc().profiles[1].options));
+  check('stale group toggles with its launcher bar', () => {
+    const group = w.document.querySelector('.stale-group');
+    const bar = group.querySelector('.stale-bar');
+    bar.click();
+    assert.ok(group.classList.contains('open'));
+    bar.click();
+    assert.ok(!group.classList.contains('open'));
+  });
+  tick({ option_defs: [{ key: 'kv_format', flag: '--kv-format', kind: 'value', group: 'memory', default: 'int8', choices: ['int8', 'bf16'], requires: [] }, { key: 'ane', flag: '--disable-ane', kind: 'bool', group: 'compute', default: true, choices: [], requires: [] }] });
+  check('stale option clears when the mapping comes to know the key', () => assert.equal(w.document.querySelector('.stale-group'), null));
+  // --- THEME INARIANTS (D3/D4, D9) ---
+  check('settings accent stays channel-06 blue #4455ff', () => assert.match(html, /\.settings-panel\s*\{[^}]*--accent:\s*#4455ff/));
+  check('warning caps use the peach warning color at 14px pill geometry', () => {
+    assert.match(html, /\.warn-cap\s*\{[^}]*var\(--peach\)/);
+    assert.match(html, /\.warn-cap\s*\{[^}]*border-radius:\s*14px/);
+    assert.match(html, /\.profile-cap\s*\{[^}]*border-radius:\s*14px/);
+  });
+  check('no ENV OVERRIDE cap exists (D9)', () => {
+    assert.ok(!w.document.documentElement.outerHTML.includes('ENV OVERRIDE'));
+    assert.ok(!/env\s*override/i.test(html));
+  });
+  check('no exact-duplicate .section-heading rule (theme dedup)', () => {
+    const matches = html.match(/\.section-heading, section > \.label:first-child/g);
+    assert.equal((matches || []).length, 1);
+  });
+} finally { warningsPanel.close(); }
+
+const native = readFileSync(new URL('../../Sources/main.swift', import.meta.url), 'utf8');
+check('native menu exposes ordered status/settings/separator/quit actions', () => {
+  assert.match(native, /sendAction\(on: \[\.leftMouseUp, \.rightMouseUp\]\)/);
+  assert.match(native, /withTitle: "Open Status"[\s\S]*#selector\(openStatus\)[\s\S]*withTitle: "Settings…"[\s\S]*#selector\(openSettings\)[\s\S]*menu\.addItem\(\.separator\(\)\)[\s\S]*withTitle: "Quit SplashUI"[\s\S]*#selector\(quitApp\)/);
+  assert.match(native, /func openSettings\(\)[\s\S]*?showPanel\(view: "settings"\)/);
+  assert.match(native, /func openStatus\(\)[\s\S]*?showPanel\(\)/);
+});
+const failed = results.filter(result => !result.pass).length;
+console.log(JSON.stringify({ suite: 'panel-jsdom', assertions: results.length, passed: results.length - failed, failed }));
+process.exitCode = failed ? 1 : 0;

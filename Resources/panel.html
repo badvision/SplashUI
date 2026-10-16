@@ -22,6 +22,17 @@ body {
   width: 100%; padding: 10px; text-transform: uppercase; overflow-x: hidden;
   -webkit-user-select: none; user-select: none;
 }
+body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+.screen { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+[hidden] { display: none !important; }
+#footer { flex-shrink: 0; }
+#header .title { padding-right: 42px; }
+#btnSettings { position: absolute; right: 10px; top: 4px; width: 26px; height: 20px; background: var(--bg); border-radius: 0 10px 10px 0; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 4px 6px; color: var(--gray-dim); }
+#btnSettings span { height: 2px; width: 14px; border-radius: 0 2px 2px 0; background: currentColor; }
+#btnSettings:hover { color: var(--teal); }
+#btnSettings:focus-visible, #btnStatus:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
+#settingsHeader { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: #4455ff; font-family: var(--display); font-size: 25px; }
+#btnStatus { background: #4455ff; color: var(--bg); border-radius: 14px 0 0 14px; min-width: 64px; padding: 6px 10px 2px; font-size: 16px; }
 /* Flat instrument fields, separated by the LCARS rail rather than cards. */
 .row { display: flex; gap: 8px; margin-bottom: 4px; align-items: stretch; }
 .col { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -50,10 +61,60 @@ section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 
 .cache-panel { --accent: var(--teal); }
 .memory-panel { --accent: var(--peach); }
 .requests-panel { --accent: var(--lavender); }
+.settings-panel { --accent: #4455ff; }
+/* S5 settings form: the rail stays blue (#4455ff, channel 06) — S7 is the final theme pass. */
+.settings-panel .sec-h { color: var(--accent); font-family: var(--display); font-size: 14px; letter-spacing: .12em; display: flex; justify-content: space-between; align-items: center; margin: 8px 0 4px; }
+.settings-panel .sec-h span { color: var(--gray); font-size: 11px; letter-spacing: .08em; }
+.capbtns { display: flex; }
+.capbtns .cb { min-height: 22px; padding: 4px 16px 1px; font-size: 13px; background: var(--track); color: var(--gray); }
+.capbtns .cb.on { background: #4455ff; color: var(--bg); }
+.capbtns .cb:first-child { border-radius: 14px 0 0 14px; }
+.capbtns .cb:last-child { border-radius: 0 14px 14px 0; }
+.settings-panel input[type=text], .settings-panel input[type=number] {
+  flex: 1; min-width: 0; background: var(--track); color: var(--white); border: none;
+  padding: 5px 8px; font: inherit; letter-spacing: .04em; border-radius: 0;
+}
+.settings-panel input:focus-visible { outline: 2px solid #4455ff; outline-offset: 1px; }
+.settings-panel .mini { min-height: 22px; padding: 3px 10px 1px; font-size: 12px; background: var(--track); color: var(--white); }
+.settings-panel .mini:hover { filter: brightness(1.25); }
+.settings-panel .mini.del { background: rgba(221,68,68,.25); color: var(--red); }
+.frow { display: flex; gap: 6px; margin-bottom: 4px; align-items: stretch; }
+.frow .fname { background: #4455ff; color: var(--bg); display: flex; align-items: center; padding: 3px 10px 1px; font-size: 12px; min-width: 78px; max-width: 120px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 700; }
+.frow .fstat { color: var(--green); } .frow .fstat.miss { color: var(--red); } .frow .fstat.scan { color: var(--yellow); }
+.frow .fmeta { flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: 8px; color: var(--gray); font-size: 10px; overflow: hidden; white-space: nowrap; }
+.tried { color: var(--gray-dim); font-size: 10px; line-height: 1.4; margin: 2px 0 0 6px; text-transform: none; letter-spacing: 0; font-family: "Avenir Next", "Helvetica Neue", sans-serif; font-weight: 400; word-break: break-all; }
+.engpath { color: var(--teal); font-size: 11px; margin: 0 0 2px 6px; text-transform: none; letter-spacing: 0; font-family: "Avenir Next", "Helvetica Neue", sans-serif; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#cfgMsg { color: var(--gray); font-size: 11px; margin: 6px 0 0 6px; }
+#cfgMsg.ok { color: var(--green); } #cfgMsg.err { color: var(--red); }
+.profile-row { border-top: 3px solid var(--bg); padding: 6px 0; background: var(--bg2); }
+.profile-row .frow { gap: 8px; flex-wrap: wrap; }
+.profile-meta { color: var(--gray); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.profile-chip { color: var(--teal); font-size: 11px; overflow-wrap: anywhere; }
+.profile-cap { background: var(--peach); color: var(--bg); border-radius: 14px; padding: 2px 8px; font-size: 11px; }
+.profile-cap.runnable { background: var(--teal); }
+.profile-cap.unrunnable { background: var(--peach); }
+.warn-cap { background: var(--peach); color: var(--bg); border-radius: 14px; padding: 2px 8px; font-size: 11px; display: inline-flex; align-items: center; }
+#engFallback { margin: 6px 0 0 3px; }
+.stale-group { margin: 8px 0; }
+.stale-bar { display: flex; justify-content: space-between; align-items: center; width: 100%; background: var(--track); color: var(--gray-dim); border-radius: 0 14px 14px 0; padding: 4px 10px; font-size: 11px; text-align: left; font-family: var(--display); letter-spacing: .1em; cursor: pointer; border: none; }
+.stale-bar[aria-expanded="true"] { background: var(--accent); color: var(--bg); }
+.stale-body { display: none; padding: 4px 0; }
+.stale-group.open .stale-body { display: block; }
+.stale-row { display: flex; align-items: center; gap: 8px; margin: 6px 0 6px 3px; color: var(--gray-dim); font-size: 11px; }
+.stale-row label { flex: 1; }
+.stale-row input { width: 140px; }
+.profile-model { display: block; width: 100%; text-align: left; background: var(--track); color: var(--white); padding: 6px 8px; margin: 6px 0; border-radius: 0 14px 14px 0; }
+#profileModels { max-height: 220px; overflow-y: auto; }
+#profileModels[hidden], #profileEditor[hidden] { display: none; }
+#profileDrafter { margin: 6px 0; }
+#cfgModal { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; background: rgba(3,3,6,.72); }
+#cfgModal .card { width: 420px; background: var(--bg2); border-top: 6px solid #4455ff; padding: 18px 20px 14px; }
+#cfgModal .card h3 { color: #4455ff; font-family: var(--display); font-size: 18px; letter-spacing: .12em; margin-bottom: 8px; }
+#cfgModal .card p { color: var(--white); text-transform: none; letter-spacing: 0; font-size: 11px; line-height: 1.5; margin-bottom: 14px; font-family: "Avenir Next", "Helvetica Neue", sans-serif; font-weight: 400; }
+#cfgModal .card .btns { display: flex; justify-content: flex-end; gap: 8px; }
 .section-heading, section > .label:first-child { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 0 0 5px; color: var(--accent); font-family: var(--display); font-size: 14px; letter-spacing: .12em; line-height: 1; }
 .section-heading h2 { font: inherit; }
 .section-heading span { color: var(--gray); font-size: 11px; letter-spacing: .08em; }
-.section-heading, section > .label:first-child { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 0 0 5px; color: var(--accent); font-family: var(--display); font-size: 14px; letter-spacing: .12em; line-height: 1; }
 /* Black breaks turn the meters into LCARS segments without changing their scale. */
 .track, .bar, .seg { position: relative; background: var(--track); border-radius: 0 7px 7px 0; height: 14px; overflow: hidden; }
 .track { flex: 1; }
@@ -82,6 +143,16 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 #pidPill { display: inline-flex; }
 #pidPill .h, #envPill { background: #888; color: #000; font-family: var(--display); letter-spacing: .08em; min-height: 28px; padding: 6px 10px 2px; font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; text-transform: uppercase; }
 #pidLabel { border-radius: 14px 0 0 14px; }
+.option-bar { display:flex; justify-content:space-between; width:100%; background:#4455ff; color:var(--white); border-radius:14px 0 0 14px; padding:4px 10px; font-size:14px; }
+.option-group { margin:8px 0; }
+.option-body { max-height:0; overflow:hidden; transition:max-height .45s ease; }
+.option-group.open > .option-body { max-height:1600px; }
+.option-body .frow { margin:6px 0; }
+.option-body label { flex:1; font-size:11px; }
+.option-body input { width:140px; }
+.option-body input[aria-invalid="true"] { border-bottom:1px solid var(--red); }
+.option-body [disabled], .option-body .unmet { color:var(--gray-dim); }
+#profileRestartPrompt { margin:8px 0; padding:8px; border-left:6px solid var(--peach); font-size:11px; }
 #pidNum { border-radius: 0 14px 14px 0; margin-left: 3px; }
 #envPill { border-radius: 14px; margin-left: 5px; }
 #tip { position: fixed; display: none; z-index: 10; pointer-events: none;
@@ -95,10 +166,13 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 </style>
 </head>
 <body>
+<main id="statusView" class="screen" aria-label="Status">
+<div id="statusContent">
 <div id="header">
   <div class="title" id="hName">Splash interface control</div>
   <div class="model" id="hModel">—</div>
   <div class="pill g" id="statusPill" data-tip="Engine state — DOWN: no server · LAUNCH FAIL: engine could not start (see error below, auto-retries) · LOADING: model loading · PREFILL: prompt being processed · DECODE: generating output · QUEUED: waiting for resources · IDLE: no work · RESTART: app is restarting the server">WAITING</div>
+  <button id="btnSettings" aria-label="Open Settings" data-tip="Open Settings"><span></span><span></span><span></span></button>
 </div>
 
 <section class="performance" data-channel="01" aria-label="Performance">
@@ -178,7 +252,87 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
     <tbody id="recentBody"></tbody>
   </table>
 </section>
+</div>
+</main>
+<main id="settingsView" class="screen" aria-label="Settings" hidden>
+<div id="settingsHeader"><button id="btnStatus" data-tip="Return to live status">Status</button><h1 style="font:inherit">Settings</h1></div>
 
+<section class="settings-panel" data-channel="06" aria-label="Settings">
+  <div class="sec-h" data-tip="Global configuration (config.json). Changes apply after an engine restart when flagged.">Global Settings<span>config.json</span></div>
+  <div class="sec-h" data-tip="Engine discovery: Auto walks the documented ladder (manual path, install root, Homebrew, kit registry); Manual uses exactly the path you give it."><span>Engine</span></div>
+  <div class="frow">
+    <div class="capbtns">
+      <button class="cb" id="capAuto">Auto</button>
+      <button class="cb" id="capManual">Manual</button>
+    </div>
+    <input type="text" id="manualPath" placeholder="kit directory…" data-tip="The kit directory (release.json + server/) — manual mode only.">
+    <button class="mini" id="btnBrowseEngine" data-tip="Pick the engine kit directory">Browse</button>
+  </div>
+  <div class="frow">
+    <span class="engpath" id="engPath" style="flex:1;min-width:0;margin:0" data-tip="The resolved kit directory the engine actually runs (Auto discovery result or your Manual path)."></span>
+    <b id="vCfg" style="color:var(--teal)">—</b>
+    <b id="engValid" style="color:var(--green)">—</b>
+  </div>
+  <div class="tried" id="engTried"></div>
+  <div class="tried" id="engFallback" hidden></div>
+  <div class="sec-h" data-tip="Where the app discovers models. Each folder is scanned in the background; PRESENT/MISSING reflects the directory, the count the models found."><span>Model folders</span></div>
+  <div id="folderList"></div>
+  <div class="frow">
+    <input type="text" id="folderPath" placeholder="add a model folder path…">
+    <button class="mini" id="btnBrowseFolder" data-tip="Pick a model folder directory">Browse</button>
+    <button class="mini" id="btnAddFolder" data-tip="Add this path as a new model folder">Add</button>
+  </div>
+  <div class="sec-h" data-tip="Server port (127.0.0.1). The running engine is adopted if it is already serving the port."><span>Network</span></div>
+  <div class="frow">
+    <label style="color:var(--gray);font-family:var(--display)">Port</label>
+    <input type="number" id="cfgPort" min="1" max="65535">
+    <label style="color:var(--gray);font-family:var(--display)">API key</label>
+    <input type="text" id="cfgKey" readonly data-tip="The API key (env-only, never on argv). Masked on load — the raw value never renders in the DOM.">
+  </div>
+  <div class="sec-h" data-tip="Apple Neural Engine: all available compute cores. Required for the standalone splash — keep it ON."><span>Compute</span></div>
+  <div class="frow">
+    <div class="capbtns">
+      <button class="cb on" id="aneOn">ANE On</button>
+      <button class="cb" id="aneOff">Off</button>
+    </div>
+  </div>
+  <div class="frow" style="margin-top:8px">
+    <button class="btn" id="btnCfgSave" style="background:#4455ff;color:var(--bg);flex:1;border-radius:0 14px 14px 0">Save</button>
+    <span id="cfgMsg" style="min-width:0"></span>
+  </div>
+</section>
+<div id="profilesSlot">
+<section class="settings-panel" aria-label="Profiles">
+  <div class="sec-h">Profiles<button class="mini" id="btnProfileAdd">Add profile</button></div>
+  <div id="profileList"></div>
+  <div id="profileEditor" hidden>
+    <div class="sec-h">Profile editor<span>draft · Save to commit</span></div>
+    <div class="frow"><label for="profileName">Name</label><input type="text" id="profileName" aria-label="Profile name"><button class="mini" id="btnProfileClone">Clone</button><button class="mini del" id="btnProfileRemove">Remove</button></div>
+    <button class="mini" id="btnProfileModels" aria-expanded="false">Choose model</button>
+    <div id="profileModels" hidden></div>
+    <div class="profile-chip" id="profileDrafter"></div>
+    <div class="frow" id="profileDraftRow"><label for="profileDraftModel">Draft override</label><input type="text" id="profileDraftModel" placeholder="HF repo or local directory" data-tip="1.3.1+ --draft-model; family comes from the model config, never the repo name."></div>
+    <div class="profile-meta" id="profileLaunchMeta"></div>
+    <div id="profileDetailSlot"></div>
+    <button class="mini" id="btnProfilesSave">Commit</button>
+  </div>
+    <div id="profileActivationSlot"><button class="mini" id="btnProfileActivate">Activate profile</button>
+      <div id="profileRestartPrompt" hidden><span id="profileRestartText"></span><button class="mini" id="btnProfileRestart">Confirm restart</button></div>
+    </div>
+</section>
+</div>
+</main>
+
+<div id="cfgModal">
+  <div class="card">
+    <h3>First run</h3>
+    <p>Welcome. Your engine kit, model folders and launch options live on the <b>Settings</b> screen. Point the app at your 1.3.0 kit and a model folder, then save. Apply changes with the explicit Restart control.</p>
+    <div class="btns">
+      <button class="btn" id="modalDismiss" style="background:var(--track);color:var(--white)">Later</button>
+      <button class="btn" id="modalCta" style="background:#4455ff;color:var(--bg)">Open Settings</button>
+    </div>
+  </div>
+</div>
 <div id="footer">
   <button class="btn gr" id="btnStart">Start</button>
   <button class="btn y" id="btnRestart">Restart</button>
@@ -193,6 +347,15 @@ const g = (b) => b >= 1073741824 ? (b/1073741824).toFixed(1)+" GiB" : b >= 10485
 const n = (v) => v == null ? "—" : v >= 1e6 ? (v/1e6).toFixed(1)+"M" : v >= 1e3 ? (v/1e3).toFixed(1)+"K" : String(v);
 const nn = (v) => v == null ? "—" : v;
 const ms = (v) => v == null ? "—" : v >= 60000 ? (v/60000).toFixed(1)+" min" : v >= 1000 ? (v/1000).toFixed(1)+" s" : v.toFixed(0)+" ms";
+// View state stays local to this single WebView; switching never rebuilds the draft.
+window.showView = function(view) {
+  const settings = view === "settings";
+  $("statusView").hidden = settings;
+  $("settingsView").hidden = !settings;
+  $(settings ? "settingsView" : "statusView").scrollTop = 0;
+};
+$("btnSettings").onclick = () => window.showView("settings");
+$("btnStatus").onclick = () => window.showView("status");
 
 function setT(id, v){ $(id).textContent = v == null || v === "" ? "—" : v; }
 
@@ -331,8 +494,17 @@ function render(){
   // footer
   $("pidNum").textContent = S.server && S.server.pid ? S.server.pid : "—";
   $("envPill").textContent = S.server && S.server.pid ? (S.server.launched_by_app ? "APP-MANAGED" : "EXTERNAL") : "NOT RUNNING";
-  const h = document.body.scrollHeight;
-  if (h !== lastH) { lastH = h; try { window.webkit.messageHandlers.size.postMessage(h) } catch(e) {} }
+  // D13: a config change that the running engine doesn't yet apply flags
+  // cfg.restart_required — the footer button says so until a restart clears it.
+  const rr = S.cfg && S.cfg.restart_required === true;
+  $("btnRestart").textContent = rr ? "RESTART TO APPLY" : "Restart";
+  cfRender();
+  cfFirstRun();
+  // Only status content determines panel geometry; settings scrolls within it.
+  if (!$("statusView").hidden) {
+    const h = $("statusContent").scrollHeight + $("footer").offsetHeight + 20;
+    if (h !== lastH) { lastH = h; try { window.webkit.messageHandlers.size.postMessage(h) } catch(e) {} }
+  }
 }
 function up(s){ s=Math.max(0,s|0); const h=s/3600|0, m=(s%3600)/60|0, ss=s%60; return (h?h+"h ":"")+(m?m+"m ":"")+ss+"s"; }
 function drawSpark(){
@@ -343,11 +515,369 @@ function drawSpark(){
   hist.forEach((v,i)=>{ const px = i/(89)*c.width, py = c.height - v/max*(c.height-4) - 2; i?x.lineTo(px,py):x.moveTo(px,py); });
   x.stroke();
 }
-window.update = d => { S = d; render(); };
-const cmd = c => { try { window.webkit.messageHandlers.cmd.postMessage(c); } catch(e) {} };
+window.update = d => { if (!("cfg" in d) && S && S.cfg) d.cfg = S.cfg; S = d; render(); };
+const cmd = (c, args) => { try { window.webkit.messageHandlers.cmd.postMessage(Object.assign({ cmd: c }, args || {})); } catch(e) {} };
+let cfgDoc = null, cfgSaveResult = null, cfgValidateResult = null;
+window.__cfgGet = d => { cfgDoc = d; cfInit(d); };
+window.__cfgSave = r => { cfgSaveResult = r; };
+window.__cfgValidate = r => {
+  if (r.validation_id != null && r.validation_id !== CF.validationID) return;
+  cfgValidateResult = r; CF.validated = CF.validationBaseline || JSON.stringify(CF.draft); CF.verdicts = r.profiles || [];
+  if (r.option_defs) CF.optionDefs = r.option_defs;
+  if (!r.ok) cfMsg((r.errors || []).join("; "), "err");
+  cfRenderProfiles();
+};
 $("btnStart").onclick = () => cmd("start");
 $("btnStop").onclick = () => cmd("stop");
-$("btnRestart").onclick = () => cmd("restart");
+$("btnRestart").onclick = () => { if (S.cfg && S.cfg.restart_required === true) { showView("settings"); cfRenderProfiles(); $("profileRestartPrompt").scrollIntoView(); } else cmd("restart"); };
+
+// ---- S5: global settings (channel 06) + first-run modal (D10) ----
+const CF = { doc: null, draft: null, baseline: "", validateTimer: null, firstRunShown: false };
+
+function cfDraft(doc) {
+  const g = doc.globals || {};
+  const p = (doc.profiles || [])[0] || {};
+  return { engineMode: (g.engine && g.engine.mode) || "auto",
+           manualPath: (g.engine && g.engine.manual_path) || "",
+           port: g.port || 8123,
+           folders: (g.model_folders || []).map(f => Object.assign({}, f)),
+           ane: (p.options && p.options.ane !== undefined) ? p.options.ane : true,
+           profiles: JSON.parse(JSON.stringify(doc.profiles || [])), activeProfile: doc.active_profile };
+}
+
+// The whole doc, raw (the tick payload only carries the mask — the raw api_key
+// must round-trip untouched, so save edits CF.doc, never a reconstructed doc).
+function cfBuildDoc() {
+  const d = JSON.parse(JSON.stringify(CF.doc));
+  const dr = CF.draft;
+  d.globals.engine.mode = dr.engineMode;
+  d.globals.engine.manual_path = dr.engineMode === "manual" ? dr.manualPath : null;
+  d.globals.port = dr.port;
+  d.globals.model_folders = dr.folders;
+  d.profiles = JSON.parse(JSON.stringify(dr.profiles));
+  d.active_profile = dr.activeProfile;
+  d.profiles.forEach(p => { p.meta = cfProfileMeta(p); });
+  if (d.profiles && d.profiles.length) {
+    if (!d.profiles[0].options) d.profiles[0].options = {};
+    d.profiles[0].options.ane = dr.ane;
+  }
+  return d;
+}
+
+function cfSyncForm() {
+  const d = CF.draft;
+  $("capAuto").classList.toggle("on", d.engineMode === "auto");
+  $("capManual").classList.toggle("on", d.engineMode === "manual");
+  if ($("manualPath").value !== d.manualPath) $("manualPath").value = d.manualPath;
+  if ($("manualPath").disabled !== (d.engineMode !== "manual")) $("manualPath").disabled = d.engineMode !== "manual";
+  if ($("cfgPort").value != String(d.port)) $("cfgPort").value = d.port;
+  $("aneOn").classList.toggle("on", d.ane);
+  $("aneOff").classList.toggle("on", !d.ane);
+}
+
+function cfRenderFolders() {
+  $("folderList").innerHTML = CF.draft.folders.map((f, i) => {
+    const st = (S.cfg && S.cfg.folders || []).find(x => x && x.id === f.id);
+    const scanning = st && st.scanning === true;
+    const present = st && st.present === true;
+    const missing = st && st.present === false;
+    const models = st && Array.isArray(st.models) ? st.models : null;
+    let stat = "…", cls = "scan";
+    if (scanning) { stat = "SCANNING"; }
+    else if (present) { stat = "PRESENT"; cls = ""; }
+    else if (missing) { stat = "MISSING"; cls = "miss"; }
+    const count = models === null ? "" : (models.length + " model" + (models.length === 1 ? "" : "s"));
+    return '<div class="frow"><span class="fname" title="'+f.path+'">'+f.id+'</span>'+
+      '<span class="fstat '+cls+'" style="min-width:74px">'+stat+'</span>'+
+      '<span class="fmeta">'+count+
+      '<button class="mini" data-act="scan" data-i="'+i+'" data-tip="Force-rescan this folder">Scan</button>'+
+      '<button class="mini del" data-act="del" data-i="'+i+'" data-tip="Remove this folder from the registry">Del</button>'+
+      '</span></div>';
+  }).join("");
+}
+
+function cfDirty() { return JSON.stringify(CF.draft) !== CF.baseline; }
+
+function cfMsg(text, kind) {
+  const m = $("cfgMsg");
+  m.textContent = text;
+  m.className = kind || "";
+}
+
+function cfValidate() {
+  if (!cfDirty()) { cfMsg("", ""); return; }
+  CF.validationBaseline = JSON.stringify(CF.draft);
+  cmd("config.validate", { doc: cfBuildDoc(), validation_id: CF.validationID });
+}
+function cfDebouncedValidate() {
+  CF.validated = null; cfgValidateResult = null;
+  CF.validationID = (CF.validationID || 0) + 1; CF.validationBaseline = null;
+  if (CF.validateTimer) clearTimeout(CF.validateTimer);
+  CF.validateTimer = setTimeout(cfValidate, 400);
+}
+
+function cfSave() {
+  if (!cfDirty()) { cfMsg("No changes", ""); return; }
+  if (CF.saving) return;
+  CF.previousResult = S.cfg && S.cfg.result;
+  CF.pendingDoc = cfBuildDoc(); CF.pendingBaseline = JSON.stringify(CF.draft); CF.saving = true;
+  cmd("config.save", { doc: CF.pendingDoc });
+  cfMsg("Saving…", "");
+}
+
+// One-time population from the raw doc (config.get), then the draft is ours.
+function cfInit(doc) {
+  if (CF.draft) { window.__cfgReady = true; return; }
+  window.__cfgReady = true;
+  CF.doc = doc;
+  CF.draft = cfDraft(doc);
+  CF.profileId = doc.active_profile || doc.profiles[0]?.id;
+  CF.baseline = JSON.stringify(CF.draft);
+  cfSyncForm();
+  $("cfgKey").value = "· · · · · · · ·";  // masked; the raw key never renders
+}
+
+function cfRender() {
+  const cfg = S.cfg;
+  if (!cfg) return;
+  const e = cfg.engine || {};
+  $("vCfg").textContent = e.version || "—";
+  const valid = e.valid;
+  const ev = $("engValid");
+  if (valid === true) { ev.textContent = "VALID"; ev.style.color = "var(--green)"; ev.removeAttribute("data-tip"); }
+  else if (valid === false) { ev.textContent = "ERROR"; ev.style.color = "var(--red)"; ev.setAttribute("data-tip", String(e.error || "")); }
+  else { ev.textContent = "—"; ev.style.color = ""; }
+  $("engPath").textContent = e.path || e.manual_path || "";
+  const tried = Array.isArray(e.tried) ? e.tried : [];
+  $("engTried").textContent = tried.length ? "ladder: " + tried.join(" → ") : "";
+  const fb = $("engFallback");
+  if (cfg.mapping_fallback === true) {
+    const used = cfg.mapping_used || "?", actual = e.version || "?";
+    fb.hidden = false;
+    fb.innerHTML = '<span class="warn-cap" data-tip="' + cfEscape(cfRegistryReport(cfg.registry_report, used, actual)) + '">FALLBACK MAPPING v' + cfEscape(used) + ' for engine v' + cfEscape(actual) + '</span>';
+  } else { fb.hidden = true; fb.innerHTML = ""; }
+  // Only a pending save may rebase: telemetry retains cfg between change-gated ticks.
+  if (CF.saving && cfg.result && cfg.result !== CF.previousResult && cfg.result.ok === true) {
+    CF.saving = false;
+    CF.doc = CF.pendingDoc;
+    CF.baseline = CF.pendingBaseline;
+    if (CF.activating) {
+      CF.draft.activeProfile = cfg.active_profile;
+      CF.pendingDoc.active_profile = cfg.active_profile;
+      CF.pendingDoc.profiles.forEach(p => { p.meta = cfProfileMeta(p); });
+      CF.doc = CF.pendingDoc; CF.baseline = JSON.stringify(CF.draft); CF.activating = false;
+    }
+    cfMsg("Saved — " + (cfg.restart_required === true ? "restart to apply" : "applied on next launch"), "ok");
+  } else if (CF.saving && cfg.result && cfg.result !== CF.previousResult && cfg.result.ok === false) {
+    CF.saving = false; CF.activating = false;
+    cfMsg((cfg.result.errors || []).join("; "), "err");
+  }
+  // A browse pick is consumed on exactly one tick.
+  if (cfg.picked && typeof cfg.picked === "object") {
+    const pk = cfg.picked;
+    if (pk.context === "engine") { CF.draft.manualPath = pk.path; cfSyncForm(); cfDebouncedValidate(); }
+    else if (pk.context === "model_folder") { $("folderPath").value = pk.path; }
+  }
+  cfRenderFolders();
+  cfRenderProfiles();
+}
+
+$("capAuto").onclick = () => { CF.draft.engineMode = "auto"; cfSyncForm(); cfDebouncedValidate(); };
+$("capManual").onclick = () => { CF.draft.engineMode = "manual"; cfSyncForm(); cfDebouncedValidate(); };
+$("manualPath").onchange = () => { CF.draft.manualPath = $("manualPath").value; cfDebouncedValidate(); };
+$("btnBrowseEngine").onclick = () => cmd("browse", { context: "engine" });
+$("cfgPort").onchange = () => { const v = parseInt($("cfgPort").value, 10); if (v > 0 && v < 65536) { CF.draft.port = v; cfDebouncedValidate(); } };
+function cfSetAne(value) { CF.draft.ane = value; if (CF.draft.profiles[0]) CF.draft.profiles[0].options.ane = value; cfSyncForm(); cfProfileChanged(); }
+$("aneOn").onclick = () => cfSetAne(true);
+$("aneOff").onclick = () => cfSetAne(false);
+$("btnBrowseFolder").onclick = () => cmd("browse", { context: "model_folder" });
+$("btnAddFolder").onclick = () => {
+  const p = $("folderPath").value.trim();
+  if (!p) return;
+  let id = "folder" + (CF.draft.folders.length + 1);
+  while (CF.draft.folders.some(f => f.id === id)) id = id.slice(0, -1) + (parseInt(id.slice(-1), 10) + 1);
+  CF.draft.folders.push({ id, path: p, source: "manual" });
+  $("folderPath").value = "";
+  cfDebouncedValidate();
+};
+$("folderList").onclick = (ev) => {
+  const b = ev.target && ev.target.closest ? ev.target.closest("[data-act]") : null;
+  if (!b) return;
+  const i = parseInt(b.dataset.i, 10);
+  if (b.dataset.act === "del") { CF.draft.folders.splice(i, 1); cfDebouncedValidate(); }
+  else if (b.dataset.act === "scan") { const f = CF.draft.folders[i]; if (f) cmd("config.scan", { id: f.id }); }
+};
+$("btnCfgSave").onclick = cfSave;
+
+// ---- S6a: profile draft CRUD; the only writer remains config.save. ----
+function cfSelectedProfile() { return CF.draft && CF.draft.profiles.find(p => p.id === CF.profileId); }
+function cfProfileMeta(p) {
+  const saved = S && S.cfg && (S.cfg.profiles || []).find(v => v.id === p.id);
+  return Object.assign({}, p.meta, saved ? saved.meta : {});
+}
+function cfEscape(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[c])); }
+function cfModels() {
+  const ids = new Set(CF.draft.folders.map(f => f.id));
+  return (S.cfg.folders || []).filter(f => ids.has(f.id)).flatMap(f => (f.models || []).filter(m => m && typeof m === "object"));
+}
+// S7: the registry report behind a fallback mapping, rendered as an actionable tip.
+function cfRegistryReport(report, used, actual) {
+  const bits = [];
+  if (report && typeof report === "object") {
+    if (report.missing_in_contract && report.missing_in_contract.length) bits.push("mapping lacks: " + report.missing_in_contract.join(", "));
+    if (report.missing_in_kit && report.missing_in_kit.length) bits.push("kit lacks: " + report.missing_in_kit.join(", "));
+    if (report.unrecognized && report.unrecognized.length) bits.push("kit declares unrecognized: " + report.unrecognized.join(", "));
+  }
+  const detail = bits.length ? bits.join("; ") + ". " : "";
+  return "Running on the latest authored mapping v" + used + " because engine v" + actual + " is not in the version registry." + detail + "Run a matching engine v" + used + " or update the mapping registry to clear this.";
+}
+function cfProfileFacts(p) {
+  const preview = (CF.verdicts || []).find(v => v.id === p.id);
+  if (preview) return preview;
+  const saved = (S.cfg.profiles || []).find(v => v.id === p.id);
+  if (saved && ['source', 'id', 'dir'].every(k => (saved.model[k] || null) === (p.model[k] || null)) && JSON.stringify(saved.options) === JSON.stringify(p.options)) return saved;
+  return cfModels().find(m => m.id === p.model.id && m.source === p.model.source) || { eligibility: p.model.source === "none" ? "unrunnable" : "unknown", drafter: "UNKNOWN — validate to resolve drafter" };
+}
+function cfVerdict(facts) {
+  const verdict = facts.eligibility || "unknown", label = verdict === "blocked" ? "UNRUNNABLE" : verdict.toUpperCase();
+  return '<span class="profile-cap '+cfEscape(verdict)+'" data-tip="'+cfEscape(facts.eligibility_reason || "")+'">'+label+(facts.eligibility_reason ? ' — '+cfEscape(facts.eligibility_reason) : '')+'</span>';
+}
+function cfRenderProfiles() {
+  if (!CF.draft || !S || !S.cfg) return;
+  const esc = cfEscape;
+  const list = CF.draft.profiles.map(p => { const meta = cfProfileMeta(p); return '<div class="profile-row"><div class="frow"><button class="mini" data-profile-act="edit" data-id="'+esc(p.id)+'">'+esc(p.name)+'</button>'+(p.id === CF.draft.activeProfile ? '<span class="profile-cap runnable">ACTIVE</span>' : '')+'</div><div class="profile-chip">'+esc(p.model.id || "MODEL UNSET")+' · '+esc(p.model.source)+'</div>'+cfVerdict(cfProfileFacts(p))+'<div class="profile-meta">Created '+esc(meta.created_at || "—")+' · Last used '+esc(meta.last_used_at || "Never")+'</div></div>'; }).join("");
+  if ($("profileList").innerHTML !== list) $("profileList").innerHTML = list;
+  $("profileRestartPrompt").hidden = S.cfg.restart_required !== true;
+  $("profileRestartText").textContent = "RESTART REQUIRED — " + (S.cfg.in_flight || 0) + " in-flight requests will be interrupted. Restart now? ";
+  $("btnProfileActivate").hidden = !cfSelectedProfile();
+  const p = cfSelectedProfile();
+  $("profileEditor").hidden = !p;
+  if (!p) return;
+  if (document.activeElement !== $("profileName") && $("profileName").value !== p.name) $("profileName").value = p.name;
+  const override = p.options.draft_model || "";
+  if (document.activeElement !== $("profileDraftModel") && $("profileDraftModel").value !== override) $("profileDraftModel").value = override;
+  $("profileDraftRow").hidden = !cfOptionDefs().some(o => o.key === "draft_model");
+  $("profileDrafter").textContent = "Drafter · " + (cfProfileFacts(p).drafter || "UNKNOWN — engine decides at load");
+  const meta = cfProfileMeta(p);
+  $("profileLaunchMeta").textContent = "Last successful launch · " + (meta.last_successful_launch || "Never") + " · Last failure · " + (meta.last_failure ? meta.last_failure.at + " — " + meta.last_failure.message : "None");
+  const models = cfModels().map((m, i) => '<button class="profile-model" data-model-index="'+i+'">'+esc(m.id)+' · '+esc(m.source)+' · '+esc(m.kind)+' '+cfVerdict(m)+'</button>').join("") || '<div class="profile-meta">No scanned models — add a model folder or Scan above.</div>';
+  if ($("profileModels").innerHTML !== models) $("profileModels").innerHTML = models;
+  cfRenderOptions(p);
+  const validated = CF.validated === JSON.stringify(CF.draft) && cfgValidateResult && cfgValidateResult.ok;
+  $("btnProfilesSave").disabled = !cfDirty() || !validated || CF.saving;
+  $("btnProfileActivate").disabled = CF.saving || (cfDirty() && !validated);
+  $("btnProfileActivate").textContent = p.id === CF.draft.activeProfile ? "Apply active profile" : "Activate profile";
+}
+function cfProfileChanged() { CF.verdicts = []; cfRenderProfiles(); cfDebouncedValidate(); }
+function cfNewProfile(cloneFrom) {
+  let id;
+  do { const random = new Uint16Array(1); crypto.getRandomValues(random); id = 'p-'+Date.now()+'-'+random[0].toString(16).padStart(4, '0'); } while (CF.draft.profiles.some(p => p.id === id));
+  const base = cloneFrom ? cloneFrom.name + " copy" : "New profile";
+  let name = base, n = 2;
+  while (CF.draft.profiles.some(p => p.name === name)) name = base + " " + n++;
+  const p = cloneFrom ? JSON.parse(JSON.stringify(cloneFrom)) : { model: { source: "none", id: null, dir: null }, options: { ane: true } };
+  Object.assign(p, { id, name, meta: { created_at: new Date().toISOString(), last_used_at: null, last_successful_launch: null, last_failure: null } });
+  CF.draft.profiles.push(p); CF.profileId = id; cfProfileChanged();
+}
+$("profileList").onclick = ev => { const b = ev.target.closest('[data-profile-act="edit"]'); if (b) { CF.profileId = b.dataset.id; CF.verdicts = []; cfRenderProfiles(); } };
+$("btnProfileAdd").onclick = () => cfNewProfile(null);
+$("btnProfileClone").onclick = () => { const p = cfSelectedProfile(); if (p) cfNewProfile(p); };
+$("btnProfileRemove").onclick = () => {
+  const p = cfSelectedProfile(); if (!p) return;
+  CF.draft.profiles = CF.draft.profiles.filter(v => v.id !== p.id);
+  CF.draft.ane = CF.draft.profiles[0]?.options.ane ?? true;
+  cfSyncForm();
+  if (CF.draft.activeProfile === p.id) CF.draft.activeProfile = null;
+  CF.profileId = CF.draft.profiles[0]?.id; cfProfileChanged();
+};
+$("profileName").onchange = () => { const p = cfSelectedProfile(); if (p) { p.name = $("profileName").value; cfProfileChanged(); } };
+$("profileDraftModel").onchange = () => { const p = cfSelectedProfile(); if (p) { const value = $("profileDraftModel").value.trim(); if (value) p.options.draft_model = value; else delete p.options.draft_model; cfProfileChanged(); } };
+$("btnProfileModels").onclick = () => { $("profileModels").hidden = !$("profileModels").hidden; $("btnProfileModels").setAttribute("aria-expanded", String(!$("profileModels").hidden)); };
+$("profileModels").onclick = ev => { const b = ev.target.closest('[data-model-index]'), p = cfSelectedProfile(); if (b && p) { const m = cfModels()[Number(b.dataset.modelIndex)]; p.model = { source: m.source, id: m.id, dir: m.dir || null }; cfProfileChanged(); } };
+$("btnProfilesSave").onclick = cfSave;
+
+// Contract keys stay flat and unknown keys survive a downgrade untouched.
+function cfOptionDefs() { return CF.optionDefs || S.cfg.option_defs || []; }
+function cfRenderOptions(p) {
+  const defs = cfOptionDefs(), esc = cfEscape;
+  const key = p.id + JSON.stringify(defs) + JSON.stringify(Object.keys(p.options || {}).sort());
+  if (CF.optionsKey !== key) {
+    CF.optionsKey = key;
+    const staleKeys = Object.keys(p.options || {}).filter(k => !defs.some(o => o.key === k)).sort();
+    const ver = (S.cfg && S.cfg.engine && S.cfg.engine.version) || "?";
+    const staleHtml = staleKeys.length ? '<div class="stale-group" data-tip="Not in the active engine mapping (v' + esc(ver) + ') — the saved value is preserved and will apply when a matching engine is active."><div class="stale-bar" aria-expanded="false"><span>STALE OPTIONS — ' + staleKeys.length + ' KEPT</span><span class="warn-cap">STALE</span></div><div class="stale-body">' + staleKeys.map(k => {
+      const vs = p.options[k];
+      return '<div class="stale-row" data-tip="Not in the active engine mapping (v' + esc(ver) + ') — preserved, not emitted to the engine."><label>' + esc(k) + '</label><input id="option-stale-' + esc(k) + '" disabled value="' + esc(Array.isArray(vs) ? vs.join(", ") : vs) + '"><span class="profile-cap">KEPT</span></div>';
+    }).join('') + '</div></div>' : "";
+    $("profileDetailSlot").innerHTML = ["model", "memory", "cache", "compute", "api", "requests", "model-axis"].map(group => {
+      const items = defs.filter(o => o.group === group);
+      if (!items.length) return "";
+      return '<div class="option-group" data-group="'+group+'"><button class="option-bar" aria-expanded="false"><span>▸ '+group+'</span><span class="option-count"></span></button><div class="option-body">'+items.map(o => {
+        const choices = o.kind === "bool" ? ["true", "false"] : o.choices || [];
+        return '<div class="frow" data-option-row="'+esc(o.key)+'"><label for="option-'+esc(o.key)+'">'+esc(o.flag)+'</label><input id="option-'+esc(o.key)+'" data-option="'+esc(o.key)+'" type="'+(choices.length ? 'hidden' : 'text')+'" placeholder="'+esc(o.default || "engine default")+'">'+choices.map(v => '<button class="mini" data-option-choice="'+esc(o.key)+'" data-value="'+esc(v)+'">'+esc(o.kind === "bool" ? (v === "true" ? "ON" : "OFF") : v)+'</button>').join('')+'<button class="mini" data-option-reset="'+esc(o.key)+'" data-tip="Use engine default">Reset</button></div>';
+      }).join('')+'</div></div>';
+    }).join('') + staleHtml;
+  }
+  defs.forEach(o => {
+    const input = $("option-"+o.key), value = p.options[o.key] ?? o.default ?? "";
+    const missing = (o.requires || []).filter(k => { const v = p.options[k] ?? defs.find(d => d.key === k)?.default; return v == null || v === false || v === "false" || v === "0" || v === "" || (Array.isArray(v) && !v.length); });
+    const row = input.closest('[data-option-row]');
+    row.dataset.tip = missing.length ? "Requires " + missing.join(", ") + " — set it first" : o.flag;
+    const invalid = (cfgValidateResult?.errors || []).find(e => e.includes("profile " + p.id + " option " + o.key + ":"));
+    input.setAttribute('aria-invalid', String(!!invalid));
+    if (invalid) row.dataset.tip = invalid;
+    row.classList.toggle("unmet", !!missing.length);
+    row.querySelectorAll('input,button').forEach(c => { c.disabled = !!missing.length; });
+    if (document.activeElement !== input) input.value = Array.isArray(value) ? value.join(", ") : String(value);
+    row.querySelectorAll('[data-option-choice]').forEach(b => b.classList.toggle('on', b.dataset.value === String(value)));
+    input.onchange = () => cfOptionChanged(o.key, input.value);
+  });
+  $("profileDetailSlot").querySelectorAll('.option-group').forEach(g => {
+    const count = defs.filter(o => o.group === g.dataset.group && p.options[o.key] != null && String(p.options[o.key]) !== String(o.default ?? "")).length;
+    g.querySelector('.option-count').textContent = count + " SET";
+  });
+}
+function cfOptionChanged(key, value) {
+  const p = cfSelectedProfile(), o = cfOptionDefs().find(o => o.key === key);
+  if (!p || !o) return;
+  if (value === "") delete p.options[key];
+  else p.options[key] = o.kind === "bool" ? value === "true" : o.kind === "append" ? value.split(',').map(v => v.trim()).filter(Boolean) : value;
+  if (key === "ane" && p.id === CF.draft.profiles[0]?.id) { CF.draft.ane = p.options.ane ?? true; cfSyncForm(); }
+  cfProfileChanged();
+}
+$("profileDetailSlot").onclick = ev => {
+  const bar = ev.target.closest('.option-bar, .stale-bar');
+  if (bar) { const g = bar.parentElement; g.classList.toggle('open'); bar.setAttribute('aria-expanded', String(g.classList.contains('open'))); return; }
+  const b = ev.target.closest('button'); if (!b) return;
+  if (b.dataset.optionChoice) cfOptionChanged(b.dataset.optionChoice, b.dataset.value);
+  if (b.dataset.optionReset) cfOptionChanged(b.dataset.optionReset, "");
+};
+$("btnProfileActivate").onclick = () => {
+  if (CF.saving || !cfSelectedProfile()) return;
+  CF.previousResult = S.cfg.result; CF.pendingDoc = cfBuildDoc(); CF.pendingBaseline = JSON.stringify(CF.draft);
+  CF.saving = true; CF.activating = true;
+  cmd("config.activate", { doc: CF.pendingDoc, profileId: CF.profileId });
+};
+$("btnProfileRestart").onclick = () => cmd("restart");
+
+// ---- D10: first-run modal (shown once; dismissal persists via the store) ----
+function cfFirstRun() {
+  if (!(S.cfg && S.cfg.first_run === true) || CF.firstRunShown) return;
+  CF.firstRunShown = true;
+  window.showView("settings");
+  $("cfgModal").style.display = "flex";
+}
+function cfFirstRunDone() {
+  cmd("config.firstRunDone");
+  $("cfgModal").style.display = "none";
+}
+$("modalCta").onclick = () => {
+  cfFirstRunDone();
+  window.showView("settings");
+};
+$("modalDismiss").onclick = cfFirstRunDone;
+// One-time: fetch the raw doc so the settings draft can round-trip api_key.
+cmd("config.get");
 
 if (location.search.includes("demo")) {
   const D = { t:Date.now()/1000, state:"decode", ready:true, model:"incoai/Qwen3.8-27B-Splash", ctx:262144,
