@@ -361,11 +361,16 @@ public struct ModelEntry: Equatable {
     public var dir: String?
     public var source: String   // the model folder's id (lmstudio/hfhub/.../u-<n>)
     public var kind: ModelKind
-    public init(id: String, dir: String? = nil, source: String, kind: ModelKind) {
+    /// The on-disk size of the model dir (bytes) — the chooser's `source · size`
+    /// readout. nil when the dir is nil (ollama) or its size is unreadable.
+    public var sizeBytes: Int64?
+    public init(id: String, dir: String? = nil, source: String, kind: ModelKind,
+                sizeBytes: Int64? = nil) {
         self.id = id
         self.dir = dir
         self.source = source
         self.kind = kind
+        self.sizeBytes = sizeBytes
     }
 }
 
@@ -395,11 +400,16 @@ private func boundedEntries(_ names: [String]) -> [String] {
 public func enumerateModels(folder: ModelFolder,
                             isDir: (String) -> Bool,
                             fileContents: (String) -> String?,
-                            listDir: (String) -> [String]?) -> [ModelEntry] {
+                            listDir: (String) -> [String]?,
+                            dirSize: (String) -> Int64? = { _ in nil }) -> [ModelEntry] {
     let root = folder.path
     func entries(_ dir: String) -> [String] {
         guard let names = listDir(dir) else { return [] }
         return boundedEntries(names)
+    }
+    func entry(_ id: String, dir: String?, kind: ModelKind) -> ModelEntry {
+        ModelEntry(id: id, dir: dir, source: folder.id, kind: kind,
+                   sizeBytes: dir.flatMap(dirSize))
     }
     func kind(of dir: String?, id: String) -> ModelKind {
         classifyModelDir(dir: dir, id: id, isDir: isDir, fileContents: fileContents)
@@ -421,8 +431,8 @@ public func enumerateModels(folder: ModelFolder,
             }
             if snap == nil { snap = snapsB.last }
             guard let s = snap else { continue }
-            out.append(ModelEntry(id: repoId, dir: snapsDir + "/" + s,
-                                  source: folder.id, kind: kind(of: snapsDir + "/" + s, id: repoId)))
+            let snapDir = snapsDir + "/" + s
+            out.append(entry(repoId, dir: snapDir, kind: kind(of: snapDir, id: repoId)))
         }
         return out
     case "ollama":
@@ -444,14 +454,14 @@ public func enumerateModels(folder: ModelFolder,
             let files = modelDirFiles(p, isDir: isDir, fileContents: fileContents)
             if files.manifest || files.modelJson || files.config {
                 // a model dir directly under the root (1-level).
-                out.append(ModelEntry(id: name, dir: p, source: folder.id, kind: kind(of: p, id: name)))
+                out.append(entry(name, dir: p, kind: kind(of: p, id: name)))
             } else if let kids = listDir(p) {
                 // an owner-like dir: its subdirs are the models (2-level).
                 for k in boundedEntries(kids) {
                     let kp = p + "/" + k
                     guard isDir(kp) else { continue }
-                    out.append(ModelEntry(id: name + "/" + k, dir: kp,
-                                          source: folder.id, kind: kind(of: kp, id: name + "/" + k)))
+                    out.append(entry(name + "/" + k, dir: kp,
+                                     kind: kind(of: kp, id: name + "/" + k)))
                 }
             }
         }
@@ -467,12 +477,18 @@ public func folderTickState(folder: ModelFolder,
                             isDir: (String) -> Bool,
                             fileContents: (String) -> String?,
                             listDir: (String) -> [String]?,
-                            version: String? = nil) -> [String: Any] {
+                            version: String? = nil,
+                            dirSize: (String) -> Int64? = { _ in nil }) -> [String: Any] {
     let present = isDir(folder.path)
     let models: [Any] = present
-        ? enumerateModels(folder: folder, isDir: isDir, fileContents: fileContents, listDir: listDir)
-            .map { modelTickState(model: ProfileModel(source: $0.source, id: $0.id, dir: $0.dir),
-                                 version: version, isDir: isDir, fileContents: fileContents) }
+        ? enumerateModels(folder: folder, isDir: isDir, fileContents: fileContents,
+                          listDir: listDir, dirSize: dirSize)
+            .map {
+                var st = modelTickState(model: ProfileModel(source: $0.source, id: $0.id, dir: $0.dir),
+                                         version: version, isDir: isDir, fileContents: fileContents)
+                st["size_bytes"] = $0.sizeBytes ?? NSNull()
+                return st
+            }
         : []
     return ["id": folder.id, "path": folder.path, "source": folder.source,
             "models": models, "scanning": false, "present": present,
@@ -1216,12 +1232,19 @@ public func buildArgv(_ contract: VersionContract,
                       profileValues: [String: JSONValue],
                       model: ProfileModel,
                       globals: GlobalCfg) -> (args: [String], env: [String: String], issues: [ArgvIssue]) {
-    // D6: port + api key are service-level (globals), not per-profile options.
-    // They sit in the values map under their option keys, and a globals value
-    // overrides a stale same-named profile entry.
+    // D6: the service-level network options (host, port, api-key, allowed-host,
+    // allowed-origin, web-ui) are globals, never per-profile options — there is
+    // no per-profile occurrence in the schema (normalizeConfig strips any a
+    // hand-edit introduced), and the globals win here at the argv boundary
+    // regardless. Emission: an empty append list and a bool equal to its
+    // defValue emit nothing, so "web UI on" + no allowed lists = bare defaults.
     var values = profileValues
+    values["host"] = .string(globals.host)
     values["port"] = .string(String(globals.port))
     if !globals.apiKey.isEmpty { values["api_key"] = .string(globals.apiKey) }
+    values["no_webui"] = .bool(!globals.webUI)
+    values["allowed_host"] = .array(globals.allowedHosts.map(JSONValue.string))
+    values["allowed_origin"] = .array(globals.allowedOrigins.map(JSONValue.string))
 
     var env: [String: String] = [:]
     var args: [String] = []
@@ -1470,6 +1493,7 @@ public struct LaunchConfig: Equatable {
     public var engineArgs: [String]   // the full argv after the executable
     public var engineEnv: [String: String]   // SPLASH_API_KEY — env only, never argv
     public var port: Int?
+    public var host: String?        // the bind address (the NETWORK panel's HOST)
     public var modelId: String?       // the model actually served
     public var modelDir: String?      // the on-disk dir (the module form's positional arg)
     public var version: String?       // the kit's release.json version
@@ -1488,7 +1512,8 @@ public struct LaunchConfig: Equatable {
     public var issues: [String]       // warning-level (dropped options) for S7
     public init(workDir: String? = nil, executable: String? = nil, base: String? = nil,
                 engineArgs: [String] = [], engineEnv: [String: String] = [:],
-                port: Int? = nil, modelId: String? = nil, modelDir: String? = nil,
+                port: Int? = nil, host: String? = nil,
+                modelId: String? = nil, modelDir: String? = nil,
                 version: String? = nil, tried: [String] = [], mappingFallback: Bool = false,
                 error: String? = nil, profileId: String? = nil, profileName: String? = nil,
                 restartRequired: Bool = false, restartReason: String? = nil,
@@ -1499,6 +1524,7 @@ public struct LaunchConfig: Equatable {
         self.engineArgs = engineArgs
         self.engineEnv = engineEnv
         self.port = port
+        self.host = host
         self.modelId = modelId
         self.modelDir = modelDir
         self.version = version
@@ -1623,11 +1649,136 @@ public func planLaunch(_ data: Data,
     if let key = built.env["SPLASH_API_KEY"] { sigParts.append(key) }
     return LaunchConfig(workDir: kit, executable: executable, base: kit,
                         engineArgs: built.args, engineEnv: built.env,
-                        port: g.port, modelId: mid, modelDir: dir,
+                        port: g.port, host: g.host, modelId: mid, modelDir: dir,
                         version: kr.version, tried: kr.tried, mappingFallback: fallback,
                         profileId: profile.id, profileName: profile.name,
                         signature: sigParts.joined(separator: "\u{1F}"),
                         issues: built.issues.filter { $0.severity == .warning }.map { $0.message })
+}
+
+// MARK: - S7: settings-screen display facts (pure)
+
+/// The engine kit the panel was BUILT against (D4): a non-pinned resolved
+/// engine must be impossible to miss in the settings UI.
+public let builtEngineVersion = "1.3.0"
+
+/// The kit dir's arch + OS from its name — `install.sh` names the kit
+/// `<name>-<version>-<arch>-<os>` (e.g. `splash-1.3.0-arm64-macos26`). The
+/// display form matches the ENGINE panel's `1.3.0 · ARM64 · MACOS 26` line;
+/// a dir that does not follow the pattern yields nils (the line stays quiet).
+public func kitArchOS(_ kit: String?) -> (arch: String?, os: String?) {
+    guard let kit else { return (nil, nil) }
+    let parts = (kit as NSString).lastPathComponent.split(separator: "-").map(String.init)
+    guard parts.count >= 3, parts[0] == "splash" else { return (nil, nil) }
+    let arch = parts[2].uppercased()
+    var os: String? = nil
+    if parts.count >= 4 {
+        let raw = parts[3]
+        // `macos26` -> `MACOS 26` (the display form).
+        if raw.lowercased().hasPrefix("macos"), let n = raw.dropFirst(5).first, n.isNumber {
+            os = "MACOS " + raw.dropFirst(5)
+        } else {
+            os = raw.uppercased()
+        }
+    }
+    return (arch, os)
+}
+
+/// The ENGINE panel's verdict cap: `valid` (green: the resolved kit's
+/// version maps fully onto an authored contract — any engine version is
+/// supported), `fallback` (peach: the running version has no authored
+/// mapping — running on the latest authored contract, the registry report
+/// is the tip), `unrunnable` (red: no kit / the plan cannot launch).
+/// The version the panel was built against is information (carried in
+/// `reason`), never an alarm. Order matters: an unrunnable plan (its
+/// actionable error) beats a mapping fallback.
+public func engineVerdict(resolved: Bool, version: String?, error: String?,
+                          mappingFallback: Bool) -> (verdict: String, reason: String?) {
+    if !resolved {
+        return ("unrunnable", error ?? "no engine kit resolved — install it or set a path")
+    }
+    if let error { return ("unrunnable", error) }
+    if mappingFallback {
+        return ("fallback", "engine v\(version ?? "?") has no authored mapping — "
+            + "running on the v\(builtEngineVersion) contract (FALLBACK MAPPING)")
+    }
+    if version != builtEngineVersion {
+        return ("valid", "built against v\(builtEngineVersion); running v\(version ?? "?")")
+    }
+    return ("valid", nil)
+}
+
+/// The GENERAL tab's LAUNCH PREVIEW: the engine argv the profile WOULD launch
+/// with, computed without starting anything (the model resolves against the
+/// folders exactly as planLaunch does — one code path, one truth). PURE (T1):
+/// every FS access is an injected closure. `restart` compares the preview's
+/// plan signature (D13: kit + version + argv + key) against the successful
+/// session baseline — nil baseline (nothing running/adopted) means the running
+/// session matches, so `false`. A blocked/unrunnable model or a missing kit
+/// yields an empty argv + the actionable reason (the box shows the fix, red).
+public func profilePreview(_ profile: Profile,
+                           kit: String?,
+                           version: String?,
+                           folders: [ModelFolder],
+                           isDir: (String) -> Bool,
+                           fileContents: (String) -> String?,
+                           listDir: (String) -> [String]?,
+                           globals: GlobalCfg,
+                           baselineSignature: String?) -> [String: Any] {
+    func done(args: [String], error: String?, restart: Bool) -> [String: Any] {
+        ["args": args as [Any], "error": error ?? NSNull(),
+         "restart": restart, "version": version ?? NSNull()]
+    }
+    guard let kit else {
+        return done(args: [], error: "no engine kit resolved — install it or set a path", restart: false)
+    }
+    let contract = contractFor(version, registry: launchRegistry).contract
+    let model = profile.model
+    guard model.source != "none", let mid = model.id, !mid.isEmpty else {
+        return done(args: [], error: "no model selected — pick one in the MODEL pill", restart: false)
+    }
+    // The same resolution as planLaunch: the fresh enumeration beats a stale
+    // stored dir; a vanished model classifies from its stored dir (or hfid).
+    var dir = model.dir
+    var kind: ModelKind?
+    for folder in folders {
+        let entries = enumerateModels(folder: folder, isDir: isDir,
+                                      fileContents: fileContents, listDir: listDir)
+        if let e = entries.first(where: { $0.id == mid }) {
+            kind = e.kind
+            if let d = e.dir { dir = d }
+            break
+        }
+    }
+    if kind == nil {
+        kind = dir == nil ? .hfid
+            : classifyModelDir(dir: dir, id: mid, isDir: isDir, fileContents: fileContents)
+    }
+    let files = modelDirFiles(dir, isDir: isDir, fileContents: fileContents)
+    let draftModel = profile.options["draft_model"]?.string
+    let family: String? = {
+        guard let dir else { return nil }
+        return deriveFamily(config: fileContents(dir + "/config.json"), contract: contract)
+    }()
+    let elig = eligibility(kind: kind!, contract: contract, modelId: mid, modelDir: dir,
+                           draftModel: draftModel, family: family, files: files)
+    if elig.verdict == .blocked || elig.verdict == .unrunnable {
+        return done(args: [], error: elig.reason, restart: false)
+    }
+    var launchModel = model
+    launchModel.dir = dir
+    let built = buildArgv(contract, profileValues: profile.options, model: launchModel, globals: globals)
+    if built.args.isEmpty {
+        let msg = built.issues.first(where: { $0.severity == .error })?.message
+            ?? "cannot build the launch argv"
+        return done(args: [], error: msg, restart: false)
+    }
+    var sigParts = [kit, version ?? ""]
+    sigParts += built.args
+    if let key = built.env["SPLASH_API_KEY"] { sigParts.append(key) }
+    let sig = sigParts.joined(separator: "\u{1F}")
+    let restart = baselineSignature.map { sig != $0 } ?? false
+    return done(args: built.args, error: nil, restart: restart)
 }
 
 // The UI never outlives the service — but only for a service that actually ran.
@@ -1950,12 +2101,23 @@ public struct EngineCfg: Equatable {
 public struct GlobalCfg: Equatable {
     public var engine: EngineCfg
     public var modelFolders: [ModelFolder]
+    /// HTTP bind address (engine `--host`, always emitted). Local-only default.
+    public var host: String
     public var port: Int
     public var apiKey: String
+    /// Extra HTTP Host names the engine accepts (`--allowed-host`, repeatable).
+    public var allowedHosts: [String]
+    /// Origins whose pages may call the API (`--allowed-origin`, repeatable).
+    public var allowedOrigins: [String]
+    /// The engine's chat page (`--no-webui` is the inverse; ON = the engine default).
+    public var webUI: Bool
     public init(engine: EngineCfg = EngineCfg(), modelFolders: [ModelFolder] = [],
-                port: Int = 8123, apiKey: String = "splash-standalone-1") {
+                host: String = "127.0.0.1", port: Int = 8123, apiKey: String = "splash-standalone-1",
+                allowedHosts: [String] = [], allowedOrigins: [String] = [], webUI: Bool = true) {
         self.engine = engine; self.modelFolders = modelFolders
-        self.port = port; self.apiKey = apiKey
+        self.host = host; self.port = port; self.apiKey = apiKey
+        self.allowedHosts = allowedHosts; self.allowedOrigins = allowedOrigins
+        self.webUI = webUI
     }
 }
 
@@ -2110,10 +2272,16 @@ private struct ConfigParser {
     private mutating func decodeGlobals(_ v: JSONValue?) throws -> GlobalCfg {
         var engine = EngineCfg()
         var folders = [ModelFolder]()
+        var host = "127.0.0.1"
         var port = 8123
         var apiKey = "splash-standalone-1"
+        var allowedHosts = [String]()
+        var allowedOrigins = [String]()
+        var webUI = true
         guard let g = try obj(v, "globals") else {
-            return GlobalCfg(engine: engine, modelFolders: folders, port: port, apiKey: apiKey)
+            return GlobalCfg(engine: engine, modelFolders: folders, host: host, port: port,
+                              apiKey: apiKey, allowedHosts: allowedHosts,
+                              allowedOrigins: allowedOrigins, webUI: webUI)
         }
         engine = try decodeEngine(g["engine"])
         if let f = try arr(g["model_folders"], "globals.model_folders") {
@@ -2136,9 +2304,27 @@ private struct ConfigParser {
                 idx += 1
             }
         }
+        host = (try str(g["host"], "globals.host", def: "127.0.0.1")) ?? "127.0.0.1"
+        if host.isEmpty { host = "127.0.0.1" }   // an emptied HOST field means "back to the default"
         port = (try int(g["port"], "globals.port", def: 8123)) ?? 8123
         apiKey = (try str(g["api_key"], "globals.api_key", def: "splash-standalone-1")) ?? "splash-standalone-1"
-        collectDropped(g, known: ["engine", "model_folders", "port", "api_key"], under: "globals")
+        func stringList(_ v: JSONValue?, _ path: String) throws -> [String] {
+            guard let a = try arr(v, path) else { return [] }
+            var out = [String]()
+            for (i, e) in a.enumerated() {
+                guard let s = e.string else {
+                    if lenient { continue }
+                    throw DecodeError.badType("\(path)[\(i)] must be a string")
+                }
+                if !s.isEmpty { out.append(s) }
+            }
+            return out
+        }
+        allowedHosts = try stringList(g["allowed_hosts"], "globals.allowed_hosts")
+        allowedOrigins = try stringList(g["allowed_origins"], "globals.allowed_origins")
+        webUI = (try bool(g["web_ui"], "globals.web_ui", def: true)) ?? true
+        collectDropped(g, known: ["engine", "model_folders", "host", "port", "api_key",
+                                  "allowed_hosts", "allowed_origins", "web_ui"], under: "globals")
         // Strict field rules (the data contract) — enforced on same-version files;
         // a forward file degrades leniently instead.
         if !lenient {
@@ -2146,8 +2332,11 @@ private struct ConfigParser {
                 throw DecodeError.badValue("globals.port must be between 1 and 65535 (got \(port))")
             }
             if apiKey.isEmpty { throw DecodeError.badValue("globals.api_key must not be empty") }
+            if host.isEmpty { throw DecodeError.badValue("globals.host must not be empty") }
         }
-        return GlobalCfg(engine: engine, modelFolders: folders, port: port, apiKey: apiKey)
+        return GlobalCfg(engine: engine, modelFolders: folders, host: host, port: port,
+                         apiKey: apiKey, allowedHosts: allowedHosts,
+                         allowedOrigins: allowedOrigins, webUI: webUI)
     }
 
     private mutating func decodeProfiles(_ v: JSONValue?) throws -> [Profile] {
@@ -2311,8 +2500,12 @@ public func configData(_ doc: ConfigDoc, schemaVersion: Int = configSchemaVersio
             "model_folders": .array(doc.globals.modelFolders.map {
                 .object(["id": .string($0.id), "path": .string($0.path), "source": .string($0.source)])
             }),
+            "host": .string(doc.globals.host),
             "port": .number(Double(doc.globals.port)),
             "api_key": .string(doc.globals.apiKey),
+            "allowed_hosts": .array(doc.globals.allowedHosts.map(JSONValue.string)),
+            "allowed_origins": .array(doc.globals.allowedOrigins.map(JSONValue.string)),
+            "web_ui": .bool(doc.globals.webUI),
         ]),
         "profiles": .array(doc.profiles.map { p -> JSONValue in
             .object([
@@ -2513,6 +2706,24 @@ public func normalizeConfig(_ doc: ConfigDoc) -> (doc: ConfigDoc, activeInvalid:
         d.activeProfile = nil
         invalid = true
     }
+    // The NETWORK fields are service-level globals (the 06 NETWORK panel): trim,
+    // drop empty (a cleared row means absent; an emptied HOST means back to the
+    // loopback default).
+    var g = d.globals
+    g.host = g.host.trimmingCharacters(in: .whitespaces)
+    if g.host.isEmpty { g.host = "127.0.0.1" }
+    g.allowedHosts = g.allowedHosts.map { $0.trimmingCharacters(in: .whitespaces) }
+        .filter { !$0.isEmpty }
+    g.allowedOrigins = g.allowedOrigins.map { $0.trimmingCharacters(in: .whitespaces) }
+        .filter { !$0.isEmpty }
+    d.globals = g
+    // Network keys are GLOBAL, never per-profile options: strip any occurrence
+    // in profile.options so the written file keeps the single source of truth.
+    for i in d.profiles.indices {
+        for k in ["host", "port", "api_key", "allowed_host", "allowed_origin", "no_webui"] {
+            d.profiles[i].options[k] = nil
+        }
+    }
     return (d, invalid)
 }
 
@@ -2528,8 +2739,11 @@ public func maskSecret(_ s: String) -> String {
 public func profileOptionDefinitions(version: String?) -> [[String: Any]] {
     contractFor(version, registry: launchRegistry).contract.options.compactMap { o in
         guard !o.builtFromModel, !o.secret, o.key != "port" else { return nil }
+        // D6: the service-level network options are GLOBAL (the 06 NETWORK
+        // panel), never per-profile — they do not appear in a profile at all.
+        if o.group == "network" { return nil }
         var group = o.group
-        if group == "network" { group = "api" }
+        if group == "requests" { group = "api" }   // the API tab combines both
         if ["ane", "allow_idle_sleep"].contains(o.key) { group = "compute" }
         if o.key == "decode_share" { group = "memory" }
         if ["draft_model", "revision", "language_only", "offline"].contains(o.key) { group = "model-axis" }
@@ -2564,6 +2778,11 @@ public func configTickPayload(
         "resolved": NSNull(), "version": NSNull(), "tried": NSNull(),
         "path": NSNull(),
         "valid": NSNull(), "error": NSNull(),
+        // S7: the ENGINE panel's new fields (arch/os/verdict are filled by the
+        // plan overlay in main; stable nulls keep the change gate quiet; the
+        // ladder line renders `tried`).
+        "arch": NSNull(), "os": NSNull(),
+        "verdict": NSNull(), "verdict_reason": NSNull(),
     ]
     let folders: [Any] = doc.globals.modelFolders.map { f -> [String: Any] in
         ["id": f.id, "path": f.path, "source": f.source,
@@ -2573,21 +2792,27 @@ public func configTickPayload(
         ["id": p.id, "name": p.name,
          "model": ["source": p.model.source,
                    "id": p.model.id ?? NSNull(),
-                   "dir": p.model.dir ?? NSNull()] as [String: Any],
+                   "dir": p.model.dir ?? NSNull(),
+                   "size_bytes": NSNull()] as [String: Any],
          "options": p.options.mapValues { $0.any },
          "meta": ["created_at": p.meta.createdAt ?? NSNull(),
                   "last_used_at": p.meta.lastUsedAt ?? NSNull(),
                   "last_successful_launch": p.meta.lastSuccessfulLaunch ?? NSNull(),
                   "last_failure": p.meta.lastFailure.map { ["at": $0.at, "message": $0.message] } ?? NSNull()] as [String: Any],
-         "eligibility": NSNull(), "eligibility_reason": NSNull(), "unrunnable_fix": NSNull()]
+         "eligibility": NSNull(), "eligibility_reason": NSNull(), "unrunnable_fix": NSNull(),
+         "preview": NSNull()]
     }
     var out: [String: Any] = [
         "load_error": loadError ?? NSNull(),
         "version_too_new": versionTooNew,
         "engine": engine,
         "folders": folders,
+        "host": doc.globals.host,
         "port": doc.globals.port,
         "api_key_masked": maskSecret(doc.globals.apiKey),
+        "allowed_hosts": doc.globals.allowedHosts as [Any],
+        "allowed_origins": doc.globals.allowedOrigins as [Any],
+        "web_ui": doc.globals.webUI,
         "profiles": profiles,
         "active_profile": doc.activeProfile ?? NSNull(),
         "active_invalid": activeInvalid,
@@ -2629,6 +2854,29 @@ public func isDir(_ path: String) -> Bool {
     var values = [FileAttributeKey: Any]()
     do { try values = FileManager.default.attributesOfItem(atPath: path) } catch { return false }
     return values[.type] as? FileAttributeType == .typeDirectory
+}
+
+/// A path's total on-disk size in bytes: a file's own size; a directory's
+/// contents summed (symlinks counted by their link size, never walked — a
+/// cycle or a giant outside tree can't inflate a model's readout). nil when the
+/// path does not exist.
+public func dirSize(_ path: String) -> Int64? {
+    let fm = FileManager.default
+    var isDir: ObjCBool = false
+    guard fm.fileExists(atPath: path, isDirectory: &isDir) else { return nil }
+    if !isDir.boolValue {
+        return (try? fm.attributesOfItem(atPath: path))?[.size] as? Int64
+    }
+    guard let en = fm.enumerator(atPath: path) else { return 0 }
+    var total: Int64 = 0
+    for case let rel as String in en {
+        let attrs = (try? fm.attributesOfItem(atPath: path + "/" + rel)) ?? [:]
+        if attrs[.type] as? FileAttributeType != .typeSymbolicLink,
+           let size = attrs[.size] as? Int64 {
+            total += size
+        }
+    }
+    return total
 }
 
 /// The Homebrew keg of the splash formula, if installed. The formula versions

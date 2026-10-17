@@ -1489,9 +1489,12 @@ do {
     check(res.args.contains("--host") && res.args.contains("127.0.0.1"), "host: always emitted (the app is local-only)")
     check(res.args.contains("--port") && res.args.contains("8000"),
           "port: emitted even when equal to the engine default (alwaysEmit overrides the omission rule)")
-    let wide = buildArgv(contract131, profileValues: ["host": .string("0.0.0.0")], model: model,
-                         globals: GlobalCfg(port: 8123, apiKey: "k"))
-    check(wide.args.contains("0.0.0.0"), "host: a user-set non-loopback host emits")
+    // D6: the bind address is a GLOBAL, not a profile option — a user-set
+    // non-loopback host comes from the globals and wins over a stale profile value.
+    let wide = buildArgv(contract131, profileValues: ["host": .string("1.2.3.4")], model: model,
+                         globals: GlobalCfg(host: "0.0.0.0", port: 8123, apiKey: "k"))
+    check(wide.args.contains("0.0.0.0") && !wide.args.contains("1.2.3.4"),
+          "host: the globals host emits and overrides a stale profile host")
 }
 
 // 39. The module structural prefix: exactly today's resolveSplashPaths shape
@@ -3302,7 +3305,7 @@ func applyPlanToCfg(_ payload: inout [String: Any], plan: LaunchConfig?,
        "S4 tick change-gate: an identical plan ticks identically")
 
  // A failed plan: resolved false, valid false, the actionable error text.
- var fsBad = FakeFS()
+ let fsBad = FakeFS()
  let cfgBad = planCfgJSON(engineMode: "manual", manualPath: "/no/kit", port: 8123, key: "k",
                           name: "default", modelId: "incoai/Qwen3.8-27B-Splash",
                           modelDir: nil, options: [:])
@@ -3541,7 +3544,7 @@ do {
     // Now test the ConfigStore round-trip: save, re-read, verify the doc.
     let home = "/tmp/s5rt"
     var storeWrites: [String: Data] = [:]
-    var store = ConfigStore(
+    let store = ConfigStore(
         home: home,
         path: home + "/config.json",
         read: { _ in nil },  // first load: absent -> seeds
@@ -3657,6 +3660,215 @@ do {
     let beforeForward = writes
     let forward = String(data: configData(candidate), encoding: .utf8)!.replacingOccurrences(of: "\"schema_version\": 1", with: "\"schema_version\": 99")
     check(!store.activateCandidate(Data(forward.utf8), profileId: "second").ok && writes == beforeForward, "S6b forward-schema activation refuses without writing")
+}
+
+// =============================================================================
+// S7: the settings-screen redesign — globals network fields, model sizes,
+// engine verdict, profile previews, the 1.3.0 pin.
+// =============================================================================
+
+// 95. S7 globals: the network fields round-trip through configData/parseConfig.
+do {
+    var doc = defaultConfig(home: "/home", now: now)
+    doc.globals.host = "0.0.0.0"
+    doc.globals.port = 9999
+    doc.globals.apiKey = "secret-key-123"
+    doc.globals.allowedHosts = ["example.com", "10.0.0.1"]
+    doc.globals.allowedOrigins = ["http://example.com"]
+    doc.globals.webUI = false
+    let data = configData(doc)
+    let (rd, err, _) = parseConfig(data)
+    check(err == nil && rd != nil, "S7 globals: the network fields parse back")
+    check(rd?.globals.host == "0.0.0.0", "S7 globals: host round-trips")
+    check(rd?.globals.port == 9999, "S7 globals: port round-trips")
+    check(rd?.globals.allowedHosts == ["example.com", "10.0.0.1"], "S7 globals: allowed_hosts round-trip")
+    check(rd?.globals.allowedOrigins == ["http://example.com"], "S7 globals: allowed_origins round-trip")
+    check(rd?.globals.webUI == false, "S7 globals: web_ui false round-trips")
+    // Defaults when absent.
+    let (dd, derr, _) = parseConfig(Data(#"{"schema_version":1,"globals":{}}"#.utf8))
+    check(derr == nil, "S7 defaults: an empty globals parses")
+    check(dd?.globals.host == "127.0.0.1", "S7 defaults: host 127.0.0.1")
+    check(dd?.globals.webUI == true, "S7 defaults: web_ui true (the engine default)")
+    check(dd?.globals.allowedHosts == [] && dd?.globals.allowedOrigins == [], "S7 defaults: empty allowed lists")
+}
+
+// 96. S7 CFBoolean trap: a JSON NUMBER for web_ui is a type violation (strict),
+// never a truthy bool. `true`/`false` parse to .bool.
+do {
+    let bad = Data(#"{"schema_version":1,"globals":{"web_ui":1}}"#.utf8)
+    let (d, err, _) = parseConfig(bad)
+    check(d == nil && err != nil, "S7 CFBoolean: a JSON number for web_ui is rejected (strict)")
+    let ok = Data(#"{"schema_version":1,"globals":{"web_ui":false}}"#.utf8)
+    let (d2, err2, _) = parseConfig(ok)
+    check(err2 == nil && d2?.globals.webUI == false, "S7 CFBoolean: JSON false decodes to .bool(false)")
+}
+
+// 97. S7 buildArgv: the network globals wire into the engine argv.
+do {
+    let model = ProfileModel(source: "hfid", id: "m/r")
+    // web_ui false -> --no-webui; allowed hosts/origins repeat; host non-loopback.
+    let g = GlobalCfg(host: "0.0.0.0", port: 8123, apiKey: "k",
+                      allowedHosts: ["a.com", "b.com"], allowedOrigins: ["o.com"],
+                      webUI: false)
+    let res = buildArgv(contract131, profileValues: [:], model: model, globals: g)
+    check(res.args.contains("--host") && res.args.contains("0.0.0.0"), "S7 argv: non-loopback host emits")
+    check(res.args.contains("--no-webui"), "S7 argv: web_ui false -> --no-webui")
+    let ahIdx = res.args.firstIndex(of: "--allowed-host")
+    check(ahIdx != nil && res.args[ahIdx! + 1] == "a.com"
+          && res.args.filter { $0 == "--allowed-host" }.count == 2,
+          "S7 argv: allowed_host repeats for each entry")
+    check(res.args.contains("o.com"), "S7 argv: allowed_origin emits")
+    // web_ui true (the default) -> no --no-webui (it would be at defValue "false").
+    let gOn = GlobalCfg(host: "127.0.0.1", port: 8123, apiKey: "k")
+    let resOn = buildArgv(contract131, profileValues: [:], model: model, globals: gOn)
+    check(!resOn.args.contains("--no-webui"), "S7 argv: web_ui true -> no --no-webui (engine default)")
+    check(!resOn.args.contains("--allowed-host") && !resOn.args.contains("--allowed-origin"),
+          "S7 argv: empty allowed lists emit nothing")
+    // A stale profile host/allowed is overridden/cleared by the globals (D6).
+    let stale = buildArgv(contract131,
+                          profileValues: ["host": .string("9.9.9.9"), "allowed_host": .array([.string("stale.com")])],
+                          model: model, globals: GlobalCfg(port: 8123, apiKey: "k"))
+    check(!stale.args.contains("9.9.9.9") && !stale.args.contains("stale.com"),
+          "S7 argv: globals override stale profile host + clear a stale allowed_host")
+    check(stale.args.contains("127.0.0.1"), "S7 argv: the default host still emits")
+}
+
+// 98. S7 profileOptionDefinitions: the network group is GLOBAL (D6) and never
+// appears in a profile; the API tab is the requests group remapped.
+do {
+    let defs = profileOptionDefinitions(version: "1.3.1")
+    let keys = Set(defs.compactMap { $0["key"] as? String })
+    for netKey in ["host", "port", "api_key", "allowed_host", "allowed_origin", "no_webui"] {
+        check(!keys.contains(netKey), "S7 optdefs: \(netKey) is global-only, not a profile option")
+    }
+    // The requests group (max_request_size etc.) is remapped to "api".
+    check(defs.contains { ($0["key"] as? String) == "max_request_size" && ($0["group"] as? String) == "api" },
+          "S7 optdefs: requests options land in the API tab")
+    // The ANE stays in the COMPUTE group (per-profile).
+    check(defs.contains { ($0["key"] as? String) == "ane" && ($0["group"] as? String) == "compute" },
+          "S7 optdefs: ane stays in COMPUTE (per-profile)")
+    // A version WITHOUT the cache group -> the CACHE tab has no options (hidden).
+    let noCache = profileOptionDefinitions(version: "9.9.9")   // unseen -> latest fallback
+    _ = noCache
+}
+
+// 99. S7 kitArchOS: the kit dir name yields the arch + OS display.
+do {
+    let (a1, o1) = kitArchOS("/k/kit/splash-1.3.0-arm64-macos26")
+    check(a1 == "ARM64" && o1 == "MACOS 26", "S7 archOS: arm64-macos26 -> ARM64 / MACOS 26")
+    let (a2, o2) = kitArchOS("/k/kit/splash-1.3.1-x86_64-macos14")
+    check(a2 == "X86_64" && o2 == "MACOS 14", "S7 archOS: x86_64-macos14 -> X86_64 / MACOS 14")
+    let (a3, o3) = kitArchOS("/opt/homebrew/libexec")
+    check(a3 == nil && o3 == nil, "S7 archOS: a non-named dir yields nils (the line stays quiet)")
+    check(kitArchOS(nil) == (nil, nil), "S7 archOS: nil kit -> nils")
+}
+
+// 100. S7 engineVerdict: the ENGINE panel's verdict cap.
+do {
+    check(engineVerdict(resolved: false, version: nil, error: nil, mappingFallback: false).verdict == "unrunnable",
+          "S7 verdict: no kit -> unrunnable")
+    check(engineVerdict(resolved: true, version: "1.3.0", error: "no python", mappingFallback: false).verdict == "unrunnable",
+          "S7 verdict: a resolved kit with a plan error -> unrunnable (the actionable reason)")
+    let fb = engineVerdict(resolved: true, version: "1.3.3", error: nil, mappingFallback: true)
+    check(fb.verdict == "fallback" && (fb.reason?.contains("FALLBACK") ?? false),
+          "S7 verdict: an unmapped version -> fallback")
+    let un = engineVerdict(resolved: true, version: "1.3.1", error: nil, mappingFallback: false)
+    check(un.verdict == "valid" && (un.reason?.contains("built against") ?? false) && (un.reason?.contains("1.3.1") ?? false),
+          "S7 verdict: any version is supported — a non-built-against kit -> valid, version as info")
+    let ok = engineVerdict(resolved: true, version: "1.3.0", error: nil, mappingFallback: false)
+    check(ok.verdict == "valid" && ok.reason == nil, "S7 verdict: the built-against kit -> valid, no reason")
+    check(builtEngineVersion == "1.3.0", "S7: the built-against version is 1.3.0 (informational only)")
+}
+
+// 101. S7 profilePreview: the GENERAL tab's LAUNCH PREVIEW is pure.
+do {
+    var fs = FakeFS()
+    planKit(fs: &fs, path: "/kits/kit130", version: "1.3.0")
+    fs.dir("/models/pkg", ["manifest.json", "tokenizer/", "draft/"])
+    fs.file("/models/pkg/manifest.json", #"{"model_type": "qwen3_5", "draft_repo": "draft"}"#)
+    fs.file("/models/pkg/draft/config.json")
+    let folder = ModelFolder(id: "lmstudio", path: "/models", source: "auto")
+    let profile = Profile(id: "p1", name: "P",
+                          model: ProfileModel(source: "lmstudio", id: "pkg", dir: nil))
+    // A healthy package -> the argv is built; restart is the signature vs baseline.
+    let p1 = profilePreview(profile, kit: "/kits/kit130", version: "1.3.0",
+                            folders: [folder],
+                            isDir: { fs.isDir($0) }, fileContents: { fs.fileContents($0) },
+                            listDir: { fs.listDir($0) },
+                            globals: GlobalCfg(), baselineSignature: nil)
+    let args1 = p1["args"] as? [String] ?? []
+    check((p1["error"] as? String) == nil, "S7 preview: a healthy package -> no error")
+    check(args1.contains("--host") && args1.contains("127.0.0.1"), "S7 preview: the argv carries the host")
+    check(p1["restart"] as? Bool == false, "S7 preview: no baseline (nothing running) -> not a restart")
+    // The model is resolved from the folder (the stored dir was nil).
+    check(args1.contains("/models/pkg") || args1.contains("pkg"), "S7 preview: the model resolves against the folder")
+    // A nil kit -> the actionable reason, empty argv.
+    let p2 = profilePreview(profile, kit: nil, version: "1.3.0", folders: [folder],
+                            isDir: { fs.isDir($0) }, fileContents: { fs.fileContents($0) },
+                            listDir: { fs.listDir($0) },
+                            globals: GlobalCfg(), baselineSignature: nil)
+    check(((p2["args"] as? [Any])?.isEmpty == true) && (p2["error"] as? String) != nil,
+          "S7 preview: a missing kit -> empty argv + the reason")
+    // A no-model profile -> the actionable "no model" reason.
+    let p3 = profilePreview(Profile(id: "p3", name: "X", model: ProfileModel(source: "none")),
+                            kit: "/kits/kit130", version: "1.3.0", folders: [folder],
+                            isDir: { fs.isDir($0) }, fileContents: { fs.fileContents($0) },
+                            listDir: { fs.listDir($0) },
+                            globals: GlobalCfg(), baselineSignature: nil)
+    check((p3["error"] as? String)?.contains("no model") == true, "S7 preview: no model -> the reason")
+    // A baseline that differs -> restart true.
+    let p4 = profilePreview(profile, kit: "/kits/kit130", version: "1.3.0", folders: [folder],
+                            isDir: { fs.isDir($0) }, fileContents: { fs.fileContents($0) },
+                            listDir: { fs.listDir($0) },
+                            globals: GlobalCfg(port: 9999), baselineSignature: "a-different-baseline")
+    check(p4["restart"] as? Bool == true, "S7 preview: a changed signature vs baseline -> restart")
+}
+
+// 102. S7 model sizes: enumerateModels/folderTickState surface size_bytes via
+// the injected dirSize (dir-less ollama models -> null).
+do {
+    var fs = FakeFS()
+    fs.dir("/folders/lm/incoai/pkg", ["manifest.json"])
+    fs.file("/folders/lm/incoai/pkg/manifest.json", "{}")
+    let folder = ModelFolder(id: "lmstudio", path: "/folders/lm", source: "auto")
+    let st = folderTickState(folder: folder,
+                             isDir: { fs.isDir($0) }, fileContents: { fs.fileContents($0) },
+                             listDir: { fs.listDir($0) },
+                             dirSize: { $0.hasSuffix("/pkg") ? 1234 : 0 })
+    let m = st["models"] as? [Any]
+    check(m?.count == 1, "S7 size: one model enumerated")
+    let size = (m?.first as? [String: Any])?["size_bytes"]
+    check(size as? Int64 == 1234, "S7 size: the dir size rides the model tick state")
+}
+
+// 103. S7 real-FS dirSize helper: a file is its own size; a missing path -> nil.
+do {
+    let tmp = NSTemporaryDirectory() + "/splashui-dirtsize-\(UUID().uuidString)"
+    try? FileManager.default.createDirectory(atPath: tmp, withIntermediateDirectories: true)
+    let f = tmp + "/f.bin"
+    try? Data(count: 512).write(to: URL(fileURLWithPath: f))
+    check(dirSize(f) == 512, "S7 dirSize: a file is its own size")
+    check(dirSize(tmp) != nil, "S7 dirSize: a dir sums to a non-nil size")
+    check(dirSize(tmp + "/nope") == nil, "S7 dirSize: a missing path -> nil")
+    try? FileManager.default.removeItem(atPath: tmp)
+}
+
+// 104. S7 tick payload: the new engine + network + preview keys ride along as
+// stable nulls/defaults (the change gate stays quiet).
+do {
+    let d = defaultConfig(home: "/home", now: now)
+    let p = configTickPayload(doc: d, loadError: nil, versionTooNew: false,
+                              activeInvalid: false, firstRun: false, inFlight: 0, result: nil)
+    let eng = p["engine"] as? [String: Any]
+    for k in ["arch", "os", "verdict", "verdict_reason"] {
+        check(eng?[k] is NSNull, "S7 tick: engine.\(k) is a stable null (pre-overlay)")
+    }
+    check(p["host"] as? String == "127.0.0.1", "S7 tick: the global host rides along")
+    check(p["web_ui"] as? Bool == true, "S7 tick: the global web_ui rides along")
+    let prof = p["profiles"] as? [Any]
+    check((prof?.first as? [String: Any])?["preview"] is NSNull, "S7 tick: a stable preview null")
+    check(((prof?.first as? [String: Any])?["model"] as? [String: Any])?["size_bytes"] is NSNull,
+          "S7 tick: a stable model size null")
 }
 
 print(failures == 0 ? "ALL TESTS PASSED" : "\(failures) TEST(S) FAILED")

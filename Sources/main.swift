@@ -46,11 +46,11 @@ func serverPids(port: Int) -> [Int32] {
 
 // Is anything listening on the engine port? Ground truth for "a server exists" —
 // a raw socket connect: no child process, no pgrep, immune to spawn flakiness.
-func portAlive(port: Int) -> Bool {
+func portAlive(port: Int, host: String = Cfg.host) -> Bool {
     var addr = sockaddr_in()
     addr.sin_family = sa_family_t(AF_INET)
     addr.sin_port = UInt16(port).bigEndian
-    addr.sin_addr = in_addr(s_addr: inet_addr(Cfg.host))
+    addr.sin_addr = in_addr(s_addr: inet_addr(host))
     let fd = socket(AF_INET, SOCK_STREAM, 0)
     guard fd >= 0 else { return false }
     defer { close(fd) }
@@ -137,7 +137,7 @@ final class ServerProc {
     }
 
     func launch() {
-        guard pid == nil, !portAlive(port: port) else { return }
+        guard pid == nil, !portAlive(port: port, host: plan.host ?? Cfg.host) else { return }
         // Fresh engine log + tail symlink on every attempt, before the pre-flight,
         // so even a missing-install failure lands in /tmp (the panel + `tail -f`).
         let stamp = ISO8601DateFormatter().string(from: Date())
@@ -618,6 +618,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                   let data = try? JSONSerialization.data(withJSONObject: obj) else { return }
             sendConfigResult(configStore.activateCandidate(data, profileId: id), to: "window.__cfgSave")
         case "config.validate": respondConfigValidate(body)
+        case "config.reveal_key":
+            // The eye toggle (S7): the raw key, on explicit user action only.
+            // The mask is the passive default; this is the approved exception
+            // to D6's "never rendered" (AGENTS.md tension flagged in S7 report).
+            let key = configStore.doc.globals.apiKey
+            let json = try? JSONSerialization.data(withJSONObject: ["key": key])
+            let str = json.flatMap { String(data: $0, encoding: .utf8) } ?? "null"
+            evalOnReady("window.__cfgRevealKey(\(str))", oneShot: true)
         case "browse": browse(context: body["context"] as? String ?? "")
         case "config.scan":
             if let id = body["id"] as? String { forceFolderScan(id) }
@@ -697,13 +705,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     private func profileStates(_ doc: ConfigDoc) -> [[String: Any]] {
         return doc.profiles.map { p in
             var model = p.model
+            var state_size: Int64? = nil
             let scanned = folderScanCache[model.source]?["models"] as? [[String: Any]]
-            if let found = scanned?.first(where: { $0["id"] as? String == model.id }) { model.dir = found["dir"] as? String }
+            if let found = scanned?.first(where: { $0["id"] as? String == model.id }) {
+                if let d = found["dir"] as? String { model.dir = d }
+                state_size = found["size_bytes"] as? Int64
+            }
             var state = modelTickState(model: model, version: server.plan.version,
                                        draftModel: p.options["draft_model"]?.string,
                                        isDir: { isDir($0) },
                                        fileContents: { try? String(contentsOfFile: $0, encoding: .utf8) })
             state["id"] = p.id
+            state["size_bytes"] = state_size ?? NSNull()
             return state
         }
     }
@@ -826,7 +839,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                     listDir: { d -> [String]? in
                         guard d == f.path || d.hasPrefix(f.path + "/") else { return nil }
                         return (try? fm.contentsOfDirectory(atPath: d))
-                    }, version: version))
+                    },
+                    version: version,
+                    dirSize: { d -> Int64? in
+                        guard d == f.path || d.hasPrefix(f.path + "/") else { return nil }
+                        return dirSize(d)
+                    }))
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
@@ -935,10 +953,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     // MARK: Polling
 
     private func get(_ path: String, _ done: @escaping (Data?) -> Void) {
-        // D9: the port + key come from the launch plan (config.json), not env.
+        // D9: the host + port + key come from the launch plan (config.json), not env.
         let port = server.port
+        let host = server.plan.host ?? Cfg.host
         let key = configStore.doc.globals.apiKey
-        guard let url = URL(string: "http://\(Cfg.host):\(port)\(path)") else { done(nil); return }
+        guard let url = URL(string: "http://\(host):\(port)\(path)") else { done(nil); return }
         var req = URLRequest(url: url)
         req.timeoutInterval = 2.5
         req.setValue(key, forHTTPHeaderField: "x-api-key")
@@ -1432,6 +1451,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         eng["tried"] = plan.tried
         eng["valid"] = plan.error == nil
         eng["error"] = plan.error ?? NSNull()
+        // S7: the ENGINE panel's new display facts (plan-stable: the change
+        // gate stays quiet while the install is unchanged).
+        let archOS = kitArchOS(plan.workDir)
+        eng["arch"] = archOS.arch ?? NSNull()
+        eng["os"] = archOS.os ?? NSNull()
+        let v = engineVerdict(resolved: plan.workDir != nil, version: plan.version,
+                              error: plan.error, mappingFallback: plan.mappingFallback)
+        eng["verdict"] = v.verdict
+        eng["verdict_reason"] = v.reason ?? NSNull()
         cfgPayload["engine"] = eng
         cfgPayload["option_defs"] = profileOptionDefinitions(version: plan.version)
         cfgPayload["mapping_fallback"] = plan.mappingFallback
@@ -1464,7 +1492,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         cfgPayload["profiles"] = (cfgPayload["profiles"] as? [[String: Any]] ?? []).map { profile in
             var merged = profile
             if let state = states.first(where: { $0["id"] as? String == profile["id"] as? String }) {
-                for key in ["eligibility", "eligibility_reason", "drafter", "kind"] { merged[key] = state[key] }
+                for key in ["eligibility", "eligibility_reason", "drafter", "kind", "size_bytes"] {
+                    merged[key] = state[key]
+                }
+            }
+            // S7: the GENERAL tab's LAUNCH PREVIEW. The running/launching
+            // profile shows the plan itself (one code path); the others run
+            // the same pipeline over their own options (pure, no process).
+            let pid = profile["id"] as? String
+            if let p = doc.profiles.first(where: { $0.id == pid }) {
+                if p.id == plan.profileId, plan.error == nil, plan.executable != nil {
+                    merged["preview"] = ["args": plan.engineArgs as [Any], "error": NSNull() as Any,
+                                          "restart": plan.restartRequired,
+                                          "version": plan.version ?? NSNull()] as [String: Any]
+                } else if p.id == plan.profileId {
+                    merged["preview"] = ["args": [Any](), "error": plan.error ?? NSNull() as Any,
+                                          "restart": false, "version": plan.version ?? NSNull()] as [String: Any]
+                } else {
+                    merged["preview"] = profilePreview(
+                        p, kit: plan.workDir, version: plan.version,
+                        folders: doc.globals.modelFolders,
+                        isDir: { isDir($0) },
+                        fileContents: { try? String(contentsOfFile: $0, encoding: .utf8) },
+                        listDir: { try? FileManager.default.contentsOfDirectory(atPath: $0) },
+                        globals: doc.globals,
+                        baselineSignature: server.lastSuccessfulPlanSignature)
+                }
             }
             return merged
         }

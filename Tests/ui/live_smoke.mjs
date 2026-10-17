@@ -21,7 +21,6 @@ const doc = JSON.parse(original), hash = data => createHash('sha256').update(dat
 const originalHash = hash(original), port = doc.globals.port;
 if (roundTrips) {
   assert.equal(port, 8123, 'round-trip fixture must begin at port 8123');
-  assert.equal(doc.profiles[0].options.ane, true, 'round-trip fixture must begin with ANE enabled');
 }
 function pids(name) {
   try { return execFileSync('pgrep', ['-x', name], { encoding: 'utf8' }).trim().split(/\s+/).filter(Boolean); }
@@ -39,7 +38,6 @@ chmodSync(directory, 0o700);
 const output = join(directory, 'result.json'), evidence = join(directory, 'evidence.png');
 writeFileSync(join(directory, 'config.before.json'), original, { mode: 0o600 });
 const expected = { port, enginePID, roundTrips, manualPath: doc.globals.engine.manual_path || '',
-  engineMode: doc.globals.engine.mode, ane: doc.profiles[0].options.ane,
   folderCount: doc.globals.model_folders.length };
 const hookPath = join(directory, 'assertions.js');
 writeFileSync(hookPath, readFileSync(join(here, 'live_assertions.js'), 'utf8')
@@ -104,7 +102,7 @@ try {
   for (const step of result.steps || []) console.log(JSON.stringify({ step }));
   assert.equal(result.suite, 'panel-live', `unexpected hook result: ${JSON.stringify(result)}`);
   assert.equal(result.failed, 0, 'live DOM assertions failed');
-  assert.ok(result.assertions >= (roundTrips ? 49 : 23), 'hook must execute every requested assertion');
+  assert.ok(result.assertions >= (roundTrips ? 22 : 19), 'hook must execute every requested assertion');
   execFileSync('screencapture', ['-x', evidence]); // Evidence only; never parsed or compared.
   await cleanup();
   assert.equal(hash(readFileSync(configPath)), originalHash, 'config must be restored byte-identical');

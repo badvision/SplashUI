@@ -1,0 +1,418 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1688 824" width="1688" height="824"><rect width="1688" height="824" fill="#000"/><rect x="0" y="20" width="520" height="776" fill="#050508"/><rect x="584" y="20" width="520" height="776" fill="#050508"/><rect x="1168" y="20" width="520" height="776" fill="#050508"/><text x="10" y="12" font-size="10" fill="#666688" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="2">01 · ONE SCREEN — GLOBAL=ENGINE</text>
+<g transform="translate(0,20)">
+<path d="M58 0 L64 0 L64 28 L56 28 Q42 28 42 42 L42 62 L0 62 L0 48 Q0 0 58 0 Z" fill="#4455ff"/>
+<path d="M64,0 H506 A14,14 0 0 1 506,28 H64 Z" fill="#4455ff"/>
+<text x="82" y="22" font-size="21" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="2.6" font-weight="700">SPLASH SETTINGS</text>
+<rect x="432" y="4" width="76" height="20" fill="#050508" rx="10"/>
+<text x="470" y="17" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="1" font-weight="700">STATUS</text>
+<rect x="64" y="34" width="350" height="18" fill="#ffcc99" rx="0"/>
+<text x="72" y="47" font-size="8.5" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" font-weight="700">QWEN3.8-27B - INCOAI/QWEN3.8-27B-SPLASH</text>
+<path d="M414,34 H502 A9,9 0 0 1 502,52 H414 Z" fill="#33cc99"/>
+<text x="458" y="47" font-size="11" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" font-weight="700">IDLE</text>
+<rect x="0" y="62" width="42" height="4" fill="#4455ff" rx="0"/>
+<rect x="42" y="66" width="478" height="2" fill="#191d33" rx="0"/>
+<rect x="0" y="66" width="42" height="240" fill="#cc88ff" rx="0"/>
+<rect x="0" y="306" width="42" height="388" fill="#33cc99" rx="0"/>
+<text x="36" y="294" font-size="23" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="end" font-weight="700">06</text>
+<text x="36" y="682" font-size="23" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="end" font-weight="700">07</text>
+<rect x="52" y="694" width="259" height="4" fill="#33cc99" rx="0"/>
+<rect x="320" y="694" width="98" height="4" fill="#33cc99" rx="0"/>
+<rect x="427" y="694" width="71" height="4" fill="#33cc99" rx="2"/>
+<text x="66" y="94" font-size="14" fill="#cc88ff" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="1.7" font-weight="700">GLOBAL SETTINGS</text>
+<path d="M74,108 H194 A8,8 0 0 1 202,116 V126 A8,8 0 0 1 194,134 H74 A8,8 0 0 1 66,126 V116 A8,8 0 0 1 74,108 Z" fill="#cc88ff"/>
+<text x="76" y="125" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="0.5" font-weight="700">ENGINE</text>
+<path d="M74,140 H194 A8,8 0 0 1 202,148 V158 A8,8 0 0 1 194,166 H74 A8,8 0 0 1 66,158 V148 A8,8 0 0 1 74,140 Z" fill="#0b0b12"/>
+<text x="76" y="157" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="0.5" font-weight="700">FOLDERS</text>
+<path d="M74,172 H194 A8,8 0 0 1 202,180 V190 A8,8 0 0 1 194,198 H74 A8,8 0 0 1 66,190 V180 A8,8 0 0 1 74,172 Z" fill="#0b0b12"/>
+<text x="76" y="189" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="0.5" font-weight="700">NETWORK</text>
+<text x="216" y="94" font-size="12" fill="#88ccff" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="2" font-weight="700">ENGINE</text>
+<rect x="216" y="110" width="95" height="20" fill="#666688" rx="10.0"/>
+<rect x="291" y="110" width="20" height="20" fill="#666688" rx="0"/>
+<rect x="316" y="110" width="115" height="20" fill="#cc88ff" rx="10.0"/>
+<rect x="316" y="110" width="20" height="20" fill="#cc88ff" rx="0"/>
+<text x="263.5" y="124" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">AUTO</text>
+<text x="373.5" y="124" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">MANUAL</text>
+<rect x="216" y="140" width="213" height="20" fill="#666688" rx="10.0"/>
+<rect x="409" y="140" width="20" height="20" fill="#666688" rx="0"/>
+<rect x="434" y="140" width="64" height="20" fill="#666688" rx="10.0"/>
+<rect x="434" y="140" width="20" height="20" fill="#666688" rx="0"/>
+<text x="226" y="154" font-size="9" fill="#050508" font-family="monospace" text-anchor="start">/Users/brobert/…/splash-standalone</text>
+<text x="466.0" y="154" font-size="9" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">BROWSE</text>
+<text x="216" y="182" font-size="9" fill="#666688" font-family="monospace" text-anchor="start">LADDER  …/kit/splash-1.3.0-arm64-macos26</text>
+<text x="216" y="198" font-size="10" fill="#88ccff" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" font-weight="700">1.3.0</text>
+<text x="260" y="198" font-size="9" fill="#666688" font-family="monospace" text-anchor="start">ARM64 · MACOS 26.6</text>
+<text x="498" y="198" font-size="10" fill="#33cc99" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="end" font-weight="700">VALID</text>
+<text x="216" y="220" font-size="9" fill="#666688" font-family="monospace" text-anchor="start">APPLIES ON NEXT RESTART</text>
+<rect x="52" y="306" width="259" height="4" fill="#cc88ff" rx="0"/>
+<rect x="320" y="306" width="98" height="4" fill="#cc88ff" rx="0"/>
+<rect x="427" y="306" width="71" height="4" fill="#cc88ff" rx="2"/>
+<text x="66" y="336" font-size="14" fill="#33cc99" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="1.7" font-weight="700">PROFILES</text>
+<path d="M74,350 H202 A0,0 0 0 1 202,350 V376 A0,0 0 0 1 202,376 H74 A8,8 0 0 1 66,368 V358 A8,8 0 0 1 74,350 Z" fill="#1fa87b"/>
+<rect x="188" y="358" width="8" height="10" fill="#ffebde" rx="4"/>
+<text x="76" y="367" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="0.5" font-weight="700">QWEN3.8-27B</text>
+<path d="M74,382 H194 A8,8 0 0 1 202,390 V400 A8,8 0 0 1 194,408 H74 A8,8 0 0 1 66,400 V390 A8,8 0 0 1 74,382 Z" fill="#0b0b12"/>
+<text x="76" y="399" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="0.5" font-weight="700">LLAMA-8B</text>
+<path d="M74,414 H194 A8,8 0 0 1 202,422 V432 A8,8 0 0 1 194,440 H74 A8,8 0 0 1 66,432 V422 A8,8 0 0 1 74,414 Z" fill="#0b0b12"/>
+<text x="76" y="431" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="0.5" font-weight="700">+ ADD PROFILE</text>
+<rect x="202" y="350" width="14" height="26" fill="#1fa87b" rx="0"/>
+<path d="M216,350 H486 A12,12 0 0 1 486,374 H216 Z" fill="#1fa87b"/>
+<text x="278" y="367" font-size="14" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="1.7" font-weight="700">PROFILE SETTINGS</text>
+<path d="M216,374 H268 V581 Q268,591 282,591 H492 A6,6 0 0 1 498,597 A6,6 0 0 1 492,603 H234 Q216,603 216,585 Z" fill="#1fa87b"/>
+<path d="M202,376 H216 V390 Q216,376 202,376 Z" fill="#1fa87b"/>
+<rect x="268" y="374" width="8" height="8" fill="#1fa87b" rx="0"/>
+<path d="M276,374 Q268,374 268,378 Q268,382 260,382 H234 A13,13 0 0 0 221,395 A13,13 0 0 0 234,408 H260 Q268,408 268,416 H278 V374 Z" fill="#050508"/>
+<text x="247" y="398.3" font-size="9" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">GENERAL</text>
+<text x="242.0" y="434.3" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">MEMORY</text>
+<text x="242.0" y="470.3" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">CACHE</text>
+<text x="242.0" y="506.3" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">COMPUTE</text>
+<text x="242.0" y="542.3" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">API</text>
+<text x="278" y="387" font-size="8" fill="#666688" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">PROFILE</text>
+<rect x="278" y="393" width="70" height="20" fill="#33cc99" rx="10.0"/>
+<rect x="328" y="393" width="20" height="20" fill="#33cc99" rx="0"/>
+<rect x="353" y="393" width="70" height="20" fill="#666688" rx="0"/>
+<rect x="428" y="393" width="70" height="20" fill="#666688" rx="10.0"/>
+<rect x="428" y="393" width="20" height="20" fill="#666688" rx="0"/>
+<text x="313.0" y="407" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">ACTIVATE</text>
+<text x="388.0" y="407" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">CLONE</text>
+<text x="463.0" y="407" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">DELETE</text>
+<text x="278" y="431" font-size="8" fill="#666688" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">MODEL</text>
+<rect x="278" y="437" width="159" height="20" fill="#666688" rx="10.0"/>
+<rect x="417" y="437" width="20" height="20" fill="#666688" rx="0"/>
+<rect x="442" y="437" width="56" height="20" fill="#666688" rx="10.0"/>
+<rect x="442" y="437" width="20" height="20" fill="#666688" rx="0"/>
+<text x="288" y="451" font-size="8" fill="#050508" font-family="monospace" text-anchor="start">Qwen3.8-27B-Splash</text>
+<text x="470.0" y="451" font-size="9" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">CHANGE</text>
+<text x="278" y="479" font-size="8" fill="#666688" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">DRAFTER</text>
+<text x="278" y="491" font-size="9" fill="#88ccff" font-family="monospace" text-anchor="start" font-weight="700">PACKAGE — BAKED IN DRAFT/</text>
+<text x="278" y="507" font-size="8.5" fill="#666688" font-family="monospace" text-anchor="start">CREATED 2026-10-15 · USED 2026-10-16</text>
+<rect x="278" y="519" width="220" height="64" fill="#0b0b12" rx="6"/>
+<text x="288" y="533" font-size="8" fill="#88ccff" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="1" font-weight="700">LAUNCH PREVIEW</text>
+<rect x="288" y="539" width="200" height="1" fill="#191d33" rx="0"/>
+<text x="288" y="553" font-size="8.5" fill="#ffebde" font-family="monospace" text-anchor="start">splash --model Qwen3.8-27B</text>
+<text x="288" y="567" font-size="8.5" fill="#88ccff" font-family="monospace" text-anchor="start">  --draft package --kv 16 · RESTART</text>
+<rect x="66" y="708" width="104" height="20" fill="#dd4444" rx="10"/>
+<text x="118.0" y="722" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">RESTART NEEDED</text>
+<rect x="394" y="708" width="60" height="20" fill="#0b0b12" rx="10.0"/>
+<rect x="434" y="708" width="20" height="20" fill="#0b0b12" rx="0"/>
+<rect x="458" y="708" width="40" height="20" fill="#4455ff" rx="10.0"/>
+<rect x="458" y="708" width="20" height="20" fill="#4455ff" rx="0"/>
+<text x="424" y="722" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">CONFIG</text>
+<text x="478" y="722" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">V1</text>
+<path d="M0,694 H42 V766 Q42,788 64,788 H514 A6,6 0 0 1 520,794 A6,6 0 0 1 514,800 H58 Q0,800 0,694 Z" fill="#4455ff"/>
+<rect x="66" y="746" width="50" height="20" fill="#33cc99" rx="10.0"/>
+<rect x="96" y="746" width="20" height="20" fill="#33cc99" rx="0"/>
+<rect x="120" y="746" width="50" height="20" fill="#ffcc33" rx="0"/>
+<rect x="174" y="746" width="50" height="20" fill="#dd4444" rx="10.0"/>
+<rect x="174" y="746" width="20" height="20" fill="#dd4444" rx="0"/>
+<text x="91" y="760" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">START</text>
+<text x="145" y="760" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">RESTART</text>
+<text x="199" y="760" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">STOP</text>
+<rect x="263" y="746" width="34" height="20" fill="#0b0b12" rx="10.0"/>
+<rect x="277" y="746" width="20" height="20" fill="#0b0b12" rx="0"/>
+<rect x="301" y="746" width="48" height="20" fill="#0b0b12" rx="10.0"/>
+<rect x="301" y="746" width="20" height="20" fill="#0b0b12" rx="0"/>
+<text x="280" y="760" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">PID</text>
+<text x="325" y="760" font-size="9.5" fill="#ffebde" font-family="monospace" text-anchor="middle" font-weight="700">23181</text>
+<rect x="388" y="746" width="110" height="20" fill="#0b0b12" rx="10"/>
+<text x="443.0" y="760" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">APP-MANAGED</text>
+</g>
+<text x="594" y="12" font-size="10" fill="#666688" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="2">02 · ONE SCREEN — GLOBAL=NETWORK · GRAY=default</text>
+<g transform="translate(584,20)">
+<path d="M58 0 L64 0 L64 28 L56 28 Q42 28 42 42 L42 62 L0 62 L0 48 Q0 0 58 0 Z" fill="#4455ff"/>
+<path d="M64,0 H506 A14,14 0 0 1 506,28 H64 Z" fill="#4455ff"/>
+<text x="82" y="22" font-size="21" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="2.6" font-weight="700">SPLASH SETTINGS</text>
+<rect x="432" y="4" width="76" height="20" fill="#050508" rx="10"/>
+<text x="470" y="17" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="1" font-weight="700">STATUS</text>
+<rect x="64" y="34" width="350" height="18" fill="#ffcc99" rx="0"/>
+<text x="72" y="47" font-size="8.5" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" font-weight="700">QWEN3.8-27B - INCOAI/QWEN3.8-27B-SPLASH</text>
+<path d="M414,34 H502 A9,9 0 0 1 502,52 H414 Z" fill="#33cc99"/>
+<text x="458" y="47" font-size="11" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" font-weight="700">IDLE</text>
+<rect x="0" y="62" width="42" height="4" fill="#4455ff" rx="0"/>
+<rect x="42" y="66" width="478" height="2" fill="#191d33" rx="0"/>
+<rect x="0" y="66" width="42" height="240" fill="#cc88ff" rx="0"/>
+<rect x="0" y="306" width="42" height="388" fill="#33cc99" rx="0"/>
+<text x="36" y="294" font-size="23" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="end" font-weight="700">06</text>
+<text x="36" y="682" font-size="23" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="end" font-weight="700">07</text>
+<rect x="52" y="694" width="259" height="4" fill="#33cc99" rx="0"/>
+<rect x="320" y="694" width="98" height="4" fill="#33cc99" rx="0"/>
+<rect x="427" y="694" width="71" height="4" fill="#33cc99" rx="2"/>
+<text x="66" y="94" font-size="14" fill="#cc88ff" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="1.7" font-weight="700">GLOBAL SETTINGS</text>
+<path d="M74,108 H194 A8,8 0 0 1 202,116 V126 A8,8 0 0 1 194,134 H74 A8,8 0 0 1 66,126 V116 A8,8 0 0 1 74,108 Z" fill="#0b0b12"/>
+<text x="76" y="125" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="0.5" font-weight="700">ENGINE</text>
+<path d="M74,140 H194 A8,8 0 0 1 202,148 V158 A8,8 0 0 1 194,166 H74 A8,8 0 0 1 66,158 V148 A8,8 0 0 1 74,140 Z" fill="#0b0b12"/>
+<text x="76" y="157" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="0.5" font-weight="700">FOLDERS</text>
+<path d="M74,172 H194 A8,8 0 0 1 202,180 V190 A8,8 0 0 1 194,198 H74 A8,8 0 0 1 66,190 V180 A8,8 0 0 1 74,172 Z" fill="#cc88ff"/>
+<text x="76" y="189" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="0.5" font-weight="700">NETWORK</text>
+<text x="216" y="94" font-size="12" fill="#88ccff" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="2" font-weight="700">NETWORK</text>
+<text x="216" y="125" font-size="10" fill="#ccaa88" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">HOST</text>
+<rect x="324" y="110" width="124" height="22" fill="#0b0b12" rx="0"/>
+<rect x="324" y="110" width="124" height="2" fill="#191d33" rx="0"/>
+<text x="330" y="125" font-size="9.5" fill="#ffebde" font-family="monospace" text-anchor="start">127.0.0.1</text>
+<text x="216" y="153" font-size="10" fill="#ccaa88" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">PORT</text>
+<rect x="324" y="138" width="70" height="22" fill="#0b0b12" rx="0"/>
+<rect x="324" y="138" width="70" height="2" fill="#191d33" rx="0"/>
+<text x="330" y="153" font-size="9.5" fill="#ffebde" font-family="monospace" text-anchor="start">8123</text>
+<text x="416" y="149" font-size="8" fill="#88ccff" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">▴</text>
+<text x="416" y="157" font-size="8" fill="#88ccff" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">▾</text>
+<text x="216" y="181" font-size="10" fill="#ccaa88" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">API KEY</text>
+<rect x="324" y="166" width="150" height="22" fill="#0b0b12" rx="0"/>
+<rect x="324" y="166" width="150" height="2" fill="#191d33" rx="0"/>
+<path d="M482,177 Q489,171 496,177 Q489,183 482,177 Z" fill="#88ccff"/>
+<rect x="486.5" y="174.5" width="5" height="5" fill="#0b0b12" rx="2.5"/>
+<text x="330" y="181" font-size="9.5" fill="#88ccff" font-family="monospace" text-anchor="start">••••••••</text>
+<text x="216" y="209" font-size="10" fill="#ccaa88" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">ALLOWED-HOST</text>
+<rect x="324" y="194" width="174" height="22" fill="#0b0b12" rx="0"/>
+<rect x="324" y="194" width="174" height="2" fill="#191d33" rx="0"/>
+<text x="330" y="209" font-size="9.5" fill="#ffebde" font-family="monospace" text-anchor="start">127.0.0.1,localhost</text>
+<text x="216" y="237" font-size="10" fill="#ccaa88" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">ALLOWED-ORIGIN</text>
+<rect x="324" y="222" width="174" height="22" fill="#0b0b12" rx="0"/>
+<rect x="324" y="222" width="174" height="2" fill="#191d33" rx="0"/>
+<text x="330" y="237" font-size="9.5" fill="#666688" font-family="monospace" text-anchor="start">file://*</text>
+<text x="216" y="265" font-size="10" fill="#ccaa88" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">WEB UI</text>
+<rect x="324" y="254" width="58" height="20" fill="#cc88ff" rx="10.0"/>
+<rect x="362" y="254" width="20" height="20" fill="#cc88ff" rx="0"/>
+<rect x="387" y="254" width="58" height="20" fill="#666688" rx="10.0"/>
+<rect x="387" y="254" width="20" height="20" fill="#666688" rx="0"/>
+<text x="353.0" y="268" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">ON</text>
+<text x="416.0" y="268" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">OFF</text>
+<rect x="52" y="306" width="259" height="4" fill="#cc88ff" rx="0"/>
+<rect x="320" y="306" width="98" height="4" fill="#cc88ff" rx="0"/>
+<rect x="427" y="306" width="71" height="4" fill="#cc88ff" rx="2"/>
+<text x="66" y="336" font-size="14" fill="#33cc99" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="1.7" font-weight="700">PROFILES</text>
+<path d="M74,350 H202 A0,0 0 0 1 202,350 V376 A0,0 0 0 1 202,376 H74 A8,8 0 0 1 66,368 V358 A8,8 0 0 1 74,350 Z" fill="#1fa87b"/>
+<rect x="188" y="358" width="8" height="10" fill="#ffebde" rx="4"/>
+<text x="76" y="367" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="0.5" font-weight="700">QWEN3.8-27B</text>
+<path d="M74,382 H194 A8,8 0 0 1 202,390 V400 A8,8 0 0 1 194,408 H74 A8,8 0 0 1 66,400 V390 A8,8 0 0 1 74,382 Z" fill="#0b0b12"/>
+<text x="76" y="399" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="0.5" font-weight="700">LLAMA-8B</text>
+<path d="M74,414 H194 A8,8 0 0 1 202,422 V432 A8,8 0 0 1 194,440 H74 A8,8 0 0 1 66,432 V422 A8,8 0 0 1 74,414 Z" fill="#0b0b12"/>
+<text x="76" y="431" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="0.5" font-weight="700">+ ADD PROFILE</text>
+<rect x="202" y="350" width="14" height="26" fill="#1fa87b" rx="0"/>
+<path d="M216,350 H486 A12,12 0 0 1 486,374 H216 Z" fill="#1fa87b"/>
+<text x="278" y="367" font-size="14" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="1.7" font-weight="700">PROFILE SETTINGS</text>
+<path d="M216,374 H268 V581 Q268,591 282,591 H492 A6,6 0 0 1 498,597 A6,6 0 0 1 492,603 H234 Q216,603 216,585 Z" fill="#1fa87b"/>
+<path d="M202,376 H216 V390 Q216,376 202,376 Z" fill="#1fa87b"/>
+<rect x="268" y="374" width="8" height="8" fill="#1fa87b" rx="0"/>
+<path d="M276,374 Q268,374 268,378 Q268,382 260,382 H234 A13,13 0 0 0 221,395 A13,13 0 0 0 234,408 H260 Q268,408 268,416 H278 V374 Z" fill="#050508"/>
+<text x="247" y="398.3" font-size="9" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">GENERAL</text>
+<text x="242.0" y="434.3" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">MEMORY</text>
+<text x="242.0" y="470.3" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">CACHE</text>
+<text x="242.0" y="506.3" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">COMPUTE</text>
+<text x="242.0" y="542.3" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">API</text>
+<text x="278" y="387" font-size="8" fill="#666688" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">PROFILE</text>
+<rect x="278" y="393" width="70" height="20" fill="#33cc99" rx="10.0"/>
+<rect x="328" y="393" width="20" height="20" fill="#33cc99" rx="0"/>
+<rect x="353" y="393" width="70" height="20" fill="#666688" rx="0"/>
+<rect x="428" y="393" width="70" height="20" fill="#666688" rx="10.0"/>
+<rect x="428" y="393" width="20" height="20" fill="#666688" rx="0"/>
+<text x="313.0" y="407" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">ACTIVATE</text>
+<text x="388.0" y="407" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">CLONE</text>
+<text x="463.0" y="407" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">DELETE</text>
+<text x="278" y="431" font-size="8" fill="#666688" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">MODEL</text>
+<rect x="278" y="437" width="159" height="20" fill="#666688" rx="10.0"/>
+<rect x="417" y="437" width="20" height="20" fill="#666688" rx="0"/>
+<rect x="442" y="437" width="56" height="20" fill="#666688" rx="10.0"/>
+<rect x="442" y="437" width="20" height="20" fill="#666688" rx="0"/>
+<text x="288" y="451" font-size="8" fill="#050508" font-family="monospace" text-anchor="start">Qwen3.8-27B-Splash</text>
+<text x="470.0" y="451" font-size="9" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">CHANGE</text>
+<text x="278" y="479" font-size="8" fill="#666688" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">DRAFTER</text>
+<text x="278" y="491" font-size="9" fill="#88ccff" font-family="monospace" text-anchor="start" font-weight="700">PACKAGE — BAKED IN DRAFT/</text>
+<text x="278" y="507" font-size="8.5" fill="#666688" font-family="monospace" text-anchor="start">CREATED 2026-10-15 · USED 2026-10-16</text>
+<rect x="278" y="519" width="220" height="64" fill="#0b0b12" rx="6"/>
+<text x="288" y="533" font-size="8" fill="#88ccff" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="1" font-weight="700">LAUNCH PREVIEW</text>
+<rect x="288" y="539" width="200" height="1" fill="#191d33" rx="0"/>
+<text x="288" y="553" font-size="8.5" fill="#ffebde" font-family="monospace" text-anchor="start">splash --model Qwen3.8-27B</text>
+<text x="288" y="567" font-size="8.5" fill="#88ccff" font-family="monospace" text-anchor="start">  --draft package --kv 16 · RESTART</text>
+<rect x="66" y="708" width="104" height="20" fill="#dd4444" rx="10"/>
+<text x="118.0" y="722" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">RESTART NEEDED</text>
+<rect x="394" y="708" width="60" height="20" fill="#0b0b12" rx="10.0"/>
+<rect x="434" y="708" width="20" height="20" fill="#0b0b12" rx="0"/>
+<rect x="458" y="708" width="40" height="20" fill="#4455ff" rx="10.0"/>
+<rect x="458" y="708" width="20" height="20" fill="#4455ff" rx="0"/>
+<text x="424" y="722" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">CONFIG</text>
+<text x="478" y="722" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">V1</text>
+<path d="M0,694 H42 V766 Q42,788 64,788 H514 A6,6 0 0 1 520,794 A6,6 0 0 1 514,800 H58 Q0,800 0,694 Z" fill="#4455ff"/>
+<rect x="66" y="746" width="50" height="20" fill="#33cc99" rx="10.0"/>
+<rect x="96" y="746" width="20" height="20" fill="#33cc99" rx="0"/>
+<rect x="120" y="746" width="50" height="20" fill="#ffcc33" rx="0"/>
+<rect x="174" y="746" width="50" height="20" fill="#dd4444" rx="10.0"/>
+<rect x="174" y="746" width="20" height="20" fill="#dd4444" rx="0"/>
+<text x="91" y="760" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">START</text>
+<text x="145" y="760" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">RESTART</text>
+<text x="199" y="760" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">STOP</text>
+<rect x="263" y="746" width="34" height="20" fill="#0b0b12" rx="10.0"/>
+<rect x="277" y="746" width="20" height="20" fill="#0b0b12" rx="0"/>
+<rect x="301" y="746" width="48" height="20" fill="#0b0b12" rx="10.0"/>
+<rect x="301" y="746" width="20" height="20" fill="#0b0b12" rx="0"/>
+<text x="280" y="760" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">PID</text>
+<text x="325" y="760" font-size="9.5" fill="#ffebde" font-family="monospace" text-anchor="middle" font-weight="700">23181</text>
+<rect x="388" y="746" width="110" height="20" fill="#0b0b12" rx="10"/>
+<text x="443.0" y="760" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">APP-MANAGED</text>
+</g>
+<text x="1178" y="12" font-size="10" fill="#666688" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="2">03 · MODEL CHOOSER MODAL</text>
+<g transform="translate(1168,20)">
+<path d="M58 0 L64 0 L64 28 L56 28 Q42 28 42 42 L42 62 L0 62 L0 48 Q0 0 58 0 Z" fill="#4455ff"/>
+<path d="M64,0 H506 A14,14 0 0 1 506,28 H64 Z" fill="#4455ff"/>
+<text x="82" y="22" font-size="21" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="2.6" font-weight="700">SPLASH SETTINGS</text>
+<rect x="432" y="4" width="76" height="20" fill="#050508" rx="10"/>
+<text x="470" y="17" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="1" font-weight="700">STATUS</text>
+<rect x="64" y="34" width="350" height="18" fill="#ffcc99" rx="0"/>
+<text x="72" y="47" font-size="8.5" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" font-weight="700">QWEN3.8-27B - INCOAI/QWEN3.8-27B-SPLASH</text>
+<path d="M414,34 H502 A9,9 0 0 1 502,52 H414 Z" fill="#33cc99"/>
+<text x="458" y="47" font-size="11" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" font-weight="700">IDLE</text>
+<rect x="0" y="62" width="42" height="4" fill="#4455ff" rx="0"/>
+<rect x="42" y="66" width="478" height="2" fill="#191d33" rx="0"/>
+<rect x="0" y="66" width="42" height="240" fill="#cc88ff" rx="0"/>
+<rect x="0" y="306" width="42" height="388" fill="#33cc99" rx="0"/>
+<text x="36" y="294" font-size="23" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="end" font-weight="700">06</text>
+<text x="36" y="682" font-size="23" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="end" font-weight="700">07</text>
+<rect x="52" y="694" width="259" height="4" fill="#33cc99" rx="0"/>
+<rect x="320" y="694" width="98" height="4" fill="#33cc99" rx="0"/>
+<rect x="427" y="694" width="71" height="4" fill="#33cc99" rx="2"/>
+<text x="66" y="94" font-size="14" fill="#cc88ff" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="1.7" font-weight="700">GLOBAL SETTINGS</text>
+<path d="M74,108 H194 A8,8 0 0 1 202,116 V126 A8,8 0 0 1 194,134 H74 A8,8 0 0 1 66,126 V116 A8,8 0 0 1 74,108 Z" fill="#0b0b12"/>
+<text x="76" y="125" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="0.5" font-weight="700">ENGINE</text>
+<path d="M74,140 H194 A8,8 0 0 1 202,148 V158 A8,8 0 0 1 194,166 H74 A8,8 0 0 1 66,158 V148 A8,8 0 0 1 74,140 Z" fill="#0b0b12"/>
+<text x="76" y="157" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="0.5" font-weight="700">FOLDERS</text>
+<path d="M74,172 H194 A8,8 0 0 1 202,180 V190 A8,8 0 0 1 194,198 H74 A8,8 0 0 1 66,190 V180 A8,8 0 0 1 74,172 Z" fill="#cc88ff"/>
+<text x="76" y="189" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="0.5" font-weight="700">NETWORK</text>
+<text x="216" y="94" font-size="12" fill="#88ccff" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="2" font-weight="700">NETWORK</text>
+<text x="216" y="125" font-size="10" fill="#ccaa88" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">HOST</text>
+<rect x="324" y="110" width="124" height="22" fill="#0b0b12" rx="0"/>
+<rect x="324" y="110" width="124" height="2" fill="#191d33" rx="0"/>
+<text x="330" y="125" font-size="9.5" fill="#ffebde" font-family="monospace" text-anchor="start">127.0.0.1</text>
+<text x="216" y="153" font-size="10" fill="#ccaa88" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">PORT</text>
+<rect x="324" y="138" width="70" height="22" fill="#0b0b12" rx="0"/>
+<rect x="324" y="138" width="70" height="2" fill="#191d33" rx="0"/>
+<text x="330" y="153" font-size="9.5" fill="#ffebde" font-family="monospace" text-anchor="start">8123</text>
+<text x="416" y="149" font-size="8" fill="#88ccff" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">▴</text>
+<text x="416" y="157" font-size="8" fill="#88ccff" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">▾</text>
+<text x="216" y="181" font-size="10" fill="#ccaa88" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">API KEY</text>
+<rect x="324" y="166" width="150" height="22" fill="#0b0b12" rx="0"/>
+<rect x="324" y="166" width="150" height="2" fill="#191d33" rx="0"/>
+<path d="M482,177 Q489,171 496,177 Q489,183 482,177 Z" fill="#88ccff"/>
+<rect x="486.5" y="174.5" width="5" height="5" fill="#0b0b12" rx="2.5"/>
+<text x="330" y="181" font-size="9.5" fill="#88ccff" font-family="monospace" text-anchor="start">••••••••</text>
+<text x="216" y="209" font-size="10" fill="#ccaa88" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">ALLOWED-HOST</text>
+<rect x="324" y="194" width="174" height="22" fill="#0b0b12" rx="0"/>
+<rect x="324" y="194" width="174" height="2" fill="#191d33" rx="0"/>
+<text x="330" y="209" font-size="9.5" fill="#ffebde" font-family="monospace" text-anchor="start">127.0.0.1,localhost</text>
+<text x="216" y="237" font-size="10" fill="#ccaa88" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">ALLOWED-ORIGIN</text>
+<rect x="324" y="222" width="174" height="22" fill="#0b0b12" rx="0"/>
+<rect x="324" y="222" width="174" height="2" fill="#191d33" rx="0"/>
+<text x="330" y="237" font-size="9.5" fill="#666688" font-family="monospace" text-anchor="start">file://*</text>
+<text x="216" y="265" font-size="10" fill="#ccaa88" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">WEB UI</text>
+<rect x="324" y="254" width="58" height="20" fill="#cc88ff" rx="10.0"/>
+<rect x="362" y="254" width="20" height="20" fill="#cc88ff" rx="0"/>
+<rect x="387" y="254" width="58" height="20" fill="#666688" rx="10.0"/>
+<rect x="387" y="254" width="20" height="20" fill="#666688" rx="0"/>
+<text x="353.0" y="268" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">ON</text>
+<text x="416.0" y="268" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">OFF</text>
+<rect x="52" y="306" width="259" height="4" fill="#cc88ff" rx="0"/>
+<rect x="320" y="306" width="98" height="4" fill="#cc88ff" rx="0"/>
+<rect x="427" y="306" width="71" height="4" fill="#cc88ff" rx="2"/>
+<text x="66" y="336" font-size="14" fill="#33cc99" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="1.7" font-weight="700">PROFILES</text>
+<path d="M74,350 H202 A0,0 0 0 1 202,350 V376 A0,0 0 0 1 202,376 H74 A8,8 0 0 1 66,368 V358 A8,8 0 0 1 74,350 Z" fill="#1fa87b"/>
+<rect x="188" y="358" width="8" height="10" fill="#ffebde" rx="4"/>
+<text x="76" y="367" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="0.5" font-weight="700">QWEN3.8-27B</text>
+<path d="M74,382 H194 A8,8 0 0 1 202,390 V400 A8,8 0 0 1 194,408 H74 A8,8 0 0 1 66,400 V390 A8,8 0 0 1 74,382 Z" fill="#0b0b12"/>
+<text x="76" y="399" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="0.5" font-weight="700">LLAMA-8B</text>
+<path d="M74,414 H194 A8,8 0 0 1 202,422 V432 A8,8 0 0 1 194,440 H74 A8,8 0 0 1 66,432 V422 A8,8 0 0 1 74,414 Z" fill="#0b0b12"/>
+<text x="76" y="431" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="0.5" font-weight="700">+ ADD PROFILE</text>
+<rect x="202" y="350" width="14" height="26" fill="#1fa87b" rx="0"/>
+<path d="M216,350 H486 A12,12 0 0 1 486,374 H216 Z" fill="#1fa87b"/>
+<text x="278" y="367" font-size="14" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="1.7" font-weight="700">PROFILE SETTINGS</text>
+<path d="M216,374 H268 V581 Q268,591 282,591 H492 A6,6 0 0 1 498,597 A6,6 0 0 1 492,603 H234 Q216,603 216,585 Z" fill="#1fa87b"/>
+<path d="M202,376 H216 V390 Q216,376 202,376 Z" fill="#1fa87b"/>
+<rect x="268" y="374" width="8" height="8" fill="#1fa87b" rx="0"/>
+<path d="M276,374 Q268,374 268,378 Q268,382 260,382 H234 A13,13 0 0 0 221,395 A13,13 0 0 0 234,408 H260 Q268,408 268,416 H278 V374 Z" fill="#050508"/>
+<text x="247" y="398.3" font-size="9" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">GENERAL</text>
+<text x="242.0" y="434.3" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">MEMORY</text>
+<text x="242.0" y="470.3" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">CACHE</text>
+<text x="242.0" y="506.3" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">COMPUTE</text>
+<text x="242.0" y="542.3" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">API</text>
+<text x="278" y="387" font-size="8" fill="#666688" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">PROFILE</text>
+<rect x="278" y="393" width="70" height="20" fill="#33cc99" rx="10.0"/>
+<rect x="328" y="393" width="20" height="20" fill="#33cc99" rx="0"/>
+<rect x="353" y="393" width="70" height="20" fill="#666688" rx="0"/>
+<rect x="428" y="393" width="70" height="20" fill="#666688" rx="10.0"/>
+<rect x="428" y="393" width="20" height="20" fill="#666688" rx="0"/>
+<text x="313.0" y="407" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">ACTIVATE</text>
+<text x="388.0" y="407" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">CLONE</text>
+<text x="463.0" y="407" font-size="9" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">DELETE</text>
+<text x="278" y="431" font-size="8" fill="#666688" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">MODEL</text>
+<rect x="278" y="437" width="159" height="20" fill="#666688" rx="10.0"/>
+<rect x="417" y="437" width="20" height="20" fill="#666688" rx="0"/>
+<rect x="442" y="437" width="56" height="20" fill="#666688" rx="10.0"/>
+<rect x="442" y="437" width="20" height="20" fill="#666688" rx="0"/>
+<text x="288" y="451" font-size="8" fill="#050508" font-family="monospace" text-anchor="start">Qwen3.8-27B-Splash</text>
+<text x="470.0" y="451" font-size="9" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">CHANGE</text>
+<text x="278" y="479" font-size="8" fill="#666688" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">DRAFTER</text>
+<text x="278" y="491" font-size="9" fill="#88ccff" font-family="monospace" text-anchor="start" font-weight="700">PACKAGE — BAKED IN DRAFT/</text>
+<text x="278" y="507" font-size="8.5" fill="#666688" font-family="monospace" text-anchor="start">CREATED 2026-10-15 · USED 2026-10-16</text>
+<rect x="278" y="519" width="220" height="64" fill="#0b0b12" rx="6"/>
+<text x="288" y="533" font-size="8" fill="#88ccff" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="1" font-weight="700">LAUNCH PREVIEW</text>
+<rect x="288" y="539" width="200" height="1" fill="#191d33" rx="0"/>
+<text x="288" y="553" font-size="8.5" fill="#ffebde" font-family="monospace" text-anchor="start">splash --model Qwen3.8-27B</text>
+<text x="288" y="567" font-size="8.5" fill="#88ccff" font-family="monospace" text-anchor="start">  --draft package --kv 16 · RESTART</text>
+<rect x="42" y="68" width="478" height="622" fill="#000000" rx="0" opacity="0.7"/>
+<rect x="76" y="208" width="368" height="320" fill="#4455ff" rx="8"/>
+<rect x="80" y="212" width="360" height="312" fill="#050508" rx="0"/>
+<text x="96" y="240" font-size="14" fill="#88ccff" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" letter-spacing="3" font-weight="700">CHOOSE MODEL</text>
+<rect x="410" y="222" width="22" height="22" fill="#0b0b12" rx="11"/>
+<text x="421" y="237" font-size="11" fill="#ccaa88" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" font-weight="700">×</text>
+<rect x="96" y="254" width="336" height="22" fill="#0b0b12" rx="0"/>
+<rect x="96" y="254" width="336" height="2" fill="#191d33" rx="0"/>
+<text x="102" y="269" font-size="10" fill="#666688" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start">search · hugging face id…</text>
+<text x="426" y="269" font-size="12" fill="#88ccff" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="end">⌕</text>
+<rect x="96" y="288" width="86" height="20" fill="#4455ff" rx="10"/>
+<text x="139.0" y="302" font-size="8" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">ALL · 20</text>
+<rect x="188" y="288" width="86" height="20" fill="#0b0b12" rx="10"/>
+<text x="231.0" y="302" font-size="8" fill="#ccaa88" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">LM STUDIO · 7</text>
+<rect x="280" y="288" width="86" height="20" fill="#0b0b12" rx="10"/>
+<text x="323.0" y="302" font-size="8" fill="#ccaa88" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">HF HUB · 13</text>
+<rect x="96" y="322" width="336" height="24" fill="#4455ff" rx="0"/>
+<text x="104" y="338" font-size="10" fill="#050508" font-family="monospace" text-anchor="start">Qwen3.8-27B-Splash</text>
+<text x="254" y="338" font-size="7" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="start" font-weight="700">MATCH</text>
+<text x="424" y="338" font-size="8" fill="#050508" font-family="monospace" text-anchor="end">LM STUDIO · 8.4 GB</text>
+<rect x="96" y="349" width="336" height="24" fill="#0b0b12" rx="0"/>
+<text x="104" y="365" font-size="10" fill="#ffebde" font-family="monospace" text-anchor="start">Llama-8B-Splash</text>
+<text x="424" y="365" font-size="8" fill="#88ccff" font-family="monospace" text-anchor="end">HF HUB · 4.9 GB</text>
+<rect x="96" y="376" width="336" height="24" fill="#0b0b12" rx="0"/>
+<text x="104" y="392" font-size="10" fill="#ffebde" font-family="monospace" text-anchor="start">Llama-8B-Instruct</text>
+<text x="424" y="392" font-size="8" fill="#88ccff" font-family="monospace" text-anchor="end">HF HUB · 4.9 GB</text>
+<rect x="96" y="403" width="336" height="24" fill="#0b0b12" rx="0"/>
+<text x="104" y="419" font-size="10" fill="#ffebde" font-family="monospace" text-anchor="start">Qwen3.8-8B-Splash</text>
+<text x="424" y="419" font-size="8" fill="#88ccff" font-family="monospace" text-anchor="end">LM STUDIO · 5.1 GB</text>
+<rect x="96" y="436" width="336" height="2" fill="#191d33" rx="0"/>
+<text x="96" y="456" font-size="8" fill="#666688" font-family="monospace" text-anchor="start">HF ID MATCHES A DOWNLOADED MODEL →</text>
+<text x="96" y="469" font-size="8" fill="#666688" font-family="monospace" text-anchor="start">SHOWN AS A SEARCH RESULT</text>
+<rect x="300" y="494" width="54" height="20" fill="#191d33" rx="10"/>
+<text x="327.0" y="508" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" font-weight="700">CANCEL</text>
+<rect x="360" y="494" width="66" height="20" fill="#4455ff" rx="10"/>
+<text x="393.0" y="508" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">OK</text>
+<rect x="66" y="708" width="104" height="20" fill="#dd4444" rx="10"/>
+<text x="118.0" y="722" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">RESTART NEEDED</text>
+<rect x="394" y="708" width="60" height="20" fill="#0b0b12" rx="10.0"/>
+<rect x="434" y="708" width="20" height="20" fill="#0b0b12" rx="0"/>
+<rect x="458" y="708" width="40" height="20" fill="#4455ff" rx="10.0"/>
+<rect x="458" y="708" width="20" height="20" fill="#4455ff" rx="0"/>
+<text x="424" y="722" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">CONFIG</text>
+<text x="478" y="722" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">V1</text>
+<path d="M0,694 H42 V766 Q42,788 64,788 H514 A6,6 0 0 1 520,794 A6,6 0 0 1 514,800 H58 Q0,800 0,694 Z" fill="#4455ff"/>
+<rect x="66" y="746" width="50" height="20" fill="#33cc99" rx="10.0"/>
+<rect x="96" y="746" width="20" height="20" fill="#33cc99" rx="0"/>
+<rect x="120" y="746" width="50" height="20" fill="#ffcc33" rx="0"/>
+<rect x="174" y="746" width="50" height="20" fill="#dd4444" rx="10.0"/>
+<rect x="174" y="746" width="20" height="20" fill="#dd4444" rx="0"/>
+<text x="91" y="760" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">START</text>
+<text x="145" y="760" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">RESTART</text>
+<text x="199" y="760" font-size="10" fill="#050508" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">STOP</text>
+<rect x="263" y="746" width="34" height="20" fill="#0b0b12" rx="10.0"/>
+<rect x="277" y="746" width="20" height="20" fill="#0b0b12" rx="0"/>
+<rect x="301" y="746" width="48" height="20" fill="#0b0b12" rx="10.0"/>
+<rect x="301" y="746" width="20" height="20" fill="#0b0b12" rx="0"/>
+<text x="280" y="760" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">PID</text>
+<text x="325" y="760" font-size="9.5" fill="#ffebde" font-family="monospace" text-anchor="middle" font-weight="700">23181</text>
+<rect x="388" y="746" width="110" height="20" fill="#0b0b12" rx="10"/>
+<text x="443.0" y="760" font-size="10" fill="#ffebde" font-family="'Avenir Next Condensed','Arial Narrow',sans-serif" text-anchor="middle" letter-spacing="0.5" font-weight="700">APP-MANAGED</text>
+</g></svg>
