@@ -71,6 +71,26 @@ in-flight request count, and **CONFIRM RESTART** explicitly applies the changed 
 The shared **RESTART** footer button flashes while changes await restart and opens this prompt. Reverting to the running plan
 clears it without restarting. Port and the masked API key remain global-only.
 
+If the engine fails to start, SplashUI stays open and shows an error modal with
+the engine's output and exit status. Choose **Open Settings**, correct the configuration,
+and press **Start** to try again. A spawned process is not considered ready until the
+engine reports readiness; a failed restart also keeps settings available.
+Startup failures remain stopped until an explicit Start/Restart; dismissing the
+error never retries. **Copy to Clipboard** copies the complete error through the
+native pasteboard bridge. AUTO first checks the selected repo id against the local
+Hub cache, regardless of its original library (including `local/name` models from
+LM Studio). A complete current snapshot uses the newest Homebrew engine offline;
+only uncached local-folder models need a local-folder-capable engine. Absent or
+incompatible cached files produce an explicit-download error, never a silent download.
+For indexed checkpoints with nested vision shards, SplashUI maintains a separate
+`~/Library/Application Support/SplashUI/hf-flat` cache: only its index is rewritten;
+all weights and metadata link to the originals. Vision tensors stay present. The
+child uses `HF_HUB_CACHE` only when the original snapshot has unsupported nested
+shard names. Neither the real Hub cache nor the Homebrew engine is patched.
+Engines with the installed GGUF target adapter (1.3.2+) also accept cached GGUF
+targets offline, including their mmproj vision projector; these snapshots do not
+need MLX config/tokenizer files. SplashUI never downloads missing model data.
+
 `./install.sh` still reads a couple of its own vars for the one-shot install (it predates the
 panel and is unaffected). `start.sh` no longer exports any of them — it launches its own engine
 directly from a fixed argv (see "How it works"); the menu-bar app ignores env and reads

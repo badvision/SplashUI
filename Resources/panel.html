@@ -320,6 +320,12 @@ section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 
 #cfgModal .card h3 { color: #4455ff; font-family: var(--display); font-size: 18px; letter-spacing: .12em; margin-bottom: 8px; }
 #cfgModal .card p { color: var(--white); text-transform: none; letter-spacing: 0; font-size: 11px; line-height: 1.5; margin-bottom: 14px; font-family: "Avenir Next", "Helvetica Neue", sans-serif; font-weight: 400; }
 #cfgModal .card .btns { display: flex; justify-content: flex-end; gap: 8px; }
+#errorModal { position: fixed; inset: 0; z-index: 70; display: none; align-items: center; justify-content: center; background: rgba(3,3,6,.8); }
+#errorModal .card { width: 620px; max-width: 94vw; max-height: 90vh; padding: 22px; background: var(--bg2); border-top: 6px solid var(--red); display: flex; flex-direction: column; gap: 14px; }
+#errorModal h3 { color: var(--red); font-size: 22px; }
+#errorText { white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; max-height: 50vh; font: 12px/1.5 var(--mono); text-transform: none; user-select: text; -webkit-user-select: text; }
+#errorCopy { align-self: flex-start; }
+#errorModal .btns { display: flex; justify-content: flex-end; gap: 8px; }
 .section-heading, section > .label:first-child { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 0 0 5px; color: var(--accent); font-family: var(--display); font-size: 14px; letter-spacing: .12em; line-height: 1; }
 .section-heading h2 { font: inherit; }
 .section-heading span { color: var(--gray); font-size: 11px; letter-spacing: .08em; }
@@ -332,6 +338,7 @@ section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 
 .track::after, .bar::after, .seg::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 34px, var(--bg) 34px 37px); pointer-events: none; }
 #spark { background: var(--bg2); border-radius: 0; border-bottom: 1px solid var(--teal-dim); }
 table { width: 100%; border-collapse: separate; border-spacing: 0 3px; font-size: 11px; line-height: 1.2; }
+.recent-wrap { min-height: 120px; }
 th { background: var(--lavender); color: var(--bg); font-family: var(--display); font-size: 12px; text-align: right; padding: 4px 4px 2px; font-weight: 600; letter-spacing: .08em; line-height: 1; }
 th:first-child, td:first-child { text-align: left; }
 td { text-align: right; padding: 2px 4px; border-bottom: 1px solid var(--track); line-height: 1; }
@@ -429,10 +436,10 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 <section class="requests-panel" data-channel="05" aria-label="Requests">
   <div class="label" data-tip="Live requests. The counters are session totals; the table shows the last 8 completions."><span>Requests <span id="reqTotals"></span></span><b id="reqActive">—</b></div>
   <div id="activeList" style="margin-bottom:6px"></div>
-  <table id="recentTable">
+  <div class="recent-wrap"><table id="recentTable">
     <thead><tr><th data-tip="Prompt tokens">Req</th><th data-tip="Prompt tokens">Input</th><th data-tip="Prompt tokens served from cached KV — these skipped prefill">Cached</th><th data-tip="Output tokens generated">Out</th><th data-tip="Time to first output token — includes thinking for reasoning models">TTFT</th><th data-tip="Streamed output rate from the completion log">tok/s</th></tr></thead>
     <tbody id="recentBody"></tbody>
-  </table>
+  </table></div>
 </section>
 </div>
 </main>
@@ -557,6 +564,16 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
   </div>
 </div>
 
+<div id="errorModal" role="dialog" aria-modal="true" aria-labelledby="errorTitle">
+  <div class="card">
+    <h3 id="errorTitle">Engine could not start</h3>
+    <p>SplashUI will stay open. Fix your settings, then try Start again.</p>
+    <pre id="errorText"></pre>
+    <button class="btn" id="errorCopy">Copy to Clipboard</button>
+    <div class="btns"><button class="btn" id="errorDismiss">Dismiss</button><button class="btn" id="errorSettings">Open Settings</button></div>
+  </div>
+</div>
+
 <div id="cfgModal">
   <div class="card">
     <h3>First run</h3>
@@ -610,6 +627,17 @@ window.showView = function(view) {
 $("btnSettings").onclick = () => window.showView($("settingsView").hidden ? "settings" : "status");
 
 function setT(id, v){ $(id).textContent = v == null || v === "" ? "—" : v; }
+window.showLaunchFailure = message => {
+  setT("errorText", message);
+  $("errorModal").style.display = "flex";
+};
+$("errorCopy").onclick = () => cmd("error.copy");
+function dismissLaunchFailure() {
+  $("errorModal").style.display = "none";
+  cmd("error.dismiss");
+}
+$("errorDismiss").onclick = dismissLaunchFailure;
+$("errorSettings").onclick = () => { dismissLaunchFailure(); window.showView("settings"); };
 
 // ---- hover help (shows after a short hover delay, hides immediately on leave)
 const tip = document.createElement("div"); tip.id = "tip"; document.body.appendChild(tip);
@@ -992,6 +1020,11 @@ function cfRender() {
   setT("engPath", e.path || e.manual_path || "");
   const tried = Array.isArray(e.tried) ? e.tried : [];
   $("engTried").textContent = tried.length ? "ladder: " + tried.join(" → ") : "";
+  if (CF.draft && CF.draft.engineMode === "auto" && e.version) {
+    const active = (cfg.profiles || []).find(p => p.id === cfg.active_profile);
+    const local = active && active.preview && (active.preview.args || []).includes("server.server");
+    $("engTried").textContent = "AUTO: " + (local ? "local folder model" : "cached Hugging Face model") + " → engine " + e.version + (tried.length ? " · " + tried.join(" → ") : "");
+  }
   // Only a pending save may rebase: telemetry retains cfg between change-gated ticks.
   if (CF.saving && cfg.result && cfg.result !== CF.previousResult && cfg.result.ok === true) {
     CF.saving = false;

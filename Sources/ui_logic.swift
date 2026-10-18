@@ -1525,8 +1525,132 @@ public struct LaunchConfig: Equatable {
     }
 }
 
-/// The pure launch planner (C3): config.json text + injected FS -> `LaunchConfig`.
-///
+/// Resolve the current complete Hub snapshot by repo id, regardless of the
+/// profile's original library source. No Hub requests or model-file reads.
+public func cachedHubSnapshot(modelId: String, roots: [String],
+                              isDir: (String) -> Bool,
+                              fileContents: (String) -> String?,
+                              listDir: (String) -> [String]?, allowNestedShards: Bool = true,
+                              requiresTokenizer: Bool = true, allowGGUF: Bool = false) -> String? {
+    let parts = modelId.split(separator: "/", omittingEmptySubsequences: false)
+    guard parts.count == 2, !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else { return nil }
+    for root in roots {
+        let repo = root + "/models--" + parts.joined(separator: "--")
+        guard let ref = fileContents(repo + "/refs/main")?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !ref.isEmpty, !ref.contains("/"), ref != ".", ref != ".." else { continue }
+        let snapshot = repo + "/snapshots/" + ref
+        guard isDir(snapshot), let entries = listDir(snapshot) else { continue }
+        let files = Set(entries)
+        if allowGGUF {
+            let targets = files.filter { !$0.contains("/") && $0.hasSuffix(".gguf") && !$0.lowercased().contains("mmproj") }
+            if targets.count == 1 { return snapshot }
+        }
+        guard files.contains("config.json"), fileContents(snapshot + "/config.json") != nil,
+              !requiresTokenizer || files.isSuperset(of: ["tokenizer.json", "tokenizer_config.json"]) else { continue }
+        if files.contains("model.safetensors") { return snapshot }
+        guard let index = fileContents(snapshot + "/model.safetensors.index.json")?.data(using: .utf8),
+              let object = (try? JSONSerialization.jsonObject(with: index)) as? [String: Any],
+              let weights = object["weight_map"] as? [String: String], !weights.isEmpty else { continue }
+        let shards = Set(weights.values)
+        guard shards.allSatisfy({ shard in
+            let parts = shard.split(separator: "/", omittingEmptySubsequences: false)
+            guard shard.hasSuffix(".safetensors"), !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }),
+                  let name = parts.last else { return false }
+            if parts.count == 1 { return files.contains(String(name)) }
+            guard allowNestedShards else { return false }
+            let parent = snapshot + "/" + parts.dropLast().joined(separator: "/")
+            return listDir(parent)?.contains(String(name)) == true
+        }) else { continue }
+        return snapshot
+    }
+    return nil
+}
+
+/// Preserve every tensor key, changing only unsupported nested shard filenames.
+public func flattenedHubIndex(_ data: Data) throws -> (data: Data, links: [String: String]) {
+    guard var index = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+          var weights = index["weight_map"] as? [String: String], !weights.isEmpty else {
+        throw NSError(domain: "SplashUI.FlatCache", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid safetensors weight index"])
+    }
+    var used = Set(weights.values)
+    var links: [String: String] = [:]
+    for source in Set(weights.values).filter({ $0.contains("/") }).sorted() {
+        let parts = source.split(separator: "/", omittingEmptySubsequences: false)
+        guard !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }), source.hasSuffix(".safetensors") else {
+            throw NSError(domain: "SplashUI.FlatCache", code: 2, userInfo: [NSLocalizedDescriptionKey: "Unsafe shard path: \(source)"])
+        }
+        let name = source == "optiq/optiq_vision.safetensors" ? "vision-optiq.safetensors" : "flat-" + parts.joined(separator: "--")
+        guard used.insert(name).inserted else {
+            throw NSError(domain: "SplashUI.FlatCache", code: 3, userInfo: [NSLocalizedDescriptionKey: "Flat shard filename collision: \(name)"])
+        }
+        links[name] = source
+        for tensor in weights.keys where weights[tensor] == source { weights[tensor] = name }
+    }
+    index["weight_map"] = weights
+    return (try JSONSerialization.data(withJSONObject: index, options: [.sortedKeys]), links)
+}
+
+/// Write only an app-owned index and refs. Model/vision data and metadata are
+/// symlinks to the source cache; neither that cache nor the engine is modified.
+@discardableResult
+public func prepareFlatHubCache(_ doc: ConfigDoc, home: String) throws -> String? {
+    guard let profile = doc.profiles.first(where: { $0.id == doc.activeProfile }), let id = profile.model.id else { return nil }
+    let fm = FileManager.default
+    let roots = [home + "/.cache/huggingface/hub"] + doc.globals.modelFolders.filter { ["hfhub", "hf"].contains($0.id) || ["hfhub", "hf"].contains($0.source) }.map { $0.path }
+    guard let source = cachedHubSnapshot(modelId: id, roots: roots,
+        isDir: { var d: ObjCBool = false; return fm.fileExists(atPath: $0, isDirectory: &d) && d.boolValue },
+        fileContents: { try? String(contentsOfFile: $0, encoding: .utf8) },
+        listDir: { try? fm.contentsOfDirectory(atPath: $0) }),
+        let original = fm.contents(atPath: source + "/model.safetensors.index.json") else { return nil }
+    let flat = try flattenedHubIndex(original)
+    guard !flat.links.isEmpty else { return nil }
+    let root = home + "/Library/Application Support/SplashUI/hf-flat"
+    let repo = root + "/models--" + id.replacingOccurrences(of: "/", with: "--")
+    let revision = URL(fileURLWithPath: source).lastPathComponent
+    let snapshot = repo + "/snapshots/" + revision
+    try fm.createDirectory(atPath: snapshot, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    func link(_ name: String, _ sourcePath: String) throws {
+        let destination = snapshot + "/" + name
+        let target = URL(fileURLWithPath: sourcePath).resolvingSymlinksInPath().path
+        if let existing = try? fm.destinationOfSymbolicLink(atPath: destination) {
+            if existing == target { return }
+            try fm.removeItem(atPath: destination)
+        }
+        try fm.createSymbolicLink(atPath: destination, withDestinationPath: target)
+    }
+    for name in try fm.contentsOfDirectory(atPath: source) where name != "model.safetensors.index.json" {
+        try link(name, source + "/" + name)
+    }
+    for (name, path) in flat.links { try link(name, source + "/" + path) }
+    let indexPath = snapshot + "/model.safetensors.index.json"
+    if fm.contents(atPath: indexPath) != flat.data { try flat.data.write(to: URL(fileURLWithPath: indexPath), options: .atomic) }
+    try fm.createDirectory(atPath: repo + "/refs", withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    let ref = repo + "/refs/main"
+    if (try? String(contentsOfFile: ref, encoding: .utf8)) != revision {
+        try revision.write(toFile: ref, atomically: true, encoding: .utf8)
+    }
+    // HF_HUB_CACHE applies to the whole launcher, including its DFlash2 draft.
+    let contract = contractFor(nil, registry: launchRegistry).contract
+    let family = deriveFamily(config: try? String(contentsOfFile: source + "/config.json", encoding: .utf8), contract: contract)
+    let draftId = profile.options["draft_model"]?.string ?? family.flatMap { contract.familyRegistry[$0] }
+    if let draftId, let draftSnapshot = cachedHubSnapshot(modelId: draftId, roots: roots,
+        isDir: { var d: ObjCBool = false; return fm.fileExists(atPath: $0, isDirectory: &d) && d.boolValue },
+        fileContents: { try? String(contentsOfFile: $0, encoding: .utf8) },
+        listDir: { try? fm.contentsOfDirectory(atPath: $0) }, requiresTokenizer: false) {
+        let draftRepo = URL(fileURLWithPath: draftSnapshot).deletingLastPathComponent().deletingLastPathComponent().path
+        let destination = root + "/models--" + draftId.replacingOccurrences(of: "/", with: "--")
+        if let existing = try? fm.destinationOfSymbolicLink(atPath: destination), existing != draftRepo {
+            try fm.removeItem(atPath: destination)
+        }
+        if (try? fm.destinationOfSymbolicLink(atPath: destination)) == nil {
+            try fm.createSymbolicLink(atPath: destination, withDestinationPath: draftRepo)
+        }
+    }
+    return root
+}
+
+
+/// The pure launch planner (C3): config.json text + injected FS -> LaunchConfig.
 /// Pipeline: parse -> active profile -> `resolveKit` (the kit ladder; D9: NO env)
 /// -> `contractFor` (D16: the kit's release.json) -> `enumerateModels` +
 /// `classifyModelDir` + `eligibility` (D4) -> `buildArgv` (S2a) -> the plan
@@ -1552,16 +1676,43 @@ public func planLaunch(_ data: Data,
         return LaunchConfig(error: "no profile is selected — pick one in Settings (06)")
     }
     let g = doc.globals
-    // 3. the engine kit (the D2 ladder; D9: nothing from the process environment).
-    let kr = resolveKit(engine: g.engine, home: home, isDir: isDir,
-                        isExecutable: isExecutable, brewKeg: brewKeg,
-                        kitVersion: kitVersion)
+    let flatRoot = home + "/Library/Application Support/SplashUI/hf-flat"
+    let cacheRoots = [home + "/.cache/huggingface/hub"] + g.modelFolders.filter { ["hfhub", "hf"].contains($0.id) || ["hfhub", "hf"].contains($0.source) }.map { $0.path } + [flatRoot]
+    let hubSnapshot = profile.model.id.flatMap {
+        cachedHubSnapshot(modelId: $0, roots: cacheRoots, isDir: isDir, fileContents: fileContents, listDir: listDir, allowNestedShards: false, allowGGUF: true)
+    }
+    let source = g.modelFolders.first(where: { $0.id == profile.model.source && $0.source != "auto" })?.source ?? profile.model.source
+    let parts = (profile.model.id ?? "").split(separator: "/", omittingEmptySubsequences: false)
+    let localModel = hubSnapshot == nil && (!["hfid", "hfhub", "hf"].contains(source) || parts.count != 2 || parts.contains(where: { $0.isEmpty }))
+    var engine = g.engine
+    if localModel && (engine.mode == "auto" || contractFor(engine.manualPath.flatMap(kitVersion), registry: launchRegistry).contract.flavor == .launcher) {
+        var candidates: [String] = []
+        for prefix in ["/opt/homebrew", "/usr/local"] {
+            let root = prefix + "/Cellar/splash"
+            candidates += (listDir(root) ?? []).map { root + "/" + $0 + "/libexec" }
+        }
+        for root in [home + "/SplashUI/kit", home + "/Documents/code/splash-standalone"] {
+            candidates += (listDir(root) ?? []).map { root + "/" + $0 }
+        }
+        if let path = engine.manualPath { candidates.append(path) }
+        let compatible = candidates.filter { path in
+            guard let version = kitVersion(path) else { return false }
+            return contractFor(version, registry: launchRegistry).contract.flavor == .module && isDir(path) &&
+                isExecutable(path + "/engine/splash") &&
+                (isExecutable(path + "/python/bin/python") || isExecutable(path + "/python/bin/python3"))
+        }.sorted { (kitVersion($0) ?? "").compare(kitVersion($1) ?? "", options: .numeric) == .orderedDescending }
+        if let path = compatible.first { engine.mode = "manual"; engine.manualPath = path }
+    }
+    let kr = resolveKit(engine: engine, home: home, isDir: isDir,
+                        isExecutable: isExecutable, brewKeg: brewKeg, kitVersion: kitVersion)
     guard let kit = kr.kit else {
         return LaunchConfig(version: kr.version, tried: kr.tried, error: kr.error,
                             profileId: profile.id, profileName: profile.name)
     }
     // 4. the contract for THAT kit (D16: exact, else the latest fallback).
     let (contract, fallback) = contractFor(kr.version, registry: launchRegistry)
+    let supportsGGUF = contract.flavor == .launcher &&
+        fileContents(kit + "/install/upstream.py")?.contains("def _gguf_target(") == true
     // 5. the model: the profile's pick, resolved against the folders by
     //    enumeration (the fresh discovery beats a stale stored dir).
     let model = profile.model
@@ -1570,9 +1721,14 @@ public func planLaunch(_ data: Data,
                             error: "no model selected — pick one in Settings (06)",
                             profileId: profile.id, profileName: profile.name)
     }
-    var dir = model.dir
-    var kind: ModelKind?
-    for folder in g.modelFolders {
+    if contract.flavor == .launcher && localModel {
+        return LaunchConfig(modelId: mid, modelDir: model.dir, version: kr.version, tried: kr.tried,
+            error: "No installed local-folder-capable engine can load \(mid). Install a module-form engine with its Python runtime, or select its kit in Engine settings.",
+            profileId: profile.id, profileName: profile.name)
+    }
+    var dir = hubSnapshot ?? model.dir
+    var kind: ModelKind? = hubSnapshot == nil ? nil : .hfid
+    for folder in g.modelFolders where hubSnapshot == nil {
         let entries = enumerateModels(folder: folder, isDir: isDir,
                                       fileContents: fileContents, listDir: listDir)
         if let e = entries.first(where: { $0.id == mid }) {
@@ -1586,6 +1742,19 @@ public func planLaunch(_ data: Data,
     if kind == nil {
         kind = dir == nil ? .hfid
             : classifyModelDir(dir: dir, id: mid, isDir: isDir, fileContents: fileContents)
+    }
+    if contract.flavor == .launcher {
+        let ggufFiles = dir.flatMap(listDir)?.filter { !$0.contains("/") && $0.hasSuffix(".gguf") && !$0.lowercased().contains("mmproj") } ?? []
+        if !ggufFiles.isEmpty && !supportsGGUF {
+            return LaunchConfig(modelId: mid, modelDir: dir, version: kr.version, tried: kr.tried,
+                error: "Engine \(kr.version ?? contract.version) does not support GGUF targets. Choose an installed engine whose upstream adapter supports GGUF (1.3.2 or later).",
+                profileId: profile.id, profileName: profile.name)
+        }
+        guard let dir, isDir(dir), fileContents(dir + "/config.json") != nil || (supportsGGUF && ggufFiles.count == 1) else {
+            return LaunchConfig(modelId: mid, version: kr.version, tried: kr.tried,
+                error: "Installed model files for \(mid) are missing a compatible MLX or GGUF snapshot. Download this model explicitly before starting; SplashUI will not download it automatically.",
+                profileId: profile.id, profileName: profile.name)
+        }
     }
     let files = modelDirFiles(dir, isDir: isDir, fileContents: fileContents)
     let draftModel = profile.options["draft_model"]?.string
@@ -1606,8 +1775,18 @@ public func planLaunch(_ data: Data,
     //    on-disk dir is the resolved one (the module form's positional argument).
     var launchModel = model
     launchModel.dir = dir
-    let built = buildArgv(contract, profileValues: profile.options,
-                          model: launchModel, globals: g)
+    var options = profile.options
+    if contract.flavor == .launcher { options["offline"] = .bool(true) }
+    var built = buildArgv(contract, profileValues: options, model: launchModel, globals: g)
+    if contract.flavor == .launcher { built.env["HF_HUB_OFFLINE"] = "1" }
+    if contract.flavor == .launcher, let hubSnapshot, hubSnapshot.hasPrefix(flatRoot + "/") {
+        built.env["HF_HUB_CACHE"] = flatRoot
+    }
+    if contract.flavor == .module, let dir, !isDir(dir + "/tokenizer"),
+       fileContents(dir + "/tokenizer_config.json") != nil,
+       let index = built.args.firstIndex(of: "--tokenizer") {
+        built.args[index + 1] = dir
+    }
     if built.args.isEmpty {
         let msg = built.issues.first(where: { $0.severity == .error })?.message
             ?? "cannot build the launch argv"
@@ -1692,12 +1871,12 @@ public func engineVerdict(resolved: Bool, version: String?, error: String?,
 /// The panel's target size for a view: the status screen stays at the historic
 /// 520pt width; the settings screen widens to 820pt (the three-column layout
 /// needs the room, and the extra width goes to the detail column). The height
-/// is the JS-reported content height with the app's usual clamps — a 320pt
-/// floor, never taller than the screen minus the menu bar and dock.
+/// is the JS-reported content height with the app's usual clamps — a 370pt
+/// floor (the minimum window height), never taller than the screen minus the menu bar and dock.
 public func panelTargetSize(view: String, contentHeight: Int, screenHeight: CGFloat)
     -> (width: CGFloat, height: CGFloat) {
     let width: CGFloat = view == "settings" ? 820 : 520
-    let height = min(max(320, CGFloat(contentHeight) + 16), screenHeight - 120)
+    let height = min(max(370, CGFloat(contentHeight) + 16), screenHeight - 120)
     return (width, height)
 }
 
@@ -1774,19 +1953,19 @@ public func profilePreview(_ profile: Profile,
     return done(args: built.args, error: nil, restart: restart)
 }
 
-// The UI never outlives the service — but only for a service that actually ran.
-// A server that was observed up (crashed, or an adopted external one died) → quit
-// 10 s after it's gone. A server that never came up (launch failed) must NOT
-// quit: the menu bar stays with the actionable error on display.
-public func autoQuitDecision(procGone: Bool, everUp: Bool, downFor: TimeInterval, userStopped: Bool) -> Bool {
-    procGone && everUp && !userStopped && downFor > 10
+/// A failed startup must remain recoverable in Settings, even after a past session.
+public func autoQuitDecision(procGone: Bool, everUp: Bool, downFor: TimeInterval,
+                             userStopped: Bool, launchFailed: Bool) -> Bool {
+    procGone && everUp && !userStopped && !launchFailed && downFor > 10
 }
 
-// Bounded auto-retry of a failed launch: every 30 s while under 10 attempts.
-// The user can fix the kit meanwhile — each attempt re-resolves paths fresh.
-public func launchRetryDue(error: Date?, retries: Int, now: Date) -> Bool {
-    error != nil && retries < 10 && now.timeIntervalSince(error!) >= 30
+/// Preserve the engine's actual stdout/stderr alongside the process exit status.
+public func engineStartupFailure(exitStatus: Int32, output: String) -> String {
+    let detail = output.trimmingCharacters(in: .whitespacesAndNewlines)
+    let summary = "Engine exited before it became ready (exit status \(exitStatus))."
+    return detail.isEmpty ? summary : summary + "\n\n" + detail
 }
+
 
 public func requestRowId(current: Int, lineHasId: Int?) -> (id: Int, next: Int) {
     let id = lineHasId ?? current

@@ -88,6 +88,7 @@ final class ServerProc {
     // True once the app has started (or adopted) a server that is serving: the
     // auto-quit policy only applies to a service that actually ran.
     private(set) var everUp = false
+    private var launchReady = false
     private var launchDate = Date()
     private var restartDates: [Date] = []
     private var outHandle: FileHandle?
@@ -171,11 +172,10 @@ final class ServerProc {
         p.standardError = out
         p.terminationHandler = { [weak self] proc in
             DispatchQueue.main.async {
-                self?.outHandle?.closeFile()
-                self?.outHandle = nil
-                self?.terminated(proc)
+                self?.terminated(proc, logPath: logPath)
             }
         }
+        launchReady = false
         do { try p.run() } catch {
             out.closeFile()
             recordLaunchFailure(error.localizedDescription, logPath: logPath)
@@ -187,21 +187,29 @@ final class ServerProc {
         outHandle = out
         process = p
         launchedByApp = true
-        everUp = true
         userStopped = false
         pendingRestart = false
         restartsExhausted = false
         lastLaunchError = nil
-        launchFailRetries = 0
+        startingPlanSignature = plan.signature
         launchDate = Date()
-        // D13: the engine now runs THIS plan — stamp it so a later config change is
-        // what flips restart_required (a rename does not; it shares the signature).
-        lastSuccessfulPlanSignature = plan.signature
+    }
+
+    private var startingPlanSignature: String?
+
+    func markReady(observedAt: Date) {
+        guard !launchReady, let process, process.isRunning, observedAt >= launchDate else { return }
+        launchReady = true
+        everUp = true
+        launchFailRetries = 0
+        lastSuccessfulPlanSignature = startingPlanSignature
     }
 
     // One line to NSLog (Console.app) and an append to the engine log stream, so
     // `tail -f /tmp/splashui.log` shows launch failures alongside engine output.
     private func recordLaunchFailure(_ message: String, logPath: String) {
+        userStopped = true
+        pendingRestart = false
         lastLaunchError = LaunchError(message: message, attempt: Date())
         launchFailRetries += 1
         let line = "SplashUI launch failed (attempt \(launchFailRetries)): \(message)\n"
@@ -229,9 +237,24 @@ final class ServerProc {
         process = nil
     }
 
-    private func terminated(_ proc: Process) {
-        if proc === process { process = nil }
+    private func terminated(_ proc: Process, logPath: String) {
+        guard proc === process else { return }
+        process = nil
+        outHandle?.closeFile()
+        outHandle = nil
         guard !userStopped else { return }
+        if !launchReady {
+            var output = ""
+            if let log = FileHandle(forReadingAtPath: logPath) {
+                let end = log.seekToEndOfFile()
+                log.seek(toFileOffset: end > 65536 ? end - 65536 : 0)
+                output = String(decoding: log.readDataToEndOfFile(), as: UTF8.self)
+                log.closeFile()
+            }
+            pendingRestart = false
+            recordLaunchFailure(engineStartupFailure(exitStatus: proc.terminationStatus, output: output), logPath: logPath)
+            return
+        }
         // backoff: max 3 automatic restarts in 10 minutes
         let cutoff = Date().addingTimeInterval(-600)
         restartDates = restartDates.filter { $0 > cutoff }
@@ -241,7 +264,7 @@ final class ServerProc {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             guard let self = self else { return }
             self.pendingRestart = false
-            guard self.pid == nil else { return }
+            guard !self.userStopped, self.lastLaunchError == nil, self.pid == nil else { return }
             self.launch()
         }
     }
@@ -424,6 +447,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     private var pendingTick: String?
     private var pendingView = "status"
     private var globalMonitor: Any?
+    private var presentedLaunchError: String?
 
     private var lastDecodeOut: Double?
     private var lastDecodeOutAt: Date?
@@ -593,8 +617,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     }
 
     @objc private func hidePanel() {
-        guard panel.isVisible else { return }
+        guard panel.isVisible, panel.attachedSheet == nil, !errorModalOpen else { return }
         panel.orderOut(nil)
+    }
+
+    private var errorModalOpen = false
+
+    private func presentLaunchFailure(_ message: String) {
+        guard webReady, message != presentedLaunchError else { return }
+        presentedLaunchError = message
+        errorModalOpen = true
+        showPanel(view: "settings")
+        let data = try! JSONSerialization.data(withJSONObject: [message])
+        let args = String(decoding: data, as: UTF8.self)
+        webView.evaluateJavaScript("window.showLaunchFailure(...\(args))", completionHandler: nil)
     }
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -611,11 +647,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         guard let body = message.body as? [String: Any] else { return }
         let cmd = body["cmd"] as? String ?? ""
         switch cmd {
-        case "start": server.clearLaunchError(); server.launch()
+        case "error.copy":
+            if let text = presentedLaunchError {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            }
+        case "error.dismiss": errorModalOpen = false
+        case "start": presentedLaunchError = nil; server.clearLaunchError(); server.launch()
         case "stop":
             server.stop()
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.quitApp() }
         case "restart":
+            presentedLaunchError = nil
             // stop() clears the failure record + retry count, so a fresh attempt
             // starts at attempt 1 with no stale error in the UI.
             server.stop()
@@ -960,6 +1003,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     /// The launch plan (C3): planLaunch over the current config doc with the real
     /// FS closures (the config is the single source of truth — no env, D9).
     private func computePlan() -> LaunchConfig {
+        do { try prepareFlatHubCache(configStore.doc, home: NSHomeDirectory()) }
+        catch { return LaunchConfig(error: "Could not prepare the offline model cache: \(error.localizedDescription)") }
         let data = configData(configStore.doc)
         return planLaunch(data, home: NSHomeDirectory(),
                           isDir: { isDir($0) },
@@ -1056,6 +1101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         // user fixing the install (or saving the panel) while the app is running
         // takes effect on the next launch attempt + this tick's restart state.
         server.plan = computePlan()
+        let statusRequestedAt = Date()
         get("/status") { [weak self] data in
             let j = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
             DispatchQueue.main.async {
@@ -1063,6 +1109,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 if let j = j {
                     self.statusJSON = j
                     self.lastServerSeen = Date()
+                    if j["ready"] as? Bool == true, self.server.lastLaunchError == nil {
+                        self.server.markReady(observedAt: statusRequestedAt)
+                        self.presentedLaunchError = nil
+                    }
                     if let completed = self.fld("requests", "completed"), let cancelled = self.fld("requests", "cancelled") {
                         self.tail.poll(completed: telemetryInt(completed), cancelled: telemetryInt(cancelled))
                     }
@@ -1308,29 +1358,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         else if decoding || !tail.active.isEmpty { state = "decode" }
         else if queued { state = "queue" }
 
-        // ---- the UI never outlives the *service*: quit 10 s after a server that was
-        // observed up goes away (crash, or an adopted external server dying). A launch
-        // that never came up (everUp == false) must NOT quit — the menu bar stays
-        // available with the actionable error on display; Stop is always the exit.
+        // Startup failure (including after a previous session) must keep Settings
+        // available. Only a previously serving service without a launch error may auto-quit.
+        if let error = server.lastLaunchError { presentLaunchFailure(error.message) }
         if procGone {
             if downSince == nil { downSince = Date() }
             else if let ds = downSince,
                     autoQuitDecision(procGone: procGone, everUp: server.everUp,
-                                     downFor: Date().timeIntervalSince(ds), userStopped: server.userStopped) {
+                                     downFor: Date().timeIntervalSince(ds), userStopped: server.userStopped,
+                                     launchFailed: server.lastLaunchError != nil) {
                 NSApplication.shared.terminate(nil)
             }
         } else {
             downSince = nil
         }
 
-        // ---- auto-retry a failed launch: every 30 s, up to 10 total attempts. The
-        // user may have installed/fixed the kit meanwhile; launch() re-resolves
-        // paths fresh and clears the error on success, re-records on failure.
-        if server.lastLaunchError != nil && !server.userStopped &&
-            launchRetryDue(error: server.lastLaunchError?.attempt,
-                           retries: server.launchFailRetries, now: Date()) {
-            server.launch()
-        }
         // ---- tray
         switch state {
         case "down": updateTray(detail: "DOWN", color: .systemRed, fill: 0)

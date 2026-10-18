@@ -386,37 +386,33 @@ do {
 // ---- autoQuitDecision: truth table ------------------------------------------
 
 // up then gone >10 s: quit (crash path, unchanged behavior).
-check(autoQuitDecision(procGone: true, everUp: true, downFor: 11, userStopped: false) == true,
+check(autoQuitDecision(procGone: true, everUp: true, downFor: 11, userStopped: false, launchFailed: false) == true,
       "quit: up-then-gone 11s -> quit")
 // up then gone 9 s: not yet.
-check(autoQuitDecision(procGone: true, everUp: true, downFor: 9, userStopped: false) == false,
+check(autoQuitDecision(procGone: true, everUp: true, downFor: 9, userStopped: false, launchFailed: false) == false,
       "quit: up-then-gone 9s -> no quit")
 // never up, long gone: NEVER quit (the bug fix).
-check(autoQuitDecision(procGone: true, everUp: false, downFor: 60, userStopped: false) == false,
+check(autoQuitDecision(procGone: true, everUp: false, downFor: 60, userStopped: false, launchFailed: true) == false,
       "quit: never-up 60s -> no quit")
 // not gone: never quit.
-check(autoQuitDecision(procGone: false, everUp: true, downFor: 0, userStopped: false) == false,
+check(autoQuitDecision(procGone: false, everUp: true, downFor: 0, userStopped: false, launchFailed: false) == false,
       "quit: proc alive -> no quit")
 // user stopped: never auto-quit.
-check(autoQuitDecision(procGone: true, everUp: true, downFor: 11, userStopped: true) == false,
+check(autoQuitDecision(procGone: true, everUp: true, downFor: 11, userStopped: true, launchFailed: false) == false,
       "quit: userStopped -> no quit")
+check(autoQuitDecision(procGone: true, everUp: true, downFor: 600, userStopped: false, launchFailed: true) == false,
+      "quit: failed restart after an earlier serving session keeps Settings available")
+check(autoQuitDecision(procGone: true, everUp: false, downFor: 600, userStopped: false, launchFailed: false) == false,
+      "quit: spawning a process is not evidence that the engine ever served")
+do {
+    let engineError = "Traceback (most recent call last):\nValueError: invalid --max-memory setting"
+    let message = engineStartupFailure(exitStatus: 1, output: "\n" + engineError + "\n")
+    check(message.contains(engineError), "startup failure: preserves the engine's multiline error verbatim")
+    check(message.contains("exit status 1"), "startup failure: includes the actual process exit status")
+    check(engineStartupFailure(exitStatus: 0, output: " \n") == "Engine exited before it became ready (exit status 0).",
+          "startup failure: a clean exit without readiness still reports the real status")
+}
 
-// ---- launchRetryDue ---------------------------------------------------------
-
-// no error: not due.
-check(launchRetryDue(error: nil, retries: 0, now: now) == false, "retry: no error -> not due")
-// error 31 s old, within retry cap: due.
-check(launchRetryDue(error: now.addingTimeInterval(-31), retries: 3, now: now) == true,
-      "retry: 31s old, under cap -> due")
-// error 29 s old: not yet (30 s interval).
-check(launchRetryDue(error: now.addingTimeInterval(-29), retries: 3, now: now) == false,
-      "retry: 29s old -> not due")
-// at the 10-retry cap: never due again.
-check(launchRetryDue(error: now.addingTimeInterval(-400), retries: 10, now: now) == false,
-      "retry: cap (10) reached -> not due")
-// just under the cap: still due.
-check(launchRetryDue(error: now.addingTimeInterval(-400), retries: 9, now: now) == true,
-      "retry: 9 retries, long ago -> due")
 
 // ---- request display and RSS ------------------------------------------------
 let explicitId = requestRowId(current: 3, lineHasId: 42)
@@ -2223,12 +2219,12 @@ func planKit(fs: inout FakeFS, path: String, version: String) {
 /// A config.json with one profile; the knobs the plan-signature tests vary.
 func planCfgJSON(engineMode: String, manualPath: String?, port: Int, key: String,
                  name: String, modelId: String?, modelDir: String?,
-                 options: [String: String]) -> Data {
+                 options: [String: String], modelSource: String? = nil) -> Data {
     var opts: [String: Any] = [:]
     for (k, v) in options { opts[k] = v }
     var engine: [String: Any] = ["mode": engineMode]
     if let manualPath { engine["manual_path"] = manualPath }
-    var model: [String: Any] = ["source": modelId == nil ? "none" : "lmstudio"]
+    var model: [String: Any] = ["source": modelId == nil ? "none" : (modelSource ?? (modelDir == nil ? "hfid" : "lmstudio"))]
     if let modelId { model["id"] = modelId }
     if let modelDir { model["dir"] = modelDir }
     let globals: [String: Any] = [
@@ -2260,6 +2256,151 @@ func readKitVersion(fs: FakeFS, kit: String) -> String? {
 func portArg(_ plan: LaunchConfig) -> String? {
     guard let i = plan.engineArgs.firstIndex(of: "--port"), i + 1 < plan.engineArgs.count else { return nil }
     return plan.engineArgs[i + 1]
+}
+do {
+    var fs = FakeFS()
+    planKit(fs: &fs, path: "/guard-kit", version: "1.3.1")
+    fs.dir("/local/owner/model", ["config.json", "draft/"])
+    fs.file("/local/owner/model/draft/config.json")
+    func guardedPlan(_ source: String, _ dir: String?) -> LaunchConfig {
+        let cfg = planCfgJSON(engineMode: "manual", manualPath: "/guard-kit", port: 8123,
+            key: "test", name: "Local", modelId: "owner/model", modelDir: dir,
+            options: ["draft_model": "owner/draft"], modelSource: source)
+        return planLaunch(cfg, home: "/home", isDir: { fs.isDir($0) },
+            isExecutable: { fs.isExecutable($0) }, kitVersion: { readKitVersion(fs: fs, kit: $0) },
+            fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
+    }
+    let refused = guardedPlan("lmstudio", "/local/owner/model")
+    check(refused.error?.contains("No installed local-folder-capable engine") == true && refused.executable == nil && refused.engineArgs.isEmpty,
+          "local model + launcher: refused before a process can spawn")
+    let cached = guardedPlan("hfid", "/local/owner/model")
+    check(cached.error == nil && cached.engineArgs.contains("--offline") && cached.engineEnv["HF_HUB_OFFLINE"] == "1", "HF cached model + launcher: launch permitted offline")
+    check(guardedPlan("hfid", nil).error?.contains("Download this model explicitly") == true, "uncached HF model: no silent download")
+    planKit(fs: &fs, path: "/guard-kit", version: "1.3.0")
+    check(guardedPlan("lmstudio", "/local/owner/model").error == nil, "local model + module: launch permitted")
+}
+do {
+    var fs = FakeFS()
+    let old = "/home/SplashUI/kit/splash-1.3.0"
+    planKit(fs: &fs, path: old, version: "1.3.0")
+    planKit(fs: &fs, path: "/brew/1.3.1/libexec", version: "1.3.1")
+    fs.dir("/home/SplashUI/kit", ["splash-1.3.0/"])
+    fs.dir("/cached/model", ["config.json"]); fs.file("/cached/model/config.json", "{}")
+    func autoPlan(_ source: String) -> LaunchConfig {
+        let cfg = planCfgJSON(engineMode: "auto", manualPath: nil, port: 8123, key: "test", name: "Auto",
+            modelId: "owner/model", modelDir: "/cached/model", options: ["draft_model": "owner/draft"], modelSource: source)
+        return planLaunch(cfg, home: "/home", isDir: { fs.isDir($0) }, isExecutable: { fs.isExecutable($0) },
+            brewKeg: { "/brew/1.3.1" }, kitVersion: { readKitVersion(fs: fs, kit: $0) },
+            fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
+    }
+    let local = autoPlan("lmstudio"), hub = autoPlan("hfhub")
+    check(local.version == "1.3.0" && local.engineArgs.prefix(3) == ["-u", "-m", "server.server"] && local.engineArgs.contains("/cached/model/tokenizer"), "AUTO local directory: newest local-capable module engine with tokenizer argv")
+    check(hub.version == "1.3.1" && hub.engineArgs.contains("--offline"), "AUTO cached HF model: highest Homebrew engine offline")
+    fs.dirs.remove(old)
+    check(autoPlan("lmstudio").error?.contains("No installed local-folder-capable engine") == true, "AUTO local model without a local-capable engine: specific error, no download")
+}
+do {
+    let fm = FileManager.default
+    let home = fm.temporaryDirectory.appendingPathComponent("splash-cache-" + UUID().uuidString).path
+    defer { try? fm.removeItem(atPath: home) }
+    let id = "local/Qwen3.8-27B-OptiQ-5bit-sharp-compact"
+    let repo = home + "/.cache/huggingface/hub/models--local--Qwen3.8-27B-OptiQ-5bit-sharp-compact"
+    let revision = String(repeating: "0", count: 40)
+    let snapshot = repo + "/snapshots/" + revision
+    try! fm.createDirectory(atPath: snapshot, withIntermediateDirectories: true)
+    try! fm.createDirectory(atPath: repo + "/refs", withIntermediateDirectories: true)
+    try! (revision + "\n").write(toFile: repo + "/refs/main", atomically: true, encoding: .utf8)
+    let shards = (1...4).map { "model-0000\($0)-of-00004.safetensors" } + ["optiq/optiq_vision.safetensors"]
+    try! fm.createDirectory(atPath: snapshot + "/optiq", withIntermediateDirectories: true)
+    for name in ["config.json", "tokenizer.json", "tokenizer_config.json"] + shards {
+        try! "{}".write(toFile: snapshot + "/" + name, atomically: true, encoding: .utf8)
+    }
+    try! #"{"model_type":"qwen3_5"}"#.write(toFile: snapshot + "/config.json", atomically: true, encoding: .utf8)
+    let draftRepo = home + "/.cache/huggingface/hub/models--incoai--Qwen3.8-27B-DFlash2"
+    let draftSnapshot = draftRepo + "/snapshots/complete-draft"
+    try! fm.createDirectory(atPath: draftSnapshot, withIntermediateDirectories: true)
+    try! fm.createDirectory(atPath: draftRepo + "/refs", withIntermediateDirectories: true)
+    try! "complete-draft".write(toFile: draftRepo + "/refs/main", atomically: true, encoding: .utf8)
+    for name in ["config.json", "model.safetensors"] {
+        try! "{}".write(toFile: draftSnapshot + "/" + name, atomically: true, encoding: .utf8)
+    }
+    var weightMap = Dictionary(uniqueKeysWithValues: shards.prefix(4).enumerated().map { ("language_model.weight\($0.offset)", $0.element) })
+    weightMap["vision_tower.blocks.0.weight"] = "optiq/optiq_vision.safetensors"
+    let index = ["weight_map": weightMap]
+    let originalIndex = try! JSONSerialization.data(withJSONObject: index)
+    try! originalIndex.write(to: URL(fileURLWithPath: snapshot + "/model.safetensors.index.json"))
+    let rewritten = try! flattenedHubIndex(originalIndex)
+    let rewrittenWeights = ((try! JSONSerialization.jsonObject(with: rewritten.data)) as! [String: Any])["weight_map"] as! [String: String]
+    check(rewrittenWeights.values.allSatisfy { !$0.contains("/") } && rewrittenWeights["vision_tower.blocks.0.weight"] == "vision-optiq.safetensors" && Set(rewrittenWeights.keys) == Set(weightMap.keys),
+          "flat index: every filename is flat and all vision_tower tensor keys retain the vision shard")
+    var fs = FakeFS()
+    planKit(fs: &fs, path: "/brew/1.3.2/libexec", version: "1.3.2")
+    planKit(fs: &fs, path: home + "/SplashUI/kit/old", version: "1.3.0")
+    func plan() -> LaunchConfig {
+        let data = planCfgJSON(engineMode: "auto", manualPath: nil, port: 8123, key: "test", name: "OptiQ Compact",
+            modelId: id, modelDir: "/lmstudio/local/model", options: ["draft_model": "owner/draft"], modelSource: "lmstudio")
+        return planLaunch(data, home: home,
+            isDir: { path in var dir: ObjCBool = false; return fs.isDir(path) || (fm.fileExists(atPath: path, isDirectory: &dir) && dir.boolValue) },
+            isExecutable: { fs.isExecutable($0) }, brewKeg: { "/brew/1.3.2" }, kitVersion: { readKitVersion(fs: fs, kit: $0) },
+            fileContents: { (try? String(contentsOfFile: $0, encoding: .utf8)) ?? fs.fileContents($0) },
+            listDir: { (try? fm.contentsOfDirectory(atPath: $0)) ?? fs.listDir($0) })
+    }
+    let config = planCfgJSON(engineMode: "auto", manualPath: nil, port: 8123, key: "test", name: "OptiQ Compact", modelId: id, modelDir: nil, options: [:], modelSource: "lmstudio")
+    let flatRoot = try! prepareFlatHubCache(parseConfig(config).doc!, home: home)!
+    let flatSnapshot = flatRoot + "/models--local--Qwen3.8-27B-OptiQ-5bit-sharp-compact/snapshots/" + revision
+    check((try! Data(contentsOf: URL(fileURLWithPath: snapshot + "/model.safetensors.index.json"))) == originalIndex &&
+          (try! fm.destinationOfSymbolicLink(atPath: flatSnapshot + "/vision-optiq.safetensors")) == snapshot + "/optiq/optiq_vision.safetensors",
+          "flat cache: source index unchanged and vision weights are symlinked, never copied")
+    check(try! prepareFlatHubCache(parseConfig(config).doc!, home: home) == flatRoot, "flat cache: preparing again is idempotent")
+    let linkedDraft = flatRoot + "/models--incoai--Qwen3.8-27B-DFlash2"
+    check((try! fm.destinationOfSymbolicLink(atPath: linkedDraft)) == draftRepo &&
+          (try! String(contentsOfFile: linkedDraft + "/refs/main", encoding: .utf8)) == "complete-draft" &&
+          fm.fileExists(atPath: linkedDraft + "/snapshots/complete-draft/model.safetensors"),
+          "flat cache: complete family DFlash2 repo is symlinked idempotently for offline draft resolution")
+    let offline = plan()
+    check(offline.error == nil && offline.version == "1.3.2" && offline.modelDir == flatSnapshot &&
+          offline.engineArgs.prefix(5) == ["-u", "install/launcher.py", "serve", "--model", id] &&
+          offline.engineArgs.contains("--offline") && offline.engineEnv["HF_HUB_OFFLINE"] == "1" && offline.engineEnv["HF_HUB_CACHE"] == flatRoot,
+          "AUTO OptiQ nested vision: Homebrew 1.3.2 offline using isolated flat cache")
+    try! rewritten.data.write(to: URL(fileURLWithPath: snapshot + "/model.safetensors.index.json"))
+    try! fm.createSymbolicLink(atPath: snapshot + "/vision-optiq.safetensors", withDestinationPath: snapshot + "/optiq/optiq_vision.safetensors")
+    check(plan().modelDir == snapshot && plan().engineEnv["HF_HUB_CACHE"] == nil,
+          "compatible original snapshot takes precedence over app-owned flat cache")
+    try! originalIndex.write(to: URL(fileURLWithPath: snapshot + "/model.safetensors.index.json"))
+    try! fm.removeItem(atPath: snapshot + "/" + shards[3])
+    try! fm.removeItem(atPath: flatSnapshot + "/" + shards[3])
+    check(plan().version != "1.3.2" || plan().error != nil, "incomplete Hub snapshot: a missing indexed shard never enables offline launcher")
+}
+do {
+    let fm = FileManager.default
+    let home = fm.temporaryDirectory.appendingPathComponent("splash-gguf-" + UUID().uuidString).path
+    defer { try? fm.removeItem(atPath: home) }
+    let id = "ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF"
+    let repo = home + "/.cache/huggingface/hub/models--ISTA-DASLab--Qwen3.8-27B-GSQ-RCO-GGUF"
+    let revision = "d562806dbafae37109975e970aae91b43e73b440"
+    let snapshot = repo + "/snapshots/" + revision
+    try! fm.createDirectory(atPath: snapshot, withIntermediateDirectories: true)
+    try! fm.createDirectory(atPath: repo + "/refs", withIntermediateDirectories: true)
+    try! revision.write(toFile: repo + "/refs/main", atomically: true, encoding: .utf8)
+    for name in ["Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf", "mmproj-Qwen3.8-27B-BF16.gguf"] {
+        try! Data("GGUF".utf8).write(to: URL(fileURLWithPath: snapshot + "/" + name))
+    }
+    func plan(_ supportsGGUF: Bool) -> LaunchConfig {
+        let data = planCfgJSON(engineMode: "auto", manualPath: nil, port: 8123, key: "test", name: "3-Bit",
+            modelId: id, modelDir: nil, options: [:], modelSource: "hfhub")
+        return planLaunch(data, home: home,
+            isDir: { path in var d: ObjCBool = false; return path == "/brew/libexec" || (fm.fileExists(atPath: path, isDirectory: &d) && d.boolValue) },
+            isExecutable: { $0 == "/brew/libexec/engine/splash" || $0 == "/brew/libexec/python/bin/python" },
+            brewKeg: { "/brew" }, kitVersion: { _ in supportsGGUF ? "1.3.2" : "1.3.1" },
+            fileContents: { path in path == "/brew/libexec/install/upstream.py" && supportsGGUF ? "def _gguf_target(repo, variant, language_only, scratch):" : (try? String(contentsOfFile: path, encoding: .utf8)) },
+            listDir: { try? fm.contentsOfDirectory(atPath: $0) })
+    }
+    let gguf = plan(true)
+    check(gguf.error == nil && gguf.modelDir == snapshot && gguf.engineArgs.prefix(5) == ["-u", "install/launcher.py", "serve", "--model", id] &&
+          gguf.engineArgs.contains("--offline") && gguf.engineEnv["HF_HUB_OFFLINE"] == "1" && gguf.engineEnv["HF_HUB_CACHE"] == nil,
+          "GGUF-only target plus BF16 mmproj cache: capable 1.3.2 launcher offline without variant or config.json")
+    check(plan(false).error?.contains("does not support GGUF targets") == true,
+          "GGUF-only cache: older engine gets accurate GGUF capability refusal")
 }
 
 // 67. planLaunch happy path, the 1.3.0 module form: a manual kit + a package
@@ -3645,12 +3786,13 @@ do {
 do {
     var candidate = defaultConfig(home: "/home", now: now)
     candidate.globals.engine = EngineCfg(mode: "manual", manualPath: "/kits/k131")
-    candidate.profiles[0].model = ProfileModel(source: "hfid", id: "org/model")
+    candidate.profiles[0].model = ProfileModel(source: "hfid", id: "org/model", dir: "/cached/model")
     candidate.profiles[0].options["draft_model"] = .string("org/draft")
     var fs = FakeFS(); planKit(fs: &fs, path: "/kits/k131", version: "1.3.1")
+    fs.dir("/cached/model", ["config.json"]); fs.file("/cached/model/config.json", "{}")
     func signature(_ d: ConfigDoc) -> String {
         planLaunch(configData(d), home: "/home", isDir: { fs.isDir($0) },
-                   isExecutable: { fs.isExecutable($0) }, kitVersion: { _ in "1.3.1" }).signature
+                   isExecutable: { fs.isExecutable($0) }, kitVersion: { _ in "1.3.1" }, fileContents: { fs.fileContents($0) }).signature
     }
     let baseline = signature(candidate)
     var second = candidate.profiles[0]; second.id = "second"; second.name = "Second"
@@ -3908,8 +4050,8 @@ do {
     check(settings.height == 716, "panel size: the view switch does not change the height")
     check(panelTargetSize(view: "whatever", contentHeight: 700, screenHeight: 1000).width == 520,
           "panel size: an unknown view defaults to the status width")
-    check(panelTargetSize(view: "status", contentHeight: 100, screenHeight: 1000).height == 320,
-          "panel size: the 320pt floor holds")
+    check(panelTargetSize(view: "status", contentHeight: 100, screenHeight: 1000).height == 370,
+          "panel size: the 370pt floor holds")
     check(panelTargetSize(view: "status", contentHeight: 5000, screenHeight: 1000).height == 880,
           "panel size: the screen cap (screenH - 120) holds")
 }

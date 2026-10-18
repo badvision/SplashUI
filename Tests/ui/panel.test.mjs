@@ -746,6 +746,37 @@ check('native menu exposes ordered status/settings/separator/quit actions', () =
   assert.match(native, /func openSettings\(\)[\s\S]*?showPanel\(view: "settings"\)/);
   assert.match(native, /func openStatus\(\)[\s\S]*?showPanel\(\)/);
 });
+check('spawning is not readiness and early engine exits preserve the engine error', () => {
+  const launch = native.match(/func launch\(\) \{([\s\S]*?)\n    \}/)[1];
+  assert.doesNotMatch(launch, /everUp = true/);
+  assert.match(native, /func markReady\(observedAt: Date\)[\s\S]*?observedAt >= launchDate[\s\S]*?everUp = true/);
+  assert.match(native, /if !launchReady[\s\S]*?readDataToEndOfFile\(\)[\s\S]*?engineStartupFailure\(exitStatus: proc\.terminationStatus, output: output\)[\s\S]*?return/);
+  assert.match(native, /launchFailed: server\.lastLaunchError != nil/);
+});
+check('failure modal copies every stderr line via the Swift bridge and dismiss never starts', () => {
+  const error = panel();
+  try {
+    const message = 'Engine exited before it became ready (exit status 1).\nTraceback:\nRepository Not Found';
+    error.w.showLaunchFailure(message);
+    assert.equal(error.$('errorText').textContent, message);
+    error.$('errorCopy').click();
+    assert.equal(error.commands.at(-1).cmd, 'error.copy');
+    error.$('errorDismiss').click();
+    assert.equal(error.commands.at(-1).cmd, 'error.dismiss');
+    error.flushTimers();
+    assert.ok(!error.commands.some(c => ['start', 'restart'].includes(c.cmd)));
+    assert.equal(error.$('errorModal').style.display, 'none');
+  } finally { error.close(); }
+  assert.match(native, /case "error.copy":[\s\S]*?NSPasteboard.general.setString\(text, forType: .string\)/);
+  assert.match(native, /if let text = presentedLaunchError/);
+});
+check('exit-1 failure remains stopped until explicit START, with no timed startup retry', () => {
+  assert.doesNotMatch(native, /launchRetryDue/);
+  assert.match(native, /recordLaunchFailure\(_ message: String, logPath: String\) \{\s*userStopped = true\s*pendingRestart = false/);
+  assert.match(native, /guard !self.userStopped, self.lastLaunchError == nil, self.pid == nil else/);
+  assert.match(native, /if let e = plan.error[\s\S]*?return \}[\s\S]*?let p = Process\(\)/);
+  assert.match(native, /case "error.dismiss": errorModalOpen = false/);
+});
 
 const failed = results.filter(result => !result.pass).length;
 console.log(JSON.stringify({ suite: 'panel-jsdom', assertions: results.length, passed: results.length - failed, failed }));

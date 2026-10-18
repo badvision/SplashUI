@@ -21,6 +21,10 @@ dependencies (swiftc + WebKit + Foundation only).
 - **Never auto-restart** (D5): config changes take effect only on restart; the app
   **prompts** (with in-flight request count) and the user explicitly confirms. Saving or
   activating a profile never restarts the engine.
+- **Startup failure is recoverable**: spawning the engine is not readiness. If it
+  exits before reporting ready, keep SplashUI open and show an error modal
+  containing its stdout/stderr and exit status. Open Settings lets the user correct
+  configuration and try Start again, including after a failed restart of an older session.
 - **No `SPLASH_*` env override** (D9): the app reads none of the 9 documented env vars —
   no precedence, no env-override indicator. `config.json` only. (The engine *child* still
   receives `SPLASH_API_KEY` as its own env — internal plumbing, not env-var support.)

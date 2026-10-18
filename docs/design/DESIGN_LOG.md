@@ -379,3 +379,61 @@ Source of truth for every design delta. Newest last. Mock: /tmp/mock/settings_pa
   rounded by 20px when the second or a later profile is selected. The first
   selected row retains a square junction flowing directly into the title bar.
   Both the frame clipping and title bar follow selection without moving the layout.
+
+- v59 (user clarification, 2026-10-17): a failed engine start must never close
+  SplashUI. Process creation no longer counts as readiness. An exit before ready
+  captures the engine log tail and exit status, opens a native error sheet over
+  Settings, and offers Open Settings or Dismiss without terminating the app.
+  A launch-failure record also prevents auto-quit after an earlier running session.
+  Existing bounded retry behavior is unchanged; repeat identical errors do not
+  repeatedly interrupt settings edits. Explicit Start/Restart can present a new failure.
+
+- v60 (startup recovery, 2026-10-17): launcher-form engines refuse local model
+  sources before process creation; AUTO selection is unchanged. Startup failures
+  stay stopped until explicit Start/Restart (removed the 30-second launch retry).
+  The error dialog now uses the panel's modal idiom, with Copy to Clipboard directly
+  below the full error text, backed by NSPasteboard. Dismiss never starts an engine.
+
+- v61 (user override, 2026-10-17): AUTO is capability-based. Local-library models
+  choose the newest valid module-form kit across installed Homebrew kegs,
+  ~/SplashUI/kit, the legacy ~/Documents/code/splash-standalone installation, and
+  the configured engine path. Cached Hub models retain newest-Homebrew selection
+  and force --offline plus HF_HUB_OFFLINE=1. Missing/incompatible cache files
+  refuse startup with an explicit-download explanation; no model is downloaded
+  silently. The Engine panel states the AUTO choice and reason. Tokenizers stored
+  at the model root are used there instead of inventing a tokenizer/ subdirectory.
+
+- v62 (cache precedence correction, 2026-10-17): resolve repo ids, including
+  local/name ids originally selected in LM Studio, through models--owner--repo,
+  refs/main and its snapshot before deciding engine capability. A complete snapshot
+  (config, tokenizer and indexed safetensors shards) always keeps AUTO on the newest
+  Homebrew launcher offline; it must not fall back to the old module engine merely
+  because the profile's source is lmstudio. A real temporary-cache regression pins
+  the OptiQ zero-revision layout and rejects a missing indexed shard.
+
+- v63 (user ruling, 2026-10-17): keep OptiQ's nested vision tower in its original
+  Hub snapshot. Remove the proposed flattened-cache workaround entirely; no cache
+  rewrites, extra cache root or HF_HUB_CACHE override. AUTO uses the highest
+  installed Homebrew keg (now 1.3.2) with --offline and HF_HUB_OFFLINE=1. This
+  records launch planning only, not proof that the engine can finish loading it.
+
+- v64 (user ruling, 2026-10-17): retain the vision tower through an isolated flat
+  cache because 1.3.2 still rejects nested vision shard paths. Rewrite only the
+  app-owned index filename to vision-optiq.safetensors; preserve every tensor key.
+  All model data and metadata are symlinks to the original files. Prefer the
+  original cache when it meets the launcher's filename restrictions; otherwise
+  select the flat cache via child HF_HUB_CACHE, with HF_HUB_OFFLINE=1 and --offline.
+  No modifications to the original Hub cache or Homebrew keg.
+
+- v65 (offline draft resolution, 2026-10-17): the app-owned flat Hub cache also
+  links the selected model's family DFlash2 repository from the original cache.
+  Select its complete refs/main snapshot (drafts require config and weights, not
+  target tokenizers). Repeated preparation retains the same repository symlink,
+  so HF_HUB_CACHE does not hide the already-downloaded draft from the launcher.
+
+- v66 (GGUF capability correction, 2026-10-17): a single cached root GGUF target
+  (excluding mmproj projectors) is an offline-loadable snapshot when the installed
+  launcher's upstream adapter defines _gguf_target. GGUF needs neither a cached
+  config.json nor tokenizer JSON; the engine derives those from its header. Keep
+  --offline and HF_HUB_OFFLINE=1, do not append an unnecessary variant, and refuse
+  older engines with an accurate capability error rather than blaming the cache.
