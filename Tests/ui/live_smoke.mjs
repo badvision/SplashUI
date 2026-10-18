@@ -37,8 +37,12 @@ const directory = mkdtempSync('/tmp/splashui-live-');
 chmodSync(directory, 0o700);
 const output = join(directory, 'result.json'), evidence = join(directory, 'evidence.png');
 writeFileSync(join(directory, 'config.before.json'), original, { mode: 0o600 });
+const folderPaths = new Set([...doc.globals.model_folders.map(f => f.path),
+  join(homedir(), '.lmstudio/models'), join(homedir(), '.ollama/models'),
+  join(homedir(), '.cache/huggingface/hub'), join(homedir(), 'Library/Application Support/Splash/models'),
+  join(homedir(), 'SplashUI/models')].filter(path => existsSync(path) && statSync(path).isDirectory()));
 const expected = { port, enginePID, roundTrips, manualPath: doc.globals.engine.manual_path || '',
-  folderCount: doc.globals.model_folders.length };
+  folderCount: folderPaths.size };
 const hookPath = join(directory, 'assertions.js');
 writeFileSync(hookPath, readFileSync(join(here, 'live_assertions.js'), 'utf8')
   .replace('/* EXPECTED */', JSON.stringify(expected)), { mode: 0o600 });

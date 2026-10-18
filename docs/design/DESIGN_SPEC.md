@@ -1,8 +1,8 @@
 # SplashUI Settings Screen — Implementation Design Spec
 
-Source of truth for the visual design: the approved SVG mock v50 —
-`/tmp/mock/settings_panel.py` (renders `/tmp/mock/settings_panel.svg`; iteration
-history in `/tmp/mock/DESIGN_LOG.md`).
+Source of truth for the visual design: the approved `docs/design/settings_panel_2x.png`
+and its geometry source `docs/design/settings_panel.py`. Current user overrides are
+recorded in DESIGN_LOG v52–v55 and take precedence over the mock's two-row footer.
 
 **Framing (critical):** the mock is a *visual-language reference, not a
 pixel-perfect doctrine*. Implement it with the app's EXISTING CSS/markup system
@@ -28,16 +28,18 @@ variable (the app's green) rather than inventing a new palette entry.
 
 ## 1. Screen structure
 
-Full-screen settings view inside the existing 520×800 borderless panel, same
-window as the status view (switched via the header STATUS pill / existing view
-mechanism in panel.html).
+Settings uses an 820px-wide window; status remains 520px wide. Both share identical
+header/footer structure and styling. Height remains status-driven and screen-clamped.
+Global and Profiles have 270px / 390px minimum boxes and share spare height 2:3.
+Their sizes depend on the window, not the selected tabs. At 820×820, their measured
+heights are 273.59px / 395.41px with footer top 755px; all tabs fit without overflow.
+Settings scrollbars are hidden throughout; smaller windows scroll internally.
 
-- **Header** (blue swoop band): "SPLASH SETTINGS" title (25px-class, bg-color
-  on blue, letterspaced); `STATUS` dark capsule at the right edge (click → back
-  to status screen); a peach bar below carrying the active profile dash model
-  name (`QWEN3.8-27B - INCOAI/QWEN3.8-27B-SPLASH`, mono, bg-color on peach);
-  a green engine-state pill at the right end of the peach bar (IDLE / RUNNING
-  etc. from the tick).
+- **Header**: one shared masthead DOM outside both views, retaining the status header's
+  blue swoop, title slot, peach model bar and engine-state pill styling. The title is
+  "SPLASH SETTINGS" in settings and "Splash interface control" in status. The same
+  right-aligned control shows STATUS in settings and the menu icon in status. The peach
+  bar carries active profile dash model; the state pill follows frozen status conventions.
 - **Left rail** (full page height, 42px): lilac segment (channel 06, global)
   from the header line; green segment (channel 07, profiles) below. Channel
   numbers (23px-class bold, bg-color) right-aligned near the base of each
@@ -47,8 +49,7 @@ mechanism in panel.html).
   06, green ending 07. The 07 divider sits on the line where the blue footer
   swoop's left arm meets the rail (v50).
 - **Footer** (blue swoop C-band: left rail column + bottom band, rounded
-  inner/outer elbows, exactly like the status screen's swoop): two control
-  rows, see §6.
+  inner/outer elbows, identical in status and settings): one control row, see §6.
 
 ## 2. Global section (06, lilac)
 
@@ -56,30 +57,31 @@ Section heading "GLOBAL SETTINGS" (16px-class bold, lilac). Finder-style
 two-column layout:
 
 - **Column 1** (narrow): three selectable rows — `ENGINE`, `FOLDERS`,
-  `NETWORK`. Selected = lilac fill/black text, only the outer-left corners
-  rounded; unselected = dark fill/white text. Selection drives column 2.
+  `NETWORK`. Selected = lilac fill/black text, all four corners rounded;
+  unselected = dark fill/white text. Selection drives column 2.
 - **Column 2** (detail area):
   - **ENGINE** (sub-heading, teal):
-    - `AUTO | MANUAL` segmented caps (selected = lilac). AUTO = the app's
-      existing discovery ladder; MANUAL = user path.
+    - `AUTO | MANUAL` segmented caps (selected = lilac). AUTO selects the highest
+      valid installed Homebrew Splash version (numeric ordering, both standard prefixes).
+      The legacy SplashUI-local kit is not an automatic default; MANUAL uses the exact user path.
     - Engine path pill (mono path, truncated) + `BROWSE` cap (folder picker).
       Validate the chosen folder is a real Splash install; show the discovery
-      ladder line, the detected version (teal, from `release.json` — never
-      `VALID` (green — any engine version is supported; built-against vs
-      running version is an informational tip) / peach `FALLBACK MAPPING`
-      (no authored mapping for the running version — the registry report is
-      the tip) / red `UNRUNNABLE — reason` (D3).
-    - "APPLIES ON NEXT RESTART" mono note, shown only while the pending change
-      differs from the running plan (D13/D5).
+      ladder line, the detected version (teal, from `release.json` — never user-set),
+      `VALID` (green, no built-against annotation) / peach `FALLBACK MAPPING`
+      (no authored mapping for the running version — registry report in its tooltip)
+      / red `UNRUNNABLE — reason` (D3).
+    - Saved plan changes flash the shared RESTART button; no save-state note.
   - **FOLDERS**: the model-folder list — rows of mono path + source tag
     (LM STUDIO / OLLAMA / HF HUB / SPLASH) + per-row remove; `+ ADD FOLDER`
-    row. Common locations auto-detected on first run (LM Studio library,
-    Ollama blobs, Hugging Face cache, Splash's own download dir). Folders feed
-    the profile model chooser.
+    row. Common locations are added automatically only when their directories exist
+    (LM Studio library, Ollama models, Hugging Face cache, Splash model directories).
+    Missing paths are omitted. ADD validates directory existence before creating a row.
+    Paths expand into available width and wrap, never truncating useful text.
+    Folders feed the profile model chooser.
   - **NETWORK** (sub-heading, teal): flat fields (label + dark input, mono
     values, gray placeholder = unset default): HOST, PORT (steppers),
-    API KEY (masked + eye toggle; never rendered in plaintext, D6),
-    ALLOWED-HOST, ALLOWED-ORIGIN. `WEB UI ON | OFF` caps (selected = lilac).
+    API KEY (masked + explicit eye reveal; never passively rendered in plaintext, D6),
+    ALLOWED-HOST, ALLOWED-ORIGIN. `WEB UI ON | OFF` caps align with the input fields above (selected = lilac).
     All network settings are global, never per-profile (D6).
 
 ## 3. Profiles section (07, green)
@@ -88,30 +90,36 @@ Section heading "PROFILES" (green). Three Finder-style columns:
 
 - **Column 1**: profile rows (name, 26px-class) + `+ ADD PROFILE` at the
   bottom of the list (same alignment/color family). Selected row = dark green
-  shade, white text, left corners rounded; the *active* profile carries a
-  small bright dot at the row's right edge.
+  shade, black text, left corners rounded; the *active* profile carries a bright dot.
+  The selected row opens into column 2; the first row's top edge is flush with the
+  title bar and its lower-right corner swoops downward. No decorative blue blob.
 - **Column 2**: `PROFILE SETTINGS` title bar spanning the editor width (green,
-  bg-color text, rounded top) above the open-right frame; below it the five
-  tab rows: `GENERAL`, `MEMORY`, `CACHE`, `COMPUTE`, `API` (36px-class,
+  bg-color text, rounded top) above the open-right frame; below it the four
+  tab rows: `GENERAL`, `MODEL`, `MEMORY`, `API` (36px-class,
   selected = black bg/white text with green shoulder, unselected = green
   bg/black text). Selected profile drives column 3.
 - **Column 3** (detail, open-bracket frame: top+left+bottom green border,
   rounded right cap, open on the right per the mock):
-  - **GENERAL**: `PROFILE` label; `ACTIVATE | CLONE | DELETE` segmented caps
-    (activate = green); model pill (`MODEL | name | CHANGE`, name segment
-    width-constrained) → opens the model chooser modal; package/draft line
-    (mono teal: whether the runtime has a matching drafter, e.g.
-    `--draft package --kv 16`); metadata line `CREATED <date> · USED <date>`
-    (mono, dim); `LAUNCH PREVIEW` box (dark, rounded: teal heading, rule,
-    the two-line mono launch command the profile would produce — includes
-    `· RESTART` when it would change the plan).
-  - **MEMORY / CACHE / COMPUTE / API**: the profile's remaining launch
-    options as flat fields / caps / toggles, in the app's field idiom.
-    **Version-gated**: the option set comes from the engine-version mapping
-    (D3); settings that don't apply to the selected runtime are hidden, not
-    disabled. ANE toggle defaults ON and never off in defaults/seeds/tests.
-    KV cache size and the other options the discovery phase identified live
-    here.
+  - Every tab is a single-column panel. The only column split is the existing
+    profiles / tabs / settings layout; no nested two-column option grids.
+  - **GENERAL** contains profile name and ACTIVATE / CLONE / DELETE, created/used
+    metadata, the two unchanged per-profile compute controls (ANE and idle sleep), and
+    complete LAUNCH PREVIEW. There is no redundant Profile heading or generated-id row.
+    Restart confirmation is reachable here through the shared flashing RESTART control.
+  - **MODEL** is its own tab, not a sub-section in GENERAL. It contains the model pill
+    and CHANGE, drafter/package facts, draft-model, revision and all other model-axis
+    options. The redundant Model heading is removed.
+  - **MEMORY** contains memory options followed by a broken section divider and
+    CACHE options. CACHE and COMPUTE no longer have their own tabs. API retains
+    API/request options; reasoning-effort choices flex-wrap instead of overflowing.
+  - Option keys, registry groups, bridge messages and persistence are unchanged;
+    this is UI grouping only. Version gating still hides unavailable controls.
+  - Reset appears only for an explicitly provided non-null option, including false
+    or a value equal to the default. Unset options have no visible reset button.
+    Reset is a rounded black-on-gray pill. Unset values show gray placeholders;
+    unset toggles select the effective default. ANE remains per-profile, default ON.
+  - Profile frame, selected-tab shoulders, connector and lower corners use rounded
+    elbows; the outer frame clips to a continuous rounded boundary, not sharp notches.
 
 ## 4. Model chooser modal
 
@@ -134,10 +142,10 @@ Dark overlay (70% black) + blue-framed panel (rounded):
 ## 5. Behavior (binding — from AGENTS.md)
 
 - Everything auto-saves on change; **no save buttons anywhere** (D14/D15).
-- **Never auto-restart** (D5): a pending plan change shows the `RESTART
-  NEEDED` pill + the RESTART button becomes armed; the app prompts with the
-  in-flight request count and the user confirms. Saving/activating never
-  restarts the engine.
+- **Never auto-restart** (D5): a pending plan change flashes the RESTART button
+  with tooltip “Settings saved. Changes take effect after the engine restarts.”
+  There is no RESTART NEEDED pill. Flashing stops on restart or a cleared pending
+  state. The app still prompts for confirmation with the in-flight request count.
 - Activation commits unsaved draft edits first (one atomic save, then
   active-id change + `last_used_at` stamp) (D14).
 - Profile CRUD: add (from a template), clone (copies settings + metadata),
@@ -147,22 +155,16 @@ Dark overlay (70% black) + blue-framed panel (rounded):
 - Unrunnable model/runtime combo: save allowed, peach `UNRUNNABLE — <reason>`
   cap with the actionable fix; start refused pre-flight (D4).
 
-## 6. Footer (blue swoop, v50 layout)
+## 6. Footer (shared one-row layout, v52)
 
-- Green 07 divider on the swoop-arm line (above the footer, bottom of 07).
-- **Row 1** (just below the divider): `( RESTART NEEDED )` full red capsule
-  (bg-color text) at the left — visible only when `restart_required` is
-  true; `( CONFIG ] [ <version> )` segmented control right-aligned to the
-  content edge — CONFIG dark cap, version cap accent blue (value from the
-  running kit's `release.json`, e.g. `1.3.0`; mock shows a `V1` stand-in).
-- **Row 2**: `( START ] [ RESTART ] [ STOP )` — one segmented group, even
-  segments, 3–4px gaps between sections, square inner edges / rounded outer
-  caps, colors green/yellow/red, bg-color text. Then `PID | <pid>` dark
-  segmented group (value mono) centered in the space around it (even
-  margins). Then `APP-MANAGED` dark capsule, right-flush with the version
-  cap above. START/RESTART/STOP drive the engine lifecycle; PID shows the
-  engine process (dash when stopped); APP-MANAGED marks app-launched vs
-  adopted.
+- Green 07 divider ends the profile section immediately above the blue swoop.
+- One row in both views: `( START ] [ RESTART ] [ STOP )`, then `( PID ] [ number )`,
+  then `( APP-MANAGED / EXTERNAL )`, then right-aligned `( CONFIG ] [ version )`.
+- Action colors remain green/yellow/red. PID, ownership, CONFIG and version use
+  black-on-gray pills. Segments have 3–4px gaps, square inner edges and rounded
+  outer caps. PID is centered between its neighbors. The footer has no gray fill.
+- Pending changes flash RESTART rather than reserving a separate warning row.
+  Restart preserves session continuity by re-executing the current plan.
 
 ## 7. Translation notes (mock → app idiom)
 

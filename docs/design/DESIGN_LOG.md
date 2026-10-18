@@ -305,3 +305,77 @@ Source of truth for every design delta. Newest last. Mock: /tmp/mock/settings_pa
   restart re-executes the current plan (same binary/version as the
   running engine — session continuity).
 
+- v52 (user overrides, 2026-10-17): removed the RESTART NEEDED pill in favor of
+  flashing RESTART with tooltip “Settings saved. Changes take effect after the
+  engine restarts.” Attention clears on restart or reverted changes. This supersedes
+  the earlier black-on-red pill rule. Footer collapsed to one shared row in both
+  views: START / RESTART / STOP, PID, ownership, CONFIG / version. Shared blue
+  header now contains the title rather than placing it on black beneath the band.
+  Settings width is 820px (status stays 520px); this keeps the profile/model controls
+  and complete launch preview readable. Global and Profiles have fixed 230px and
+  440px heights, with internal overflow; tab switches never resize either section.
+  Chooser keeps explicit OK confirmation, source counts, MATCH tagging and no load.
+  Removed the restart confirmation box's decorative peach left border: when the
+  prompt starts below the scroll viewport it left a stray colored fragment beneath
+  LAUNCH PREVIEW. Confirmation text/control remain scroll-accessible; RESTART flashes.
+
+- v53 (user overrides, 2026-10-17): profile tabs are GENERAL / MEMORY / API.
+  CACHE merges into MEMORY after a section break; COMPUTE is removed and its two
+  unchanged per-profile settings move to GENERAL. GENERAL separates PROFILE
+  identity/actions/history from the labeled MODEL sub-section (model chooser,
+  package/drafter, draft-model, revision and other model-axis options).
+  Reset is visible only for explicitly provided non-null settings, styled as a
+  rounded black-on-gray pill. Reasoning-effort choices wrap. Settings scrollbars
+  are hidden globally, while the reference layout itself fits without scrolling.
+  Global grows to 270px; Profiles tightens to 390px. Settings widens to 1040px
+  to fit the regrouped controls in compact two-column detail grids; status stays
+  520px. Profile frame and selected-tab junctions use rounded elbows and corners.
+
+- v54 (user clarification, 2026-10-17): supersedes v53's General model sub-section
+  and nested grids. The final tabs are GENERAL / MODEL / MEMORY / API. MODEL
+  owns model selection, drafter/package, every model-axis option and launch preview.
+  GENERAL owns profile identity/actions/history and the two former Compute settings.
+  All four detail panels are single-column; only profiles / tabs / settings form
+  columns. MEMORY still includes CACHE after its section break. Compact rows keep
+  the full option contract in the fixed boxes without scrolling.
+  The single-column layout retains the previously accepted 820px settings width
+  (the temporary 1040px nested-grid experiment in v53 is superseded). Status stays
+  520px. Global and Profiles remain 270px / 390px, with no reference-size overflow.
+
+- v55 (user clarification, 2026-10-17): replaces the lookalike settings header with
+  the actual shared status masthead DOM; both views now use the same swoop, title
+  slot, model/state row and right-aligned STATUS/menu control. The title changes by view.
+  AUTO chooses the highest valid installed Homebrew Splash version numerically across
+  both prefixes; the old SplashUI kit is no longer an automatic default. MANUAL resolves
+  its exact path. Any current engine version is supported; VALID has no built-against note.
+  Global navigation rounds all corners. Only existing common model folders are added
+  automatically, missing paths are omitted, ADD checks existence first, and folder paths
+  expand/wrap. Web UI caps align with the fields above. The selected profile opens
+  directly into its green frame with a flush first-row top and rounded lower-right
+  swoop; the failed blue connector is removed. Column-2 tabs sit below the editor elbow.
+  GENERAL drops the redundant Profile/id row and regains LAUNCH PREVIEW and restart
+  confirmation; MODEL drops its redundant heading. Tabs remain GENERAL / MODEL /
+  MEMORY / API. The 820px settings width and 520px status width remain unchanged.
+  Global/Profile minima are 270px / 390px; spare vertical room is distributed 2:3,
+  eliminating dead space below 07 without any tab-dependent resizing. At 820×820,
+  measured section heights are 273.59px / 395.41px and footer top is 755px across all tabs.
+
+- v56 (user clarification, 2026-10-17): selected profile and its connector pieces
+  stack above column-2 tabs and editor. Restored the black inside-corner swoops
+  above/below the selected column-2 tab; only the failed blue junction blob stays
+  removed. The green frame's top-right end is a 15px half-round cap and its 10px
+  bottom edge ends in a 5px half-round cap, independent of the editor clipping.
+  Model chooser is fixed at 460px wide by 75vh tall, with a flexible internally
+  scrolling list and hidden scrollbars; empty, one-result and many-result states
+  never resize or reposition the modal.
+
+- v57 (user clarification, 2026-10-17): expose both inside-left 20px curves of
+  column 3 against a green backing strip. Column-2 swoops use the same 20px
+  radius; General starts 40px below the editor top, so its upper swoop's tip
+  meets the editor's upper-left curve tip without a jagged vertical seam.
+  The lower-left editor curve and the existing right-edge round caps remain visible.
+
+- v58 (user clarification, 2026-10-17): column 2's upper-left outer corner is
+  rounded by 20px when the second or a later profile is selected. The first
+  selected row retains a square junction flowing directly into the title bar.
+  Both the frame clipping and title bar follow selection without moving the layout.

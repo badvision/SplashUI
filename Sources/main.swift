@@ -1,5 +1,6 @@
 import AppKit
 import WebKit
+import QuartzCore
 import Foundation
 import Darwin
 
@@ -477,6 +478,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         // absent, the load SEEDS it (D10): that write happens synchronously here,
         // ahead of the launch/adopt below and of any config command (R10).
         configStore = ConfigStore(home: NSHomeDirectory())
+        configStore.doc.globals.modelFolders = existingModelFolders(configStore.doc.globals.modelFolders,
+            home: NSHomeDirectory(), isDir: { isDir($0) })
         // D12: pick the startup profile (most-recent last_used_at -> the persisted
         // active id -> first), stamp it (D13), and persist the choice — still before
         // the first launch below. On a fresh seed this re-picks its own "Default"
@@ -578,8 +581,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         if webReady { webView.evaluateJavaScript("window.showView('\(view)')", completionHandler: nil) }
         if let button = statusItem.button, let win = button.window {
             let f = win.frame
-            let maxX = (NSScreen.main?.frame.maxX ?? 2000) - 528
-            panel.setFrame(NSRect(x: min(f.maxX - 528, maxX), y: f.minY - panel.frame.height - 8, width: 520, height: panel.frame.height),
+            // The panel opens at the view's own width (820 for settings, 520 for status),
+            // right edge anchored 8pt from the tray icon, clamped to the screen.
+            let w: CGFloat = view == "settings" ? 820 : 520
+            let maxX = (NSScreen.main?.frame.maxX ?? 2000) - w - 8
+            panel.setFrame(NSRect(x: min(f.maxX - w - 8, maxX), y: f.minY - panel.frame.height - 8, width: w, height: panel.frame.height),
                            display: false)
         }
         NSApp.activate(ignoringOtherApps: true)
@@ -593,7 +599,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         if message.name == "size" {
-            if let h = message.body as? Int { applyPanelHeight(h) }
+            if let body = message.body as? [String: Any] {
+                applyPanelSize(height: body["h"] as? Int, width: (body["w"] as? Int) ?? 520)
+            } else if let h = message.body as? Int {
+                applyPanelSize(height: h, width: 520)
+            }
             return
         }
         // Object-body commands: the JS sends {cmd: "…", …args} (T8 clean cutover —
@@ -616,6 +626,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             guard let id = body["profileId"] as? String,
                   let obj = body["doc"] as? [String: Any],
                   let data = try? JSONSerialization.data(withJSONObject: obj) else { return }
+            if let candidate = parseConfig(data).doc {
+                let errors = modelFolderAdditionErrors(candidate.globals.modelFolders,
+                    existing: configStore.doc.globals.modelFolders, isDir: { isDir($0) })
+                if !errors.isEmpty {
+                    sendConfigResult(ConfigSaveResult(ok: false, errors: errors, warnings: []), to: "window.__cfgSave")
+                    return
+                }
+            }
             sendConfigResult(configStore.activateCandidate(data, profileId: id), to: "window.__cfgSave")
         case "config.validate": respondConfigValidate(body)
         case "config.reveal_key":
@@ -655,6 +673,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     /// The whole doc, raw (the edit form needs the unmasked api_key to round-trip
     /// it — the tick payload only ever carries the mask, D6).
     private func respondConfigGet() {
+        configStore.doc.globals.modelFolders = existingModelFolders(configStore.doc.globals.modelFolders,
+            home: NSHomeDirectory(), isDir: { isDir($0) })
         let data = configData(configStore.doc)
         guard let str = String(data: data, encoding: .utf8) else { return }
         // cfInit marks __cfgReady. The retry is scheduled FIRST so it survives
@@ -669,6 +689,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     private func respondConfigSave(_ body: [String: Any]) {
         guard let docObj = body["doc"] as? [String: Any],
               let data = try? JSONSerialization.data(withJSONObject: docObj) else { return }
+        if let candidate = parseConfig(data).doc {
+            let errors = modelFolderAdditionErrors(candidate.globals.modelFolders,
+                existing: configStore.doc.globals.modelFolders, isDir: { isDir($0) })
+            if !errors.isEmpty {
+                sendConfigResult(ConfigSaveResult(ok: false, errors: errors, warnings: []), to: "window.__cfgSave")
+                return
+            }
+        }
         var r = configStore.saveCandidate(data)
         if let candidate = parseConfig(data).doc { r.warnings += profileStates(candidate).compactMap { $0["eligibility_reason"] as? String } }
         sendConfigResult(r, to: "window.__cfgSave")
@@ -679,7 +707,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     private func respondConfigValidate(_ body: [String: Any]) {
         guard let docObj = body["doc"] as? [String: Any],
               let data = try? JSONSerialization.data(withJSONObject: docObj) else { return }
-        let r = configStore.validateCandidate(data)
+        var r = configStore.validateCandidate(data)
+        if let candidate = parseConfig(data).doc {
+            r.errors += modelFolderAdditionErrors(candidate.globals.modelFolders,
+                existing: configStore.doc.globals.modelFolders, isDir: { isDir($0) })
+            r.ok = r.ok && r.errors.isEmpty
+        }
         let states = parseConfig(data).doc.map { profileStates($0) } ?? []
         let candidateVersion = parseConfig(data).doc.map { candidate in
             planLaunch(configData(candidate), home: NSHomeDirectory(), isDir: { isDir($0) },
@@ -855,13 +888,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         }
     }
 
-    // JS reports natural content height; panel grows/shrinks to fit (top edge pinned)
-    private func applyPanelHeight(_ h: Int) {
+    // JS reports the view's geometry target; the panel animates to it with the
+    // top edge pinned. The settings view widens the window to 820 and the status
+    // view returns to 520; a width-only message keeps the current height (only
+    // status content ever sets the height).
+    private func applyPanelSize(height: Int?, width: Int) {
         let screenH = NSScreen.main?.frame.height ?? 1200
-        let target = min(max(320, CGFloat(h + 16)), screenH - 120)
         let f = panel.frame
-        guard abs(f.height - target) > 4 else { return }
-        panel.setFrame(NSRect(x: f.minX, y: f.origin.y - (target - f.height), width: f.width, height: target), display: true)
+        let targetH: CGFloat
+        if let height {
+            targetH = panelTargetSize(view: width == 820 ? "settings" : "status",
+                                      contentHeight: height, screenHeight: screenH).height
+        } else {
+            targetH = f.height
+        }
+        let targetW = CGFloat(width)
+        guard abs(f.width - targetW) > 1 || abs(f.height - targetH) > 4 else { return }
+        // The window is right-anchored under the tray; widening must not push
+        // the right edge off screen (showPanel's clamp, applied here too).
+        let screenMaxX = NSScreen.main?.frame.maxX ?? 2000
+        let x = min(f.minX, screenMaxX - 8 - targetW)
+        let frame = NSRect(x: x, y: f.origin.y - (targetH - f.height), width: targetW, height: targetH)
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.25
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().setFrame(frame, display: true)
+        }
     }
 
     @objc private func quitApp() {
@@ -1481,7 +1533,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             runFolderScan()
         }
         var folders: [[String: Any]] = []
-        for f in doc.globals.modelFolders {
+        for f in doc.globals.modelFolders where isDir(f.path) {
             var st = folderScanCache[f.id] ?? ["id": f.id, "path": f.path, "source": f.source,
                                                "models": [Any](), "present": NSNull() as Any, "error": NSNull()]
             st["scanning"] = folderScanInFlight || st["present"] is NSNull

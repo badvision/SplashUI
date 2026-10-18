@@ -38,6 +38,7 @@ const DEFAULT_DEFS = [
   { key: 'allow_idle_sleep', flag: '--allow-idle-sleep', kind: 'bool', group: 'compute', default: false, requires: [] },
   { key: 'served_model_name', flag: '--served-model-name', kind: 'value', group: 'api', default: null, requires: [] },
   { key: 'max_request_size', flag: '--max-request-size', kind: 'value', group: 'api', default: '256m', requires: [] },
+  { key: 'reasoning_effort', flag: '--default-reasoning-effort', kind: 'value', group: 'api', default: null, choices: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], requires: [] },
   { key: 'draft_model', flag: '--draft-model', kind: 'value', group: 'model-axis', default: null, requires: [] },
   { key: 'revision', flag: '--revision', kind: 'value', group: 'model-axis', default: null, requires: [] }
 ];
@@ -56,7 +57,7 @@ function check(name, body) {
 }
 function panel({ firstRun = false, optionDefs = null } = {}) {
   let doc = clone(fixture), baseline = signature(doc), rejectSave = false;
-  const commands = [], replies = [], timers = new Map(), errors = [];
+  const commands = [], replies = [], sizes = [], timers = new Map(), errors = [];
   let timerID = 0;
   const virtualConsole = new VirtualConsole();
   virtualConsole.on('jsdomError', error => errors.push(error.message));
@@ -77,7 +78,7 @@ function panel({ firstRun = false, optionDefs = null } = {}) {
     state: 'idle', ready: true, server: { pid: 17573, launched_by_app: true },
     cfg: {
       engine: engineTick(doc),
-      folders: doc.globals.model_folders.map(f => ({ ...f, present: f.id === 'lmstudio', scanning: false,
+      folders: doc.globals.model_folders.map(f => ({ ...f, present: f.path !== '/fixture/missing', scanning: false,
         models: f.id === 'lmstudio' ? [
           { id: 'org/model', source: f.id, dir: '/fixture/models/org/model', kind: 'package', size_bytes: 1900000000, eligibility: 'runnable', drafter: 'PACKAGE — baked in' },
           { id: 'org/assembly', source: f.id, dir: '/fixture/models/org/assembly', kind: 'assembly', size_bytes: 1800000000, eligibility: 'unrunnable', eligibility_reason: 'missing draft/config.json', drafter: 'MISSING — draft/config.json required' }
@@ -96,7 +97,7 @@ function panel({ firstRun = false, optionDefs = null } = {}) {
     }, ...extra
   });
   w.webkit = { messageHandlers: {
-    size: { postMessage() {} },
+    size: { postMessage(v) { sizes.push(v); } },
     cmd: { postMessage(message) {
       const m = clone(message); commands.push(m);
       replies.push(() => {
@@ -106,10 +107,12 @@ function panel({ firstRun = false, optionDefs = null } = {}) {
           const invalid = m.doc.profiles.find(p => p.options.kv_format && !['int8', 'bf16'].includes(p.options.kv_format));
           const names = m.doc.profiles.map(p => p.name);
           const duplicate = new Set(names).size !== names.length;
+          const missingFolder = m.doc.globals.model_folders.find(f => f.path === '/fixture/not-a-directory');
           w.__cfgValidate({
-            ok: !invalid && !duplicate,
+            ok: !invalid && !duplicate && !missingFolder,
             errors: [...(invalid ? [`profile ${invalid.id} option kv_format: invalid syntax`] : []),
-              ...(duplicate ? ['duplicate profile name(s)'] : [])],
+              ...(duplicate ? ['duplicate profile name(s)'] : []),
+              ...(missingFolder ? ['model folder does not exist: ' + missingFolder.path] : [])],
             warnings: [], validation_id: m.validation_id,
             option_defs: optionDefs ?? DEFAULT_DEFS,
             profiles: m.doc.profiles.map(p => ({ id: p.id, eligibility: p.model.source === 'none' ? 'unrunnable' : 'runnable', drafter: 'PACKAGE — baked in' }))
@@ -136,7 +139,7 @@ function panel({ firstRun = false, optionDefs = null } = {}) {
   function change(id, value) { $(id).value = String(value); $(id).dispatchEvent(new w.Event('change')); }
   function save() { flushTimers(); }   // S7: no save buttons — a passing validation commits the dirty draft
   drain(); tick();
-  return { w, $, tick, commands, drain, flushTimers, change, save, errors,
+  return { w, $, tick, commands, drain, flushTimers, change, save, errors, sizes,
     doc: () => clone(doc), reject: value => { rejectSave = value; },
     restarted: () => { baseline = signature(doc); tick(); }, close: () => dom.window.close() };
 }
@@ -145,6 +148,11 @@ function panel({ firstRun = false, optionDefs = null } = {}) {
 const p = panel();
 try {
   const { w, $, tick, commands, drain, change, save } = p;
+  check('initial status tick posts the content height with the status width', () => {
+    const first = p.sizes[0];   // the harness's setup tick, on the status view
+    assert.equal(first.w, 520);
+    assert.ok(first.h > 0);
+  });
   check('default screen is telemetry-only status', () => {
     assert.ok(!$('statusView').hidden && $('settingsView').hidden);
     assert.equal($('statusView').querySelector('section.settings-global, section.settings-profiles'), null);
@@ -161,21 +169,29 @@ try {
     assert.match(html, /\.settings-profiles\s*{[^}]*--accent:\s*var\(--green\)/);
     assert.match(html, /section::after\s*{[^}]*linear-gradient\(to right, var\(--accent\)/);
   });
-  check('settings header: title, STATUS cap, active profile bar, engine state pill', () => {
-    assert.equal($('s7Title').textContent, 'Splash settings');
-    assert.ok($('btnStatus').closest('#settingsHeader'));
-    assert.equal($('s7ProfileName').textContent, 'Default');
-    assert.ok($('s7ProfileModel').textContent.includes('org/model'));
-    assert.equal($('s7EngState').textContent, 'IDLE');
-    assert.ok($('s7EngState').classList.contains('up'));
+  check('both views use one shared masthead with the title, STATUS cap, model and state', () => {
+    const header = $('header');
+    assert.ok(header.classList.contains('panel-header'));
+    assert.ok(!header.closest('main'));
+    assert.equal($('settingsHeader'), null);
+    assert.equal($('s7Title'), null);
+    assert.equal($('hName').textContent, 'Splash interface control');
+    const sameModel = $('hModel').textContent, sameState = $('statusPill').textContent;
+    w.showView('settings');
+    assert.equal($('hName').textContent, 'Splash settings');
+    assert.ok(header.contains($('btnSettings')));
+    assert.equal($('hModel').textContent, sameModel);
+    assert.equal($('statusPill').textContent, sameState);
+    assert.match(sameModel, /Default.*org\/model/);
+    w.showView('status');
   });
   tick({}, { state: 'down', server: { pid: null, launched_by_app: false } });
-  check('settings engine-state pill: DOWN when the server is gone', () => {
-    assert.equal($('s7EngState').textContent, 'DOWN');
-    assert.ok(!$('s7EngState').classList.contains('up'));
+  check('shared engine-state pill shows DOWN when the server is gone', () => {
+    assert.equal($('statusPill').textContent, 'DOWN');
+    assert.ok($('statusPill').classList.contains('r'));
   });
   tick();
-  check('hamburger switches views without bridging or losing draft', () => {
+  check('shared STATUS cap switches views without bridging or losing draft', () => {
     const count = commands.length, draft = w.__test.draft();
     $('statusView').scrollTop = 90;
     $('btnSettings').click();
@@ -184,11 +200,31 @@ try {
     assert.equal(commands.length, count);
     assert.equal(w.__test.draft(), draft);
   });
+  check('view switch posts the per-view width to the app', () => {
+    p.sizes.length = 0;
+    $('btnSettings').click();
+    $('btnSettings').click();
+    $('btnSettings').click();
+    assert.deepEqual(p.sizes.map(s => s.w), [520, 820, 520]);
+  });
+  check('ticks post the size channel only for view switches, never while settings shows', () => {
+    p.sizes.length = 0;
+    $('btnSettings').click();
+    assert.equal(p.sizes.length, 1);   // the switch posts the width
+    assert.equal(p.sizes[0].w, 820);
+    p.sizes.length = 0;
+    tick(); tick();
+    assert.equal(p.sizes.length, 0);   // settings scrolls internally — no size posts
+    $('btnSettings').click();
+    p.sizes.length = 0;
+    tick();
+    assert.equal(p.sizes.length, 0);   // an unchanged height does not repost (lastH guard)
+  });
   check('S7 controls live on the settings screen', () => {
     for (const id of ['capAuto', 'capManual', 'manualPath', 'btnBrowseEngine', 'engPath', 'engTried', 'vCfg', 'engArch', 'engValid',
       'cfgMsg', 'folderList', 'folderPath', 'btnBrowseFolder', 'btnAddFolder',
       'cfgHost', 'cfgPort', 'cfgKey', 'btnKeyEye', 'cfgAllowedHost', 'cfgAllowedOrigin', 'webUiOn', 'webUiOff',
-      'profileList', 'btnProfileAdd', 'ptabGeneral', 'ptabMemory', 'ptabCache', 'ptabCompute', 'ptabApi',
+      'profileList', 'btnProfileAdd', 'ptabGeneral', 'ptabModel', 'ptabMemory', 'ptabApi',
       'profileName', 'btnProfileActivate', 'btnProfileClone', 'btnProfileRemove', 'modelPill', 'modelPillName',
       'profileDrafter', 'profileModelAxis', 'profileLaunchMeta', 'profilePreviewBox', 'profileRestartPrompt'])
       assert.ok($('settingsView').contains($(id)), id);
@@ -200,8 +236,38 @@ try {
     }
   });
   check('footer controls live on the shared footer', () => {
-    for (const id of ['footRow1', 'footRow2', 'restartPill', 'cfgPill', 'verPill', 'btnGroup', 'btnStart', 'btnRestart', 'btnStop', 'pidPill', 'pidLabel', 'pidNum', 'envPill'])
+    for (const id of ['footRow1', 'cfgPill', 'verPill', 'btnGroup', 'btnStart', 'btnRestart', 'btnStop', 'pidPill', 'pidLabel', 'pidNum', 'envPill'])
       assert.ok(w.document.getElementById('footer').contains($(id)), id);
+  });
+  check('settings sections have tab-independent boxes that share spare height', () => {
+    const global = w.getComputedStyle(w.document.querySelector('.settings-global'));
+    const profile = w.getComputedStyle(w.document.querySelector('.settings-profiles'));
+    assert.equal(global.minHeight, '270px');
+    assert.equal(profile.minHeight, '390px');
+    assert.ok(Number(global.flexGrow) > 0 && Number(profile.flexGrow) > 0);
+    assert.equal(w.getComputedStyle($('profileEditor')).overflowY, 'auto');
+    assert.equal(w.getComputedStyle(w.document.querySelector('.s7-detail')).overflow, 'auto');
+    assert.equal($('header').querySelector('.title').id, 'hName');
+    assert.match(html, /\.s7 \.gcol\s*{[^}]*border-radius:\s*12px/);
+    assert.equal(w.document.querySelector('.s7-tabs').style.getPropertyValue('--connector-top'), '');
+  });
+  check('third-column inside corners and General swoop have matching tips', () => {
+    const editor = w.getComputedStyle($('profileEditor'));
+    const tabs = w.getComputedStyle($('profileTabCol'));
+    assert.deepEqual(editor.borderRadius.split(/\s+/).map(Number.parseFloat), [20, 0, 0, 20]);
+    assert.equal(Number.parseFloat(tabs.paddingTop) - Number.parseFloat(editor.marginTop), 40);
+    assert.match(html, /\.ptab\.on::before, \.ptab\.on::after\s*{[^}]*width:\s*20px; height:\s*20px/);
+  });
+  check('column two rounds its upper-left corner only for a later selected profile', () => {
+    const rows = [...w.document.querySelectorAll('#profileList .profrow')];
+    const frame = w.document.querySelector('.s7-profile-frame');
+    const title = w.document.querySelector('.s7-topbar');
+    rows[1].click();
+    assert.equal(w.getComputedStyle(frame).borderTopLeftRadius, '20px');
+    assert.equal(w.getComputedStyle(title).borderTopLeftRadius, '20px');
+    w.document.querySelector('#profileList .profrow').click();
+    assert.notEqual(w.getComputedStyle(frame).borderTopLeftRadius, '20px');
+    assert.notEqual(w.getComputedStyle(title).borderTopLeftRadius, '20px');
   });
   check('save buttons are gone — every change auto-saves', () => {
     assert.equal($('btnCfgSave'), null);
@@ -236,10 +302,10 @@ try {
   $('capManual').click();
   tick({ engine: { ...w.__test.S().cfg.engine, verdict: 'valid', version: '1.3.1',
     verdict_reason: 'built against v1.3.0; running v1.3.1' } });
-  check('verdict cap: any version is supported — a non-built-against kit is VALID with the version as info', () => {
-    assert.match($('engValid').textContent, /^VALID — built against v1\.3\.0; running v1\.3\.1$/);
+  check('valid engine versions have no confusing build-version annotation', () => {
+    assert.equal($('engValid').textContent, 'VALID');
     assert.ok($('engValid').classList.contains('valid'));
-    assert.equal($('engValid').dataset.tip, 'built against v1.3.0; running v1.3.1');
+    assert.equal($('engValid').dataset.tip, undefined);
   });
   tick({ engine: { ...w.__test.S().cfg.engine, verdict: 'fallback', version: '1.3.1' },
     mapping_used: '1.3.0', registry_report: { missing_in_kit: ['--foo'] } });
@@ -260,13 +326,13 @@ try {
     $('gcolEngine').click();
     assert.ok(!$('gpanelEngine').hidden);
   });
-  check('folder rows: source tag, path, status, model count', () => {
-    assert.equal(w.document.querySelectorAll('#folderList .frow').length, 2);
+  check('folder rows hide nonexistent paths and give existing paths the available width', () => {
+    assert.equal(w.document.querySelectorAll('#folderList .frow').length, 1);
     assert.match($('folderList').textContent, /LM Studio/);
     assert.match($('folderList').textContent, /\/fixture\/models/);
     assert.match($('folderList').textContent, /PRESENT.*2 models/);
-    assert.match($('folderList').textContent, /Manual/);
-    assert.match($('folderList').textContent, /MISSING.*0 models/);
+    assert.doesNotMatch($('folderList').textContent, /MISSING|\/fixture\/missing/);
+    assert.equal(w.getComputedStyle(w.document.querySelector('#folderList .fpath')).whiteSpace, 'normal');
   });
   tick({ folders: [{ id: 'lmstudio', scanning: true, present: true, models: [] }] });
   check('scanning folder uses SCANNING state', () => assert.match($('folderList').textContent, /SCANNING/));
@@ -275,7 +341,10 @@ try {
   check('scan bridges the selected folder ID', () => assert.deepEqual(commands.at(-1), { cmd: 'config.scan', id: 'lmstudio' }));
   $('folderPath').value = '/fixture/added';
   $('btnAddFolder').click();
-  check('folder add creates a manual row', () => {
+  check('folder add validates existence before adding a row', () => {
+    assert.equal(w.__test.draft().folders.length, 2);
+    assert.equal(commands.at(-1).cmd, 'config.validate');
+    drain();
     const folders = w.__test.draft().folders;
     assert.equal(folders.length, 3);
     assert.deepEqual(JSON.parse(JSON.stringify(folders.at(-1))), { id: 'folder3', path: '/fixture/added', source: 'manual' });
@@ -283,6 +352,13 @@ try {
   });
   w.document.querySelector('#folderList [data-act="del"][data-i="2"]').click(); tick();
   check('folder delete removes the draft row', () => assert.equal(w.__test.draft().folders.length, 2));
+  $('folderPath').value = '/fixture/not-a-directory';
+  $('btnAddFolder').click(); drain();
+  check('nonexistent folder never enters the draft or list', () => {
+    assert.equal(w.__test.draft().folders.length, 2);
+    assert.doesNotMatch($('folderList').textContent, /not-a-directory/);
+    assert.match($('folderMsg').textContent, /model folder does not exist/);
+  });
   change('cfgHost', '0.0.0.0');
   save();
   check('host edit auto-saves (no save button) and round-trips the doc', () => {
@@ -294,14 +370,16 @@ try {
     assert.equal(saved.active_profile, 'p1');
     assert.ok(!('restart_required' in saved) && saved.schema_version === 1);
   });
-  check('changed running plan arms the RESTART NEEDED pill + restart button', () => {
-    assert.ok(!$('restartPill').hidden);
-    assert.equal($('btnRestart').textContent, 'Restart to apply');
-    assert.match($('cfgMsg').textContent, /restart to apply/);
+  check('changed running plan flashes RESTART without a restart pill or save indicator', () => {
+    assert.equal($('restartPill'), null);
+    assert.ok($('btnRestart').classList.contains('restart-pending'));
+    assert.equal($('btnRestart').textContent, 'Restart');
+    assert.equal($('btnRestart').getAttribute('data-tip'), 'Settings saved. Changes take effect after the engine restarts.');
+    assert.equal($('cfgMsg').textContent, '');
   });
   change('cfgHost', '127.0.0.1'); save(); p.restarted();
-  check('restoring baseline clears the restart pill', () => {
-    assert.ok($('restartPill').hidden);
+  check('restoring baseline clears restart attention', () => {
+    assert.ok(!$('btnRestart').classList.contains('restart-pending'));
     assert.equal($('btnRestart').textContent, 'Restart');
   });
   check('allowed-hosts and allowed-origins parse comma lists', () => {
@@ -362,24 +440,26 @@ try {
     assert.equal($('vCfg').textContent, '1.3.0');
   });
   check('ordinary session does not show the first-run modal', () => assert.notEqual($('cfgModal').style.display, 'flex'));
-  check('footer: shared swoop, two rows, pills populated', () => {
-    assert.ok($('restartPill').hidden);
+  check('footer: shared swoop, one row, pills populated', () => {
+    assert.equal($('restartPill'), null);
+    assert.equal($('footer').querySelectorAll('.foot-row').length, 1);
     assert.equal($('verPill').textContent, 'v1.3.0');
     assert.equal($('pidNum').textContent, '17573');
     assert.equal($('envPill').textContent, 'APP-MANAGED');
-    assert.equal($('footRow2').children.length, 3);
-    const [group, center, env] = $('footRow2').children;
+    assert.equal($('footRow1').children.length, 4);
+    const [group, center, env, config] = $('footRow1').children;
+    assert.equal(config.id, 'cfgVerGroup');
     assert.equal(group.id, 'btnGroup');
     assert.equal(center.querySelector('#pidPill') ? true : false, true);
     assert.equal(env.id, 'envPill');
     assert.deepEqual([...group.querySelectorAll('.btn')].map(b => b.id), ['btnStart', 'btnRestart', 'btnStop']);
   });
   check('CONFIG pill opens settings from the status view', () => {
-    $('btnStatus').click();
+    w.showView('status');
     assert.ok(!$('statusView').hidden && $('settingsView').hidden);
     $('cfgPill').click();
     assert.ok($('settingsView').hidden === false && $('statusView').hidden);
-    $('btnStatus').click();
+    $('btnSettings').click();
     assert.ok(!$('statusView').hidden && $('settingsView').hidden);
   });
   check('no unhandled DOM errors', () => assert.deepEqual(p.errors, []));
@@ -413,59 +493,92 @@ try {
   rows()[1].click();
   check('selecting a profile switches the editor to it', () => {
     assert.equal($('profileName').value, 'Untouched');
-    assert.equal($('profileIdLabel').textContent, 'p2');
+    assert.equal($('profileIdLabel'), null);
     assert.ok(rows()[1].classList.contains('on') && !rows()[0].classList.contains('on'));
   });
-  check('five tabs render; GENERAL is the landing tab', () => {
-    for (const id of ['ptabGeneral', 'ptabMemory', 'ptabCache', 'ptabCompute', 'ptabApi']) assert.equal($(id).hidden, false, id);
+  check('four tabs render; GENERAL contains per-profile compute settings', () => {
+    for (const id of ['ptabGeneral', 'ptabModel', 'ptabMemory', 'ptabApi']) assert.equal($(id).hidden, false, id);
+    assert.equal($('ptabCache'), null);
+    assert.equal($('ptabCompute'), null);
     assert.ok($('ptabGeneral').classList.contains('on'));
-    assert.ok(!$('ptabGeneralPanel').hidden && $('ptabComputePanel').hidden);
+    assert.ok(!$('ptabGeneralPanel').hidden && $('ptabMemoryPanel').hidden);
+    assert.ok($('ptabGeneralPanel').contains($('option-ane')));
+    assert.equal($('option-allow_idle_sleep').value, 'false');
+    assert.ok($('ptabGeneralPanel').querySelector('[data-option-choice="allow_idle_sleep"][data-value="false"]').classList.contains('on'));
+    assert.equal($('option-allow_idle_sleep').closest('.option-row').querySelector('.option-choices').children.length, 2);
   });
-  $('ptabCompute').click();
-  check('tab click switches the visible tab panel', () => {
-    assert.ok($('ptabCompute').classList.contains('on') && !$('ptabGeneral').classList.contains('on'));
-    assert.ok(!$('ptabComputePanel').hidden && $('ptabGeneralPanel').hidden);
-    assert.equal($('ptabComputePanel').querySelector('#option-ane') ? true : false, true);
+  check('Model has its own tab and reset pills only appear for overrides', () => {
+    assert.ok($('profileBasics').contains($('profileLaunchMeta')));
+    assert.ok(!$('profileBasics').contains($('modelPill')));
+    assert.ok($('ptabModelPanel').contains($('modelPill')));
+    assert.ok($('ptabModelPanel').contains($('option-draft_model')));
+    assert.equal($('ptabModelPanel').querySelector('.section-heading'), null);
+    assert.ok($('ptabGeneralPanel').contains($('profilePreviewBox')));
+    assert.ok(!$('ptabModelPanel').contains($('profilePreviewBox')));
+    assert.ok(w.document.querySelector('[data-option-reset="allow_idle_sleep"]').hidden);
+    assert.ok(!w.document.querySelector('[data-option-reset="ane"]').hidden);
+    w.document.querySelector('[data-option-reset="ane"]').click();
+    assert.ok(w.document.querySelector('[data-option-reset="ane"]').hidden);
+    assert.ok(w.document.querySelector('[data-option-choice="ane"][data-value="true"]').classList.contains('on'));
+    w.document.querySelector('[data-option-choice="ane"][data-value="false"]').click();
+  });
+  check('reasoning effort choices wrap and unset controls have no reset pill', () => {
+    const row = w.document.querySelector('[data-option-row="reasoning_effort"]');
+    assert.equal(row.querySelectorAll('[data-option-choice]').length, 7);
+    assert.equal(w.getComputedStyle(row.querySelector('.option-choices')).flexWrap, 'wrap');
+    assert.ok(row.querySelector('[data-option-reset]').hidden);
   });
   check('ANE is per-profile: the selected profile owns its compute option', () => {
     const draft = w.__test.draft();
     assert.equal(draft.profiles[1].options.ane, false);   // p2 selected, p1 keeps its own value
-    const on = w.document.querySelector('#ptabComputePanel [data-option-choice="ane"][data-value="true"]');
+    const on = w.document.querySelector('#ptabGeneralPanel [data-option-choice="ane"][data-value="true"]');
     on.click();
     assert.equal(w.__test.draft().profiles[1].options.ane, true);
     assert.equal(w.__test.draft().profiles[0].options.ane, true);
   });
   save();
-  check('compute tab edit auto-saves into the selected profile', () => {
+  check('General compute edit auto-saves into the selected profile', () => {
     const saved = profiles.commands.findLast(m => m.cmd === 'config.save');
     assert.equal(saved.doc.profiles[1].options.ane, true);
     assert.equal(saved.doc.profiles[0].options.ane, true);
   });
   rows()[0].click();
-  $('ptabCache').click();
+  $('ptabMemory').click();
   check('requires-gating: an unmet prerequisite disables the dependent row', () => {
     // p1 has persistent_cache set — its cache_dir row is live.
-    const p1row = w.document.querySelector('#ptabCachePanel [data-option-row="cache_dir"]');
+    const p1row = w.document.querySelector('#ptabMemoryPanel [data-option-row="cache_dir"]');
     assert.ok(!p1row.classList.contains('unmet'));
+    assert.ok($('ptabMemoryPanel').querySelector('[data-option-row="kv_format"]'));
+    assert.ok($('ptabMemoryPanel').querySelector('.profile-subsection [data-option-row="cache_dir"]'));
     rows()[1].click();
-    $('ptabCache').click();
+    $('ptabMemory').click();
     // p2: switch persistent_cache OFF via the UI — cache_dir must be gated off.
-    w.document.querySelector('#ptabCachePanel [data-option-choice="persistent_cache"][data-value="false"]').click();
+    w.document.querySelector('#ptabMemoryPanel [data-option-choice="persistent_cache"][data-value="false"]').click();
     assert.equal(w.__test.draft().profiles[1].options.persistent_cache, false);
-    const p2row = w.document.querySelector('#ptabCachePanel [data-option-row="cache_dir"]');
+    const p2row = w.document.querySelector('#ptabMemoryPanel [data-option-row="cache_dir"]');
     assert.ok(p2row.classList.contains('unmet'));
     assert.ok(p2row.querySelector('#option-cache_dir').disabled);
     save();   // auto-save rebaselines — the draft is clean again for the activation checks
     assert.ok(!w.__test.dirty());
   });
   rows()[0].click(); $('ptabGeneral').click();
-  check('GENERAL: actions, model pill, drafter, metadata', () => {
+  check('GENERAL identity and MODEL content remain separate', () => {
     assert.equal($('profileName').value, 'Default');
     assert.equal($('btnProfileActivate').textContent, 'Active');
     assert.equal($('modelPillName').textContent, 'org/model');
     assert.match($('profileDrafter').textContent, /PACKAGE — baked in/);
     assert.match($('profileLaunchMeta').textContent, /Created/);
     assert.match($('profileLaunchMeta').textContent, /Used/);
+  });
+  $('ptabModel').click();
+  check('Model navigation survives ticks and has a single-column panel', () => {
+    tick();
+    assert.ok($('ptabModel').classList.contains('on') && !$('ptabModelPanel').hidden);
+    assert.notEqual(w.getComputedStyle($('ptabModelPanel')).display, 'grid');
+    assert.ok(!$('ptabModelPanel').contains($('option-ane')));
+    assert.ok(!$('ptabModelPanel').contains($('profilePreviewBox')));
+    $('ptabGeneral').click();
+    assert.ok($('ptabGeneralPanel').contains($('profilePreviewBox')));
   });
   check('LAUNCH PREVIEW box renders the tick argv with the restart marker hidden', () => {
     assert.equal($('profilePreviewBox').hidden, false);
@@ -490,6 +603,9 @@ try {
     assert.equal($('profileRestartPrompt').hidden, false);
     assert.match($('profileRestartText').textContent, /7 in-flight/);
     assert.ok($('profileRestartPrompt').contains($('btnProfileRestart')));
+    $('ptabGeneral').click();
+    $('btnRestart').click();
+    assert.ok(!$('ptabGeneralPanel').hidden && $('ptabModelPanel').hidden);
   });
   tick();
   check('activation commits the draft atomically (doc + active id in one write)', () => {
@@ -501,7 +617,7 @@ try {
     assert.equal(m.doc.active_profile, 'p1');   // the doc as it stands; activation stamps the id
     assert.equal(w.__test.draft().activeProfile, 'p2');
     assert.equal($('btnProfileActivate').textContent, 'Active');
-    assert.match($('cfgMsg').textContent, /Saved/);
+    assert.equal($('cfgMsg').textContent, '');
   });
   check('a dirty unvalidated draft cannot activate', () => {
     change('profileName', 'Dirty name');
@@ -529,7 +645,7 @@ try {
     $('btnProfileRemove').click();
   });
   check('stale option keys surface under the active tab, never on GENERAL', () => {
-    $('ptabCompute').click();
+    $('ptabMemory').click();
     w.__test.draft().profiles[0].options.foo_bar = 'x';
     tick();
     assert.equal($('profileStaleSlot').hidden, false);
@@ -545,16 +661,16 @@ try {
   check('no unhandled DOM errors (profiles)', () => assert.deepEqual(profiles.errors, []));
 } finally { profiles.close(); }
 
-// ---- S7: version-gated tabs (a contract without the cache group) ----
-const gated = panel({ optionDefs: DEFAULT_DEFS.filter(d => d.group !== 'cache') });
+// ---- Version-gated tabs (neither memory nor cache options) ----
+const gated = panel({ optionDefs: DEFAULT_DEFS.filter(d => !['memory', 'cache'].includes(d.group)) });
 try {
   check('a tab whose group has no options for the resolved version is hidden, not disabled', () => {
-    assert.equal(gated.$('ptabCache').hidden, true);
-    for (const id of ['ptabGeneral', 'ptabMemory', 'ptabCompute', 'ptabApi']) assert.equal(gated.$(id).hidden, false, id);
+    assert.equal(gated.$('ptabMemory').hidden, true);
+    for (const id of ['ptabGeneral', 'ptabModel', 'ptabApi']) assert.equal(gated.$(id).hidden, false, id);
   });
   gated.tick({ option_defs: DEFAULT_DEFS });
   check('tabs re-appear when a tick carries the fuller contract', () => {
-    assert.equal(gated.$('ptabCache').hidden, false);
+    assert.equal(gated.$('ptabMemory').hidden, false);
   });
 } finally { gated.close(); }
 

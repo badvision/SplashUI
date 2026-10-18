@@ -5,7 +5,7 @@ Read this first. Durable decisions, conventions, and SMART goals for agent sessi
 ## Project
 
 SplashUI is a macOS app (Swift/AppKit + a single `WKWebView`, LCARS/TNG themed) that
-controls the Splash 1.3.0 standalone LLM engine: it launches or adopts the engine
+controls supported Splash standalone LLM engines: it launches or adopts the engine
 (`python …/server/server` or `install/launcher.py serve`), polls a 1s tick, and renders
 it in a borderless 520px panel. Key surfaces: status screen (telemetry, channels 01–05,
 tray pill, prefill/ETA display) and the Settings screen (channel 06: global engine/port/key
@@ -25,10 +25,34 @@ dependencies (swiftc + WebKit + Foundation only).
   no precedence, no env-override indicator. `config.json` only. (The engine *child* still
   receives `SPLASH_API_KEY` as its own env — internal plumbing, not env-var support.)
   `planLaunch` and its pipeline take **no env parameter** and read no environment.
-- **Engine version = what the panel package was built against (1.3.0), never a newer
-  system version** (e.g. a 1.3.1 Homebrew keg). Auto discovery is *order*, never version
-  preference; newer engines are surfaced as a blocked/unrunnable verdict, not promoted.
+- **Any current engine version is supported** (user override, 2026-10-17).
+  AUTO selects the highest valid installed Homebrew Splash version across Apple-silicon
+  and Intel prefixes, using numeric version ordering. The old SplashUI-local kit is
+  never an automatic default; MANUAL uses exactly the selected kit. A normal VALID
+  cap has no confusing built-against-version annotation. Restart preserves the current plan.
 - **Engine version detected from the kit's `release.json`, never user-set** (D16).
+- **Settings screen widens the window** (D19): the panel animates its width per view —
+  status 520pt, settings 820pt (the three-column layout needs the room; the extra width
+  goes to the detail column). Height is driven by status content only; the settings screen
+  scrolls internally within the wider window. Pure mapping: `panelTargetSize(view:
+  contentHeight:screenHeight:)` in ui_logic.swift; the JS posts `{h?, w}` on the `size`
+  channel.
+  Global and Profiles have 270px / 390px minimum boxes; spare height is shared 2:3.
+  Their heights remain identical across tabs at any given window size. At 820×820,
+  measured heights are 273.59px / 395.41px, footer top 755px; no reference overflow.
+  Profile tabs are GENERAL / MODEL / MEMORY / API, each a single-column panel.
+  General contains identity, per-profile compute and launch preview; Model owns model settings.
+  Memory includes cache after a section break. No nested two-column option grids.
+  Reset pills show only for explicitly provided non-null values.
+  Both views use the same header DOM outside the view containers and the same footer.
+  Global nav rows round all four corners. Profile selection opens into its green frame
+  with rounded inboard corners, no blue connector blob; General starts below the editor elbow.
+  Existing common model folders are discovered automatically; absent folders are omitted.
+  ADD validates directory existence before adding a row. Folder paths use the available
+  width and wrap instead of being cut off.
+  The footer is one row: START | RESTART | STOP, PID | number, APP-MANAGED/EXTERNAL,
+  CONFIG | version. Pending changes flash RESTART with the tooltip “Settings saved.
+  Changes take effect after the engine restarts.” No RESTART NEEDED or save-state pill.
 - **`restart_required` is computed, never stored** (D13): compare the current plan
   signature (kit + version + argv + key) against the last successful plan. The baseline
   must be stamped on **BOTH** launch and adopt paths (`ServerProc.launch` and

@@ -46,17 +46,23 @@
       $('statusView').querySelectorAll('section').length === 5, $('statusView').hidden);
     const geometry = { width: innerWidth, height: innerHeight };
     $('btnSettings').click();
-    check('hamburger opens settings in the same viewport', $('statusView').hidden && !$('settingsView').hidden &&
-      innerWidth === geometry.width && innerHeight === geometry.height && $('settingsView').scrollTop === 0, geometry);
+    // The app animates the window width for the view (820 for settings); height is untouched.
+    await until(() => $('statusView').hidden && !$('settingsView').hidden, 'settings view shown');
+    await until(() => innerWidth === 820, 'window widened for settings');
+    check('hamburger opens settings and widens the window', $('statusView').hidden && !$('settingsView').hidden &&
+      innerWidth === 820 && innerHeight === geometry.height && $('settingsView').scrollTop === 0,
+      { width: innerWidth, height: innerHeight, baseline: geometry });
     check('settings scrolls internally with shared footer reachable', getComputedStyle($('settingsView')).overflowY === 'auto' &&
       $('btnRestart').getBoundingClientRect().bottom <= innerHeight && $('btnRestart').getBoundingClientRect().top >= 0,
       { overflow: getComputedStyle($('settingsView')).overflowY, footerBottom: $('btnRestart').getBoundingClientRect().bottom });
-    check('settings header: title, back cap, engine state', $('s7Title').textContent.trim().length > 0 &&
-      $('settingsHeader').contains($('btnStatus')) && $('s7EngState').textContent.length > 0,
-      { title: $('s7Title').textContent, engState: $('s7EngState').textContent });
-    $('btnStatus').click();
-    check('back cap returns to status without resizing', !$('statusView').hidden && $('settingsView').hidden &&
-      innerWidth === geometry.width && innerHeight === geometry.height, $('statusView').scrollTop);
+    check('shared header: settings title, STATUS cap, model and engine state', $('hName').textContent === 'Splash settings' &&
+      $('header').contains($('btnSettings')) && !$('header').closest('main') && $('statusPill').textContent.length > 0,
+      { title: $('hName').textContent, engState: $('statusPill').textContent });
+    $('btnSettings').click();
+    await until(() => !$('statusView').hidden && $('settingsView').hidden, 'status view shown');
+    await until(() => innerWidth === 520, 'window restored to the status width');
+    check('back cap returns to status and restores the status width', !$('statusView').hidden && $('settingsView').hidden &&
+      innerWidth === 520 && innerHeight === geometry.height, { width: innerWidth, height: innerHeight });
     $('btnSettings').click();
     check('engine adopted not relaunched', S.server.pid === expected.enginePID && S.server.launched_by_app === false,
       { pid: S.server.pid, launched_by_app: S.server.launched_by_app });
@@ -130,12 +136,12 @@
         cmd('config.validate', { doc: cfBuildDoc(), validation_id: CF.validationID });
         // Wait for the actual save result + computed tick state, never a fixed sleep.
         await until(() => !cfDirty() && S.cfg.port === port && S.cfg.restart_required === restart &&
-          $('cfgMsg').textContent.startsWith('Saved'),
+          $('cfgMsg').textContent === '',
           step, port === 8199 ? 3500 : 6000);
         const actual = snapshot(step);
         check(step, actual.draftPort === port && actual.restart_required === restart &&
           actual.manualPath === expected.manualPath && actual.draftManualPath === expected.manualPath &&
-          actual.footer === (restart ? 'Restart to apply' : 'Restart'), actual);
+          actual.footer === 'Restart' && $('btnRestart').classList.contains('restart-pending') === restart, actual);
       }
       await save('port_8199_saved', 8199, true);
       await save('port_8123_restored', 8123, false);

@@ -58,14 +58,17 @@ lives at `~/Library/Application Support/SplashUI/config.json` (created with docu
 on first run) and is the single source of truth. The app reads no environment variables — the
 pre-panel `SPLASH_*` env vars are deprecated and no longer have any effect on the app.
 
-Profiles expose the resolved runtime's startup options in collapsed LCARS groups;
-each group counts settings that differ from engine defaults. Unsupported flags stay
-hidden without deleting their saved values. COMMIT requires a successful debounced
-validation; unsupported model/option combinations remain saveable with warnings.
+Profiles expose the resolved runtime's startup options in GENERAL / MODEL / MEMORY / API
+tabs. GENERAL holds profile identity, compute settings and launch preview; MEMORY also
+contains cache settings. Unsupported flags stay hidden without deleting saved values.
+Every change auto-saves after debounced validation; unsupported combinations remain
+saveable with warnings. Settings expands to 820px while status stays 520px, using one
+shared header and one-row footer. Existing common model folders are discovered automatically;
+nonexistent folders are omitted, and manual additions must point to real directories.
 ACTIVATE PROFILE atomically commits the whole draft and stamps that profile's last-used
 time. It does **not** restart the engine: a restart-required prompt shows the current
 in-flight request count, and **CONFIRM RESTART** explicitly applies the changed plan.
-The shared **RESTART TO APPLY** footer opens this prompt. Reverting to the running plan
+The shared **RESTART** footer button flashes while changes await restart and opens this prompt. Reverting to the running plan
 clears it without restarting. Port and the masked API key remain global-only.
 
 `./install.sh` still reads a couple of its own vars for the one-shot install (it predates the
@@ -79,7 +82,7 @@ The environment variables formerly documented here are retired. Each one maps to
 | Retired env var        | config.json replacement                                                                 |
 |------------------------|-----------------------------------------------------------------------------------------|
 | `SPLASH_KIT_DIR`       | `globals.engine.manual_path` (with `globals.engine.mode: "manual"`)                     |
-| `SPLASHUI_HOME`        | not user-facing — fixed discovery rung at `~/SplashUI`                                  |
+| `SPLASHUI_HOME`        | retired — AUTO discovers installed Homebrew versions, not an assumed SplashUI kit      |
 | `SPLASH_VERSION`       | not user-facing — version read from the installed kit's `release.json`                  |
 | `SPLASH_PORT`          | `globals.port`                                                                          |
 | `SPLASH_KEY`           | `globals.api_key`                                                                       |
@@ -107,8 +110,10 @@ The environment variables formerly documented here are retired. Each one maps to
     under the hood). It loads the model **by id** — a one-time download it manages itself.
     It refuses the 1.3.0 Splash-package id (`incoai/Qwen3.8-27B-Splash`) outright — "Splash
     no longer loads" that prebuilt format — so a 1.3.0 model dir is not usable by it either.
-    Consequently, when a local model dir is present the app does not fall back to the Homebrew
-    keg (it would re-download the model); it asks for a 1.3.0-style engine instead.
+  AUTO selects the highest valid installed Homebrew Splash version (numeric ordering,
+  Apple-silicon and Intel prefixes); the old SplashUI-local kit is not an automatic default.
+  MANUAL uses exactly the chosen path. Model/runtime incompatibilities remain visible
+  eligibility errors rather than silently selecting another engine. VALID has no build-version note.
 - The app polls `/status` (1 s) and `/metrics` (1 s) and renders the panel in a
   WKWebView. The decode readout is the *committed* output rate: counter delta divided by
   the real elapsed time between samples. DFlash-2 draft tokens that fail verification do

@@ -222,19 +222,9 @@ public struct KitResolve: Equatable {
 
 /// The engine-kit ladder — the Auto discovery of D2, as a pure function.
 ///
-/// Rungs, in order (D2: discovery ORDER, never version preference — a newer
-/// engine is never auto-promoted over the one the active model package was
-/// built against; that mismatch is the eligibility layer's verdict, S3):
-/// 1. the manual engine path — only when `mode == "manual"` (it replaces rung 1
-///    of the old env ladder; an incomplete manual kit is skipped, not fatal);
-/// 2. the fixed install.sh layout: `~/SplashUI/kit/splash-1.3.0-arm64-macos26`
-///    — the install.sh constants, hard-wired. D9: NO env reads — `SPLASHUI_HOME`
-///    and `SPLASH_VERSION` are not user-facing, the rung is a constant, not a var;
-/// 3. the Homebrew keg's `libexec` — only when the config's brew rung is enabled
-///    (D10 seeds it from detection; S5 exposes it). The old gate (brew only when
-///    no local model) is gone: in the config world the model is per-profile and
-///    the engine global, so the ladder cannot consult it — a 1.3.1 keg under a
-///    1.3.0 package model is refused by eligibility, with the 1.3.0 kit named.
+/// AUTO uses the highest installed Homebrew splash version. The early SplashUI
+/// kit is never an automatic default; choose it explicitly in MANUAL if desired.
+/// MANUAL resolves exactly the supplied kit directory, without fallback.
 ///
 /// A kit is the exact `isKit()` checks of the old code: a dir holding
 /// `engine/splash` (executable) and a bundled `python/bin/python{,3}`. The first
@@ -261,13 +251,8 @@ public func resolveKit(engine: EngineCfg,
     if engine.mode == "manual" {
         tryKit(engine.manualPath ?? "")
     }
-    // The install.sh layout (install.sh's own constants — never app-read env):
-    // <root>/kit/splash-<version>-arm64-macos26 with root = ~/SplashUI.
-    tryKit(home + "/SplashUI/kit/splash-1.3.0-arm64-macos26")
-    if engine.brew {
-        if let b = brewKeg(), !b.isEmpty {
-            tryKit(b + "/libexec")   // the keg's libexec IS the engine kit
-        }
+    else if let keg = brewKeg(), !keg.isEmpty {
+        tryKit(keg + "/libexec")
     }
 
     let version = kit.flatMap(kitVersion)
@@ -277,7 +262,7 @@ public func resolveKit(engine: EngineCfg,
         error = "engine kit not found — no valid kit at: " + list +
             " — a kit needs engine/splash + python/bin/python{,3} — "
             + "point the engine at a kit folder in Settings (engine → manual), "
-            + "or run `./install.sh`, or install via Homebrew (brew install incoai/tap/splash)"
+            + "or install via Homebrew (brew install incoai/tap/splash)"
     }
     return KitResolve(kit: kit, version: version, tried: tried, error: error)
 }
@@ -1689,9 +1674,8 @@ public func kitArchOS(_ kit: String?) -> (arch: String?, os: String?) {
 /// supported), `fallback` (peach: the running version has no authored
 /// mapping — running on the latest authored contract, the registry report
 /// is the tip), `unrunnable` (red: no kit / the plan cannot launch).
-/// The version the panel was built against is information (carried in
-/// `reason`), never an alarm. Order matters: an unrunnable plan (its
-/// actionable error) beats a mapping fallback.
+/// A valid version has no build-version annotation. An unrunnable plan's
+/// actionable error takes precedence over a mapping fallback.
 public func engineVerdict(resolved: Bool, version: String?, error: String?,
                           mappingFallback: Bool) -> (verdict: String, reason: String?) {
     if !resolved {
@@ -1700,12 +1684,21 @@ public func engineVerdict(resolved: Bool, version: String?, error: String?,
     if let error { return ("unrunnable", error) }
     if mappingFallback {
         return ("fallback", "engine v\(version ?? "?") has no authored mapping — "
-            + "running on the v\(builtEngineVersion) contract (FALLBACK MAPPING)")
-    }
-    if version != builtEngineVersion {
-        return ("valid", "built against v\(builtEngineVersion); running v\(version ?? "?")")
+            + "using the latest authored startup mapping (FALLBACK MAPPING)")
     }
     return ("valid", nil)
+}
+
+/// The panel's target size for a view: the status screen stays at the historic
+/// 520pt width; the settings screen widens to 820pt (the three-column layout
+/// needs the room, and the extra width goes to the detail column). The height
+/// is the JS-reported content height with the app's usual clamps — a 320pt
+/// floor, never taller than the screen minus the menu bar and dock.
+public func panelTargetSize(view: String, contentHeight: Int, screenHeight: CGFloat)
+    -> (width: CGFloat, height: CGFloat) {
+    let width: CGFloat = view == "settings" ? 820 : 520
+    let height = min(max(320, CGFloat(contentHeight) + 16), screenHeight - 120)
+    return (width, height)
 }
 
 /// The GENERAL tab's LAUNCH PREVIEW: the engine argv the profile WOULD launch
@@ -2566,6 +2559,33 @@ public func defaultConfig(home: String, now: Date = Date()) -> ConfigDoc {
     return ConfigDoc(globals: globals, profiles: [profile], activeProfile: id, reserved: [:])
 }
 
+/// Existing registry folders plus installed common libraries, without phantom rows.
+/// Discovery is in-memory; persistence remains on the normal config save path.
+public func existingModelFolders(_ folders: [ModelFolder], home: String,
+                                 isDir: (String) -> Bool) -> [ModelFolder] {
+    var result = folders.filter { isDir($0.path) }
+    let common = [ModelFolder(id: "lmstudio", path: home + "/.lmstudio/models", source: "auto"),
+                  ModelFolder(id: "ollama", path: home + "/.ollama/models", source: "auto"),
+                  ModelFolder(id: "hfhub", path: home + "/.cache/huggingface/hub", source: "auto"),
+                  ModelFolder(id: "splash", path: home + "/Library/Application Support/Splash/models", source: "auto"),
+                  ModelFolder(id: "installroot", path: home + "/SplashUI/models", source: "auto")]
+    for var folder in common where isDir(folder.path) && !result.contains(where: { $0.path == folder.path }) {
+        while result.contains(where: { $0.id == folder.id }) { folder.id += "-auto" }
+        result.append(folder)
+    }
+    return result
+}
+
+/// Folder ADD uses the existing validate bridge before changing the draft.
+/// Existing paths that later disappear remain saveable, but new ones must exist.
+public func modelFolderAdditionErrors(_ candidate: [ModelFolder], existing: [ModelFolder],
+                                      isDir: (String) -> Bool) -> [String] {
+    candidate.compactMap { folder in
+        guard !existing.contains(where: { $0.path == folder.path }), !isDir(folder.path) else { return nil }
+        return "model folder does not exist: " + folder.path
+    }
+}
+
 /// App-generated profile id: `p-<unix-ms>-<rand4>` (not user-editable).
 private func appProfileId(now: Date) -> String {
     let ms = Int(now.timeIntervalSince1970 * 1000)
@@ -2606,6 +2626,7 @@ public func firstRunConfig(home: String,
                            isDir: (String) -> Bool,
                            now: Date = Date()) -> ConfigDoc {
     var d = defaultConfig(home: home, now: now)   // the documented defaults (D10)
+    d.globals.modelFolders = existingModelFolders([], home: home, isDir: isDir)
     if let keg = brewKeg(), keg != "", isDir(keg + "/libexec") {
         // The keg's libexec IS the engine kit (same layout as the release kit).
         d.globals.engine = EngineCfg(mode: "auto", manualPath: nil, brew: true)
@@ -2879,18 +2900,26 @@ public func dirSize(_ path: String) -> Int64? {
     return total
 }
 
-/// The Homebrew keg of the splash formula, if installed. The formula versions
-/// its Cellar path per release, so the newest version dir is picked.
-public func findBrewKeg() -> String? {
-    for base in ["/opt/homebrew", "/usr/local"] {
-        let cellar = base + "/Cellar/splash"
-        let versions = (try? FileManager.default.contentsOfDirectory(atPath: cellar)) ?? []
-        if let v = versions.sorted().last {
-            let keg = cellar + "/" + v
-            if access(keg + "/bin/splash", X_OK) == 0 { return keg }
+/// Highest installed Homebrew splash keg across Apple-silicon and Intel prefixes.
+/// Numeric ordering handles 1.3.10 after 1.3.9 and Homebrew revision suffixes.
+/// Invalid/incomplete kegs are skipped before selecting the highest version.
+public func findBrewKeg(prefixes: [String] = ["/opt/homebrew", "/usr/local"],
+                        listDir: (String) -> [String]? = { try? FileManager.default.contentsOfDirectory(atPath: $0) },
+                        isExecutable: (String) -> Bool = { access($0, X_OK) == 0 }) -> String? {
+    var newest: (version: String, path: String)?
+    for prefix in prefixes {
+        let cellar = prefix + "/Cellar/splash"
+        for version in listDir(cellar) ?? [] where version.first?.isNumber == true {
+            let keg = cellar + "/" + version
+            guard isExecutable(keg + "/libexec/engine/splash"),
+                  isExecutable(keg + "/libexec/python/bin/python") ||
+                    isExecutable(keg + "/libexec/python/bin/python3") else { continue }
+            if newest == nil || newest!.version.compare(version, options: .numeric) == .orderedAscending {
+                newest = (version, keg)
+            }
         }
     }
-    return nil
+    return newest?.path
 }
 
 /// A kit's on-disk engine version, from its release.json — the flavor

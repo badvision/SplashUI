@@ -10,8 +10,8 @@
   --teal: #88ccff; --teal-dim: #33518a;
   --lavender: #cc88ff; --peach: #ffcc99;
   --gray: #ccaa88; --gray-dim: #666688;
-  --white: #ffebde; --red: #dd4444; --yellow: #ffcc33; --green: #33cc99;
-  --blue: #4455ff;
+  --white: #ffebde; --red: #dd4444; --yellow: #ffcc33; --green: #33cc99; --blue: #4455ff;
+  --green-deep: color-mix(in srgb, var(--green) 80%, var(--bg));
   --display: "DIN Condensed", "Avenir Next Condensed", "Arial Narrow", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
 }
@@ -28,11 +28,7 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 .screen { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 [hidden] { display: none !important; }
 #footer { flex-shrink: 0; }
-#header .title { padding-right: 42px; }
-#btnSettings { position: absolute; right: 10px; top: 4px; width: 26px; height: 20px; background: var(--bg); border-radius: 0 10px 10px 0; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 4px 6px; color: var(--gray-dim); }
-#btnSettings span { height: 2px; width: 14px; border-radius: 0 2px 2px 0; background: currentColor; }
-#btnSettings:hover { color: var(--teal); }
-#btnSettings:focus-visible, #btnStatus:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
+#btnSettings:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
 /* Flat instrument fields, separated by the LCARS rail rather than cards. */
 .row { display: flex; gap: 8px; margin-bottom: 4px; align-items: stretch; }
 .col { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -47,11 +43,7 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 .o { background: var(--orange); color: var(--bg); } .t { background: var(--teal); color: var(--bg); }
 .g { background: var(--lavender); color: var(--bg); } .r { background: var(--red); color: var(--bg); }
 .y { background: var(--yellow); color: var(--bg); } .gr { background: var(--green); color: var(--bg); }
-/* Upper elbow joins the orange masthead to the segmented port-side rail. */
-#header { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 100px; grid-template-rows: 28px 28px; gap: 6px; padding-left: 64px; margin-bottom: 8px; height: 62px; }
-#header::before { content: ""; position: absolute; top: 0; left: 0; width: 64px; height: 62px; border-left: 42px solid #4455ff; border-top: 28px solid #4455ff; border-top-left-radius: 58px 48px; pointer-events: none; }
-#header .title { grid-column: 1 / -1; background: #4455ff; color: var(--bg); display: flex; align-items: center; padding: 5px 14px 0; font-family: var(--display); font-size: 25px; font-weight: 700; letter-spacing: .12em; line-height: 1; border-radius: 0 14px 14px 0; }
-#header .model { background: var(--peach); color: var(--bg); display: flex; align-items: center; padding: 2px 8px 0; font-size: 11px; line-height: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+/* One masthead joins the shared chrome to the segmented port-side rail. */
 #statusPill { border-radius: 0 14px 14px 0; display: flex; justify-content: center; align-items: center; padding: 3px 6px 0; line-height: 1; white-space: pre-line; text-align: center; }
 section { --accent: var(--lavender); position: relative; padding: 0 0 8px 64px; margin-bottom: 6px; }
 section::before { content: attr(data-channel); position: absolute; left: 0; top: 0; bottom: 0; width: 42px; background: var(--accent); color: var(--bg); display: flex; align-items: flex-end; justify-content: flex-end; padding: 8px 6px; font-family: var(--display); font-size: 23px; font-weight: 700; }
@@ -70,107 +62,217 @@ section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 
 .capbtns .cb.on { background: var(--accent); color: var(--bg); }
 .capbtns .cb:first-child { border-radius: 14px 0 0 14px; }
 .capbtns .cb:last-child { border-radius: 0 14px 14px 0; }
-/* The settings header blends with the status look: same blue swoop, same pills. */
-#settingsHeader { position: relative; padding-left: 64px; margin-bottom: 8px; height: 62px; display: flex; flex-direction: column; gap: 6px; }
-#settingsHeader::before { content: ""; position: absolute; top: 0; left: 0; width: 64px; height: 62px; border-left: 42px solid var(--blue); border-top: 28px solid var(--blue); border-top-left-radius: 58px 48px; pointer-events: none; }
-#settingsHeader .s7-top { display: flex; align-items: stretch; gap: 6px; height: 28px; }
-#settingsHeader .s7-top .title { flex: 1; background: var(--blue); color: var(--bg); display: flex; align-items: center; padding: 0 14px; font-family: var(--display); font-size: 25px; font-weight: 700; letter-spacing: .12em; line-height: 1; border-radius: 0 14px 14px 0; overflow: hidden; white-space: nowrap; }
-#settingsHeader #btnStatus { background: var(--bg); color: var(--white); border-radius: 0 14px 14px 0; min-width: 64px; padding: 6px 10px 2px; font-size: 16px; }
-#settingsHeader .s7-mid { display: flex; align-items: center; gap: 6px; height: 28px; }
-#settingsHeader .s7-mid .s7-profbar { flex: 1; min-width: 0; background: var(--peach); color: var(--bg); display: flex; align-items: center; padding: 2px 8px; font-size: 11px; line-height: 1; overflow: hidden; white-space: nowrap; }
-#settingsHeader .s7-mid .s7-profbar .mono { overflow: hidden; text-overflow: ellipsis; }
-#settingsHeader .s7-mid .s7-engstate { border-radius: 0 14px 14px 0; background: var(--track); color: var(--gray); min-width: 74px; padding: 3px 8px 0; font-size: 14px; font-family: var(--display); display: flex; justify-content: center; align-items: center; }
-#settingsHeader .s7-mid .s7-engstate.up { background: var(--green); color: var(--bg); }
-/* Finder-style columns: a narrow selector column drives the detail column. */
+/* Base row idioms (shared shape; the fidelity pass below rescales the settings scope). */
 .s7-cols { display: flex; gap: 6px; align-items: stretch; }
 .s7-col { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.s7-nav { width: 112px; flex-shrink: 0; }
-.s7-navlbl { color: var(--accent); font-family: var(--display); font-size: 14px; letter-spacing: .12em; line-height: 1; padding: 4px 8px 2px; }
-.gcol { width: 100%; text-align: left; background: var(--track); color: var(--white); min-height: 24px; padding: 5px 10px 2px; font-size: 13px; border-radius: 0; }
-.gcol.on { background: var(--accent); color: var(--bg); }
-.gcol:first-of-type { border-radius: 14px 0 0 14px; }
-.s7-nav .gcol:only-of-type { border-radius: 14px; }
-/* The 07 profile rows share the green family; the selected row is a green shade. */
-.profrow { position: relative; width: 100%; text-align: left; background: var(--track); color: var(--white); padding: 5px 18px 3px 10px; font-size: 16px; line-height: 1.1; border-radius: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.profrow.on { background: color-mix(in srgb, var(--green) 30%, var(--bg)); color: var(--white); }
-.profrow .profdot { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 7px; height: 7px; border-radius: 7px; background: var(--white); opacity: 0; }
+.s7-nav { flex-shrink: 0; }
+.profrow { position: relative; width: 100%; text-align: left; background: var(--track); color: var(--white); line-height: 1.1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.profrow .profdot { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 7px; height: 7px; border-radius: 7px; background: var(--white); opacity: 0; }
 .profrow .profdot.on { opacity: 1; }
 .profrow .profdot + .profdot { display: none; }
-#btnProfileAdd { width: 100%; text-align: left; background: var(--track); color: var(--green); padding: 5px 10px 2px; font-size: 13px; border-radius: 0 0 14px 0; }
-/* Column 2: the PROFILE SETTINGS title + the five 36px-class tabs. */
-.s7-tabs { width: 128px; flex-shrink: 0; }
-.s7-tabtitle { color: var(--accent); font-family: var(--display); font-size: 14px; letter-spacing: .1em; line-height: 1; padding: 4px 8px 2px; border-top: 3px solid var(--accent); border-radius: 6px 6px 0 0; }
-.ptab { width: 100%; text-align: left; background: var(--green); color: var(--bg); min-height: 36px; padding: 6px 10px 2px; font-size: 16px; line-height: 1.1; border-radius: 0; display: flex; align-items: center; gap: 6px; }
-.ptab.on { background: var(--bg); color: var(--white); box-shadow: inset 3px 0 0 var(--green); }
-/* Column 3: the open-bracket frame (top+left+bottom, rounded right cap, open right). */
-.s7-editor { flex: 1; position: relative; padding: 8px 10px 10px 10px; border: 3px solid color-mix(in srgb, var(--green) 55%, var(--bg)); border-right: none; border-radius: 14px 0 0 14px; }
-/* Flat option rows inside the editor (the app's field idiom, black-on-track). */
-.s7-editor .frow { margin-bottom: 4px; }
-.s7-editor .frow label { color: var(--gray); font-size: 11px; min-width: 84px; max-width: 96px; overflow: hidden; white-space: nowrap; }
-.s7 input[type=text], .s7 input[type=number], #modelSearch, .network-panel input {
-  flex: 1; min-width: 0; background: var(--track); color: var(--white); border: none;
-  padding: 5px 8px; font: inherit; letter-spacing: .04em; border-radius: 0;
-}
-input.mono, .mono input, input[type=number] { font-family: var(--mono); font-size: 11px; font-weight: 400; letter-spacing: 0; text-transform: none; }
-.s7 input:focus-visible, #modelSearch:focus-visible { outline: 2px solid var(--accent, var(--blue)); outline-offset: 1px; }
-.s7 .mini { min-height: 22px; padding: 3px 10px 1px; font-size: 12px; background: var(--track); color: var(--white); }
-.s7 .mini:hover { filter: brightness(1.25); }
-.s7 .mini.del { background: rgba(221,68,68,.25); color: var(--red); }
 .frow { display: flex; gap: 6px; margin-bottom: 4px; align-items: stretch; }
-.frow .fname { background: var(--accent); color: var(--bg); display: flex; align-items: center; padding: 3px 10px 1px; font-size: 12px; min-width: 78px; max-width: 120px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 700; }
+.frow .fname { background: var(--accent); color: var(--bg); display: flex; align-items: center; font-weight: 700; min-width: 78px; max-width: 120px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .frow .fstat { color: var(--green); } .frow .fstat.miss { color: var(--red); } .frow .fstat.scan { color: var(--yellow); }
-.frow .fmeta { flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: 8px; color: var(--gray); font-size: 10px; overflow: hidden; white-space: nowrap; }
-.frow .fpath { flex: 1; min-width: 0; font-family: var(--mono); font-size: 11px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--gray); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tried { color: var(--gray-dim); font-size: 10px; line-height: 1.4; margin: 2px 0 0 6px; text-transform: none; letter-spacing: 0; font-family: var(--mono); font-weight: 400; word-break: break-all; }
-.engpath { color: var(--teal); font-size: 11px; margin: 0; flex: 1; min-width: 0; font-family: var(--mono); font-weight: 400; letter-spacing: 0; text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--track); padding: 5px 8px; }
-#cfgMsg { color: var(--gray); font-size: 11px; margin: 6px 0 0 6px; }
-#cfgMsg.ok { color: var(--green); } #cfgMsg.err { color: var(--red); }
-.warn-cap { background: var(--peach); color: var(--bg); border-radius: 14px; padding: 2px 8px; font-size: 11px; display: inline-flex; align-items: center; white-space: nowrap; }
-.verdict-cap { border-radius: 14px; padding: 2px 8px; font-size: 11px; background: var(--track); color: var(--gray); white-space: nowrap; }
+.frow .fmeta { flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: 8px; color: var(--gray); overflow: hidden; white-space: nowrap; }
+.frow .fpath { flex: 1; min-width: 0; font-family: var(--mono); font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--gray); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tried { color: var(--gray-dim); line-height: 1.5; margin: 2px 0 0 6px; text-transform: none; letter-spacing: 0; font-family: var(--mono); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.engpath { margin: 0; flex: 1; min-width: 0; font-family: var(--mono); font-weight: 400; letter-spacing: 0; text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.warn-cap { border-radius: 14px; padding: 2px 8px; display: inline-flex; align-items: center; white-space: nowrap; }
+.verdict-cap { border-radius: 14px; padding: 2px 8px; background: var(--track); color: var(--gray); white-space: nowrap; }
 .verdict-cap.valid { background: var(--green); color: var(--bg); }
 .verdict-cap.fallback { background: var(--peach); color: var(--bg); }
 .verdict-cap.unrunnable { background: var(--red); color: var(--bg); }
-.profile-cap { background: var(--peach); color: var(--bg); border-radius: 14px; padding: 2px 8px; font-size: 11px; }
-.profile-cap.runnable { background: var(--teal); }
+.profile-cap { background: var(--peach); color: var(--bg); border-radius: 14px; padding: 2px 8px; }
+.profile-cap.runnable { background: var(--teal); color: var(--bg); }
 .profile-cap.unrunnable { background: var(--peach); }
 .profile-cap.blocked { background: var(--peach); }
 .profile-cap.unknown { background: var(--track); color: var(--gray); }
-/* The GENERAL tab: actions + model pill + metadata + the launch preview. */
-.act-caps .cb.on.act { background: var(--green); }
-.act-caps .cb.on.del { background: var(--red); }
-.modelpill { display: flex; width: 100%; min-height: 26px; background: var(--track); border-radius: 14px; overflow: hidden; }
-.modelpill .mp-l { background: var(--bg); color: var(--white); padding: 4px 10px 1px; font-size: 12px; }
-.modelpill .mp-name { flex: 1; min-width: 0; color: var(--white); padding: 3px 8px 2px; font-family: var(--mono); font-size: 11px; font-weight: 400; letter-spacing: 0; text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
-.modelpill .mp-act { background: var(--accent); color: var(--bg); padding: 4px 12px 1px; font-size: 12px; }
-.profile-chip { color: var(--teal); font-size: 11px; overflow-wrap: anywhere; }
-.profile-meta { color: var(--gray); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.modelpill { display: flex; width: 100%; background: var(--track); border-radius: 14px; overflow: hidden; }
+.modelpill .mp-l { padding: 4px 10px 1px; }
+.modelpill .mp-name { flex: 1; min-width: 0; padding: 3px 8px 2px; font-family: var(--mono); font-weight: 400; letter-spacing: 0; text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.modelpill .mp-act { padding: 4px 12px 1px; }
+.profile-chip { color: var(--teal); overflow-wrap: anywhere; }
+.profile-meta { color: var(--gray); line-height: 1.5; overflow-wrap: anywhere; }
 #profileDrafter { margin: 6px 0; }
-#profilePreviewBox { margin-top: 6px; background: var(--bg2); border: 1px solid var(--track); border-radius: 8px; padding: 8px 10px; }
-#profilePreviewBox .pp-h { color: var(--teal); font-family: var(--display); font-size: 12px; letter-spacing: .1em; border-bottom: 2px solid var(--track); padding-bottom: 4px; margin-bottom: 6px; display: flex; justify-content: space-between; }
-#profilePreviewBox .pp-args { font-family: var(--mono); font-size: 11px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--white); line-height: 1.5; word-break: break-all; white-space: pre-wrap; }
-#profilePreviewBox .pp-args.err { color: var(--peach); }
-#profilePreviewBox .pp-restart { color: var(--peach); font-family: var(--mono); font-size: 11px; font-weight: 400; letter-spacing: 0; }
-#profileRestartPrompt { margin: 8px 0; padding: 8px; border-left: 6px solid var(--peach); font-size: 11px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+#profilePreviewBox .pp-args { font-family: var(--mono); font-weight: 400; letter-spacing: 0; text-transform: none; }
+#profilePreviewBox .pp-restart { color: var(--peach); font-family: var(--mono); font-weight: 400; letter-spacing: 0; }
 .stale-group { margin: 8px 0; }
-.stale-bar { display: flex; justify-content: space-between; align-items: center; width: 100%; background: var(--track); color: var(--gray-dim); border-radius: 0 14px 14px 0; padding: 4px 10px; font-size: 11px; text-align: left; font-family: var(--display); letter-spacing: .1em; cursor: pointer; border: none; }
+.stale-bar { display: flex; justify-content: space-between; align-items: center; width: 100%; background: var(--track); color: var(--gray-dim); border-radius: 0 14px 14px 0; padding: 4px 10px; text-align: left; font-family: var(--display); letter-spacing: .1em; cursor: pointer; border: none; }
 .stale-bar[aria-expanded="true"] { background: var(--accent); color: var(--bg); }
 .stale-body { display: none; padding: 4px 0; }
 .stale-group.open .stale-body { display: block; }
-.stale-row { display: flex; align-items: center; gap: 8px; margin: 6px 0 6px 3px; color: var(--gray-dim); font-size: 11px; }
+.stale-row { display: flex; align-items: center; gap: 8px; margin: 6px 0 6px 3px; color: var(--gray-dim); }
 .stale-row label { flex: 1; }
 .stale-row input { width: 140px; }
+.stale-bar, .stale-row, .profile-chip, .profile-meta, .frow .fname, .frow .fmeta, .frow .fpath, .tried, .engpath, .warn-cap, .verdict-cap, .profile-cap { font-size: 11px; }
+#profilePreviewBox .pp-args, #profilePreviewBox .pp-restart { font-size: 11px; }
+#profilePreviewBox .pp-args { line-height: 1.5; color: var(--white); white-space: pre-wrap; }
+#profilePreviewBox .pp-args.err { color: var(--peach); }
+
+/* Fixed settings boxes fit their tab contents without changing shared chrome. */
+#settingsView { display: flex; flex-direction: column; scrollbar-width: none; }
+#settingsView * { scrollbar-width: none; }
+#settingsView::-webkit-scrollbar, #settingsView ::-webkit-scrollbar { display: none; }
+.settings-global, .settings-profiles { padding-left: 64px; flex-shrink: 0; }
+.settings-global { flex: 2 0 270px; min-height: 270px; height: 270px; }
+.settings-profiles { flex: 3 0 390px; min-height: 390px; margin-bottom: 0; display: flex; flex-direction: column; }
+.settings-global .s7-cols { height: 100%; padding: 12px 0 16px; }
+.settings-global .s7-nav, .settings-profiles .s7-nav { width: 160px; }
+.s7-navlbl { color: var(--accent); font-family: var(--display); font-size: 15px; letter-spacing: .12em; line-height: 1; padding: 0 0 12px; white-space: nowrap; }
+.s7 .gcol, .s7 .profrow, #btnProfileAdd { background: var(--bg2); color: var(--white); min-height: 30px; padding: 7px 12px; font-size: 13px; text-align: left; border-radius: 12px 0 0 12px; }
+.s7 .gcol { border-radius: 12px; }
+.s7 .gcol.on { background: var(--lavender); color: var(--bg); }
+.s7 .profrow.on { background: var(--green-deep); color: var(--bg); }
+#btnProfileAdd { color: var(--white); }
+.settings-global .s7-detail { overflow: auto; padding: 0 10px 0 12px; }
+.s7-panel > .section-heading { margin-bottom: 12px; }
+.panel-header { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 100px; grid-template-rows: 28px 28px; gap: 6px; padding-left: 64px; margin-bottom: 8px; height: 62px; flex-shrink: 0; }
+.panel-header::before { content: ""; position: absolute; top: 0; left: 0; width: 64px; height: 62px; border-left: 42px solid var(--blue); border-top: 28px solid var(--blue); border-top-left-radius: 58px 48px; pointer-events: none; }
+.panel-header .title { grid-column: 1 / -1; background: var(--blue); color: var(--bg); display: flex; justify-content: center; align-items: center; padding: 5px 44px 0 4px; font-family: var(--display); font-size: 25px; font-weight: 700; letter-spacing: .12em; line-height: 1; border-radius: 0 14px 14px 0; white-space: nowrap; }
+.panel-header .model { background: var(--peach); color: var(--bg); display: flex; align-items: center; padding: 2px 8px 0; font-size: 11px; line-height: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#btnSettings { position: absolute; right: 10px; top: 4px; width: 56px; height: 20px; padding: 3px 8px 1px; font-size: 12px; background: var(--bg); border-radius: 10px; color: var(--white); display: flex; justify-content: center; align-items: center; }
+#btnSettings .menu-icon { display: flex; flex-direction: column; gap: 3px; }
+#btnSettings .menu-icon span { display: block; width: 14px; height: 2px; background: currentColor; }
+.settings-profiles > .s7-navlbl { flex: 0 0 34px; min-height: 0; padding: 10px 0 9px; }
+.settings-profiles .s7-cols { flex: 1; min-height: 0; gap: 0; }
+.settings-profiles .s7-nav { position: relative; z-index: 4; padding-right: 0; overflow: visible; }
+.s7-topbar { position: absolute; z-index: 2; top: 34px; left: 224px; right: 0; height: 30px; padding: 6px 12px 4px 112px; background: var(--green-deep); color: var(--bg); border-radius: 0 15px 15px 0; font-family: var(--display); font-size: 15px; letter-spacing: .12em; }
+.s7-profile-frame { position: relative; z-index: 1; display: flex; flex: 1; min-width: 0; border-radius: 0 20px 5px 20px; background: linear-gradient(to bottom, transparent calc(100% - 10px), var(--green-deep) 0); overflow: hidden; }
+.s7-profile-frame { background-image: linear-gradient(var(--green-deep), var(--green-deep)), linear-gradient(to bottom, transparent calc(100% - 10px), var(--green-deep) 0); background-position: 99px 30px, 0 0; background-size: 21px calc(100% - 40px), calc(100% - 5px) 100%; background-repeat: no-repeat; }
+.s7-profile-frame::after { content: ""; position: absolute; right: 0; bottom: 0; width: 10px; height: 10px; border-radius: 50%; background: var(--green-deep); pointer-events: none; }
+.s7-tabs { width: 100px; flex-shrink: 0; padding: 70px 0 12px 8px; background: var(--green-deep); border-radius: 0 0 0 20px; border-bottom: 10px solid var(--green-deep); }
+.settings-profiles:has(#profileList .profrow.on:not(:first-child)) .s7-topbar,
+.settings-profiles:has(#profileList .profrow.on:not(:first-child)) .s7-profile-frame { border-top-left-radius: 20px; }
+.ptab { position: relative; width: 100%; text-align: center; background: transparent; color: var(--bg); min-height: 38px; padding: 8px 4px; font-size: 13px; line-height: 1.1; border-radius: 14px 0 0 14px; }
+.ptab.on { background: var(--bg); color: var(--white); z-index: 1; }
+.ptab.on::before, .ptab.on::after { content: ""; position: absolute; right: 0; width: 20px; height: 20px; pointer-events: none; }
+.ptab.on::before { bottom: 100%; background: radial-gradient(circle at 0 0, transparent 20px, var(--bg) 20px); }
+.ptab.on::after { top: 100%; background: radial-gradient(circle at 0 100%, transparent 20px, var(--bg) 20px); }
+.s7-editor { flex: 1; min-width: 0; position: relative; margin-top: 30px; margin-bottom: 10px; padding: 20px 12px 8px; background: var(--bg); border-radius: 20px 0 0 20px; overflow-y: auto; }
+.s7-editor .frow label, .network-panel .frow label { color: var(--gray); font-size: 12px; min-width: 106px; display: flex; align-items: center; }
+.s7 input[type=text], .s7 input[type=number], #modelSearch, .network-panel input {
+  flex: 1; min-width: 0; background: var(--track); color: var(--white); border: none;
+  padding: 6px 8px; font: inherit; letter-spacing: .04em; border-radius: 0;
+}
+.s7 input[type=text], .s7 input[type=number], #modelSearch, .network-panel input { font-family: var(--mono); font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; }
+.s7 input:focus-visible, #modelSearch:focus-visible { outline: 2px solid var(--accent, var(--blue)); outline-offset: 1px; }
+/* G + F: the mock's instrument pills — one shade of the existing gray, black-on-it. */
+.s7 .mini { min-height: 26px; padding: 4px 12px 1px; font-size: 13px; background: var(--gray-dim); color: var(--white); border-radius: 0; }
+.s7 .mini:hover { filter: brightness(1.25); }
+.s7 .mini.del { background: rgba(221,68,68,.25); color: var(--red); }
+/* G: long paths ellipsize instead of wrapping mid-word. */
+.s7 .engpath { color: var(--white); font-size: 12px; margin: 0; flex: 1; min-width: 0; font-family: var(--mono); font-weight: 400; letter-spacing: 0; text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--gray-dim); padding: 6px 10px; }
+#cfgMsg { color: var(--gray); font-size: 12px; margin: 6px 0 0 6px; }
+#cfgMsg.ok { color: var(--green); } #cfgMsg.err { color: var(--red); }
+/* F: the caps + rows follow the settings scale. */
+.s7 .warn-cap { background: var(--peach); color: var(--bg); border-radius: 14px; padding: 2px 8px; font-size: 12px; display: inline-flex; align-items: center; white-space: nowrap; }
+.s7 .verdict-cap { border-radius: 14px; padding: 2px 10px; font-size: 12px; background: var(--gray-dim); color: var(--white); white-space: nowrap; }
+.s7 .verdict-cap.valid { background: var(--green); color: var(--bg); }
+.s7 .verdict-cap.fallback { background: var(--peach); color: var(--bg); }
+.s7 .verdict-cap.unrunnable { background: var(--red); color: var(--bg); }
+.s7 .profile-cap { background: var(--peach); color: var(--bg); border-radius: 14px; padding: 2px 8px; font-size: 12px; }
+.s7 .profile-cap.runnable { background: var(--teal); color: var(--bg); }
+.s7 .profile-cap.unrunnable { background: var(--peach); }
+.s7 .profile-cap.blocked { background: var(--peach); }
+.s7 .profile-cap.unknown { background: var(--gray-dim); color: var(--white); }
+.s7 .section-heading { margin: 0 0 6px; font-size: 15px; letter-spacing: .14em; }
+.s7 .capbtns, #modelSrcCaps { gap: 4px; }
+.s7 .capbtns .cb { min-height: 26px; padding: 5px 16px 2px; font-size: 13px; background: var(--gray-dim); color: var(--bg); border-radius: 0; }
+.s7 .capbtns .cb:first-child { border-radius: 14px 0 0 14px; }
+.s7 .capbtns .cb:last-child { border-radius: 0 14px 14px 0; }
+.s7 .capbtns .cb.on { background: var(--accent); color: var(--bg); }
+#gpanelEngine > .capbtns { width: 240px; margin-bottom: 10px; }
+#gpanelEngine > .capbtns .cb { flex: 1; }
+#manualPath { border-radius: 14px 0 0 14px; color: var(--bg); background: var(--gray-dim); }
+#btnBrowseEngine { border-radius: 0 14px 14px 0; }
+.network-panel .frow { min-height: 26px; margin-bottom: 5px; }
+.network-panel .section-heading span { display: none; }
+.network-panel input::placeholder, .s7 input::placeholder { color: var(--gray-dim); opacity: 1; }
+#gpanelEngine .frow:has(#engPath) { display: none; }
+.s7-panel > .section-heading { color: var(--teal); }
+.profrow.on { overflow: visible; z-index: 5; }
+.profrow .profile-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profrow.on::after { content: ""; position: absolute; right: 0; top: 100%; width: 16px; height: 16px; background: radial-gradient(circle at 0 100%, transparent 16px, var(--green-deep) 16px); pointer-events: none; }
+#profileList .profrow.on:not(:first-child)::before { content: ""; position: absolute; right: 0; bottom: 100%; width: 16px; height: 16px; background: radial-gradient(circle at 0 0, transparent 16px, var(--green-deep) 16px); pointer-events: none; }
+#folderList .fname { flex: 0 0 90px; min-width: 90px; max-width: 90px; }
+#folderList .fpath { flex: 1 1 0; white-space: normal; overflow-wrap: anywhere; align-self: center; overflow: visible; text-overflow: clip; }
+#folderList .fmeta { flex: 0 0 auto; gap: 6px; }
+#folderList .fstat { font-size: 10px; min-width: 52px !important; }
+#folderList .mini { padding-left: 8px; padding-right: 8px; }
+#folderMsg { color: var(--red); font-size: 11px; text-transform: none; margin-top: 4px; }
+#gpanelNetwork .frow > label, #gpanelNetwork .frow > .label { flex: 0 0 106px; min-width: 106px; }
+.option-row label { width: 128px; flex-shrink: 0; overflow-wrap: anywhere; }
+.option-choices { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; gap: 4px; }
+.option-list { display: flex; flex-direction: column; }
+.s7-editor .option-row { min-width: 0; min-height: 20px; margin-bottom: 2px; }
+.s7-editor .option-row label { width: 160px; min-width: 160px; font-size: 11px; }
+.s7 .s7-editor .option-row input { padding: 3px 6px; font-size: 11px; }
+.s7 .s7-editor .option-row .mini { padding: 3px 8px 2px; font-size: 11px; min-height: 20px; }
+.s7 .mini[data-option-reset] { border-radius: 14px; color: var(--bg); background: var(--gray-dim); }
+.profile-subsection { margin-top: 6px; padding-top: 6px; border-top: 3px solid var(--green-deep); border-image: linear-gradient(to right, var(--green-deep) 58%, transparent 58% 60%, var(--green-deep) 60% 82%, transparent 82% 84%, var(--green-deep) 84%) 1; }
+.profile-identity { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
+.profile-identity .frow { flex: 1; margin: 0; min-width: 0; }
+.profile-identity .frow label { min-width: 38px; }
+.profile-identity .capbtns { flex-shrink: 0; }
+#profileComputeOptions { margin-top: 4px; }
+#profileModelAxis { margin-top: 4px; }
+#profileBasics { min-width: 0; }
+#profileBasics .profile-identity { flex-direction: column; align-items: stretch; gap: 4px; }
+#profileBasics .profile-identity .frow { flex: none; }
+#ptabApiPanel .option-row:has([data-option="reasoning_effort"]) .option-choices { flex: 0 1 260px; }
+.option-row:has([data-option="reasoning_effort"]) { align-items: center; }
+.s7 .option-choices .mini { color: var(--bg); }
+.s7 .option-choices .mini:first-child { border-radius: 14px 0 0 14px; }
+.s7 .option-choices .mini:last-child { border-radius: 0 14px 14px 0; }
+.s7 .option-choices .mini.on { background: var(--green); }
+#profilePreviewArgs span { display: inline-block; max-width: 100%; overflow-wrap: anywhere; vertical-align: top; }
+.model-row:has(.match-tag) { background: var(--blue); color: var(--bg); }
+.model-row:has(.match-tag) .m-src { color: var(--bg); }
+.s7 .frow .fname { min-height: 30px; padding: 4px 12px 1px; font-size: 12px; }
+.s7 .frow .fmeta { font-size: 11px; }
+.s7 .frow .fpath { font-size: 12px; }
+/* Identity and launch preview stay in GENERAL; model selection has its own tab. */
+.s7 .act-caps .cb.on.act { background: var(--green); }
+.s7 .act-caps .cb.on.del { background: var(--red); }
+.s7 .modelpill { display: flex; gap: 4px; width: 100%; min-height: 28px; background: transparent; border-radius: 14px; overflow: hidden; }
+.s7 .modelpill .mp-l { background: var(--gray-dim); color: var(--bg); padding: 5px 12px 1px; font-size: 13px; }
+.s7 .modelpill .mp-name { flex: 1; min-width: 0; background: var(--gray-dim); color: var(--bg); padding: 4px 10px 2px; font-family: var(--mono); font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.s7 .modelpill .mp-act { background: var(--gray-dim); color: var(--white); padding: 5px 12px 1px; font-size: 13px; }
+.s7 .profile-chip { color: var(--teal); font-size: 12px; overflow-wrap: anywhere; }
+.s7 .profile-meta { color: var(--gray); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+#profileDrafter { margin: 3px 0; }
+#profilePreviewBox { margin-top: 6px; background: var(--bg2); border: 1px solid var(--track); border-radius: 8px; padding: 6px 8px; }
+#profilePreviewBox .pp-h { color: var(--teal); font-family: var(--display); font-size: 13px; letter-spacing: .1em; border-bottom: 2px solid var(--track); padding-bottom: 4px; margin-bottom: 6px; display: flex; justify-content: space-between; }
+/* G: the argv renders as token spans — it wraps at flag boundaries, and a token only
+   breaks mid-word when a single token is wider than the box. */
+#profilePreviewBox .pp-args { font-family: var(--mono); font-size: 10px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--white); line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; }
+#profilePreviewBox .pp-args.err { color: var(--peach); }
+#profilePreviewBox .pp-restart { color: var(--peach); font-family: var(--mono); font-size: 12px; font-weight: 400; }
+#profileRestartPrompt { margin: 4px 0 0; padding: 0; font-size: 10px; line-height: 1.2; display: flex; align-items: center; gap: 8px; }
+#profileRestartText { flex: 1; min-width: 0; }
+#profileRestartPrompt .mini { flex-shrink: 0; min-height: 24px; padding: 4px 8px 2px; font-size: 11px; }
+.s7 .stale-group { margin: 8px 0; }
+.s7 .stale-bar { display: flex; justify-content: space-between; align-items: center; width: 100%; background: var(--gray-dim); color: var(--bg); border-radius: 14px; padding: 5px 10px; font-size: 12px; text-align: left; font-family: var(--display); letter-spacing: .1em; cursor: pointer; border: none; }
+.s7 .stale-bar[aria-expanded="true"] { background: var(--accent); color: var(--bg); }
+.s7 .stale-body { display: none; padding: 4px 0; }
+.s7 .stale-group.open .stale-body { display: block; }
+.s7 .stale-row { display: flex; align-items: center; gap: 8px; margin: 6px 0 6px 3px; color: var(--gray-dim); font-size: 12px; }
+.s7 .stale-row label { flex: 1; }
+.s7 .stale-row input { width: 140px; }
 .option-row.unmet label, .option-row.unmet input, .option-row.unmet button { color: var(--gray-dim); }
 .option-row input[aria-invalid="true"] { border-bottom: 1px solid var(--red); }
 /* The model chooser modal: the cfgModal pattern, a blue-framed card. */
 #modelModal { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; background: rgba(3,3,6,.7); }
-#modelModal .card { width: 460px; max-width: 96vw; background: var(--bg2); border: 4px solid var(--blue); border-radius: 14px; padding: 14px 16px 12px; }
+#modelModal .card { width: 460px; max-width: 96vw; height: 75vh; background: var(--bg2); border: 4px solid var(--blue); border-radius: 14px; padding: 14px 16px 12px; display: flex; flex-direction: column; }
+#modelModal .card > :not(#modelRows) { flex-shrink: 0; }
 #modelModal .mhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 #modelModal .mhead h3 { color: var(--teal); font-family: var(--display); font-size: 18px; letter-spacing: .12em; }
 #modelModal .mhead .mclose { background: var(--track); color: var(--gray); width: 24px; height: 20px; border-radius: 10px; font-size: 14px; }
 #modelModal .mhead .mclose:hover { color: var(--white); }
-#modelSearch { width: 100%; margin-bottom: 8px; border-radius: 8px; }
+#modelSearch { width: 100%; flex: 0 0 30px; height: 30px; margin-bottom: 8px; border-radius: 8px; }
 #modelSrcCaps .cb.on { background: var(--blue); }
-#modelRows { max-height: 300px; overflow-y: auto; margin-bottom: 8px; }
+#modelRows { flex: 1; min-height: 0; overflow-y: auto; margin-bottom: 8px; scrollbar-width: none; }
+#modelRows::-webkit-scrollbar { display: none; }
 .model-row { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: transparent; color: var(--white); padding: 5px 8px; border-radius: 8px; font-size: 11px; }
 .model-row:hover { background: var(--track); }
 .model-row.sel { background: var(--blue); color: var(--bg); }
@@ -180,25 +282,25 @@ input.mono, .mono input, input[type=number] { font-family: var(--mono); font-siz
 .model-row .match-tag { background: var(--peach); color: var(--bg); border-radius: 8px; padding: 1px 6px; font-size: 10px; }
 .mnote { color: var(--gray-dim); font-family: var(--mono); font-size: 10px; font-weight: 400; letter-spacing: 0; text-transform: uppercase; border-top: 2px solid var(--track); padding-top: 6px; margin-bottom: 10px; }
 #modelModal .btns { display: flex; justify-content: flex-end; gap: 8px; }
-/* The shared footer: the blue swoop, two rows. */
-#footer { position: relative; display: flex; flex-direction: column; gap: 6px; margin-top: 6px; padding: 8px 0 23px 64px; }
+/* Both views share this single compact footer and blue return swoop. */
+#footer { position: relative; margin-top: 0; padding: 8px 0 23px 64px; }
 #footer::before { content: ""; position: absolute; left: 0; bottom: 0; width: 64px; height: 100%; border-left: 42px solid var(--blue); border-bottom: 12px solid var(--blue); border-bottom-left-radius: 58px 38px; pointer-events: none; }
 #footer::after { content: ""; position: absolute; left: 64px; right: 0; bottom: 0; height: 12px; background: var(--blue); border-radius: 0 6px 6px 0; }
 .foot-row { display: flex; align-items: center; gap: 5px; }
 .foot-row.right { justify-content: flex-end; }
 .foot-row.center { justify-content: center; flex: 1; }
-.fpill { background: var(--track); color: var(--white); border-radius: 14px; padding: 4px 10px 2px; font-family: var(--display); font-size: 14px; letter-spacing: .08em; line-height: 1; display: inline-flex; align-items: center; }
-.fpill.blue { background: var(--blue); color: var(--bg); }
-.fpill.red { background: var(--red); color: var(--bg); }
-.fpill.dark { background: var(--bg); color: var(--white); border: 1px solid var(--track); }
+.fpill { background: #888; color: #000; border-radius: 14px; padding: 5px 6px 3px; font-family: var(--display); font-size: 11px; letter-spacing: .03em; line-height: 1; display: inline-flex; align-items: center; white-space: nowrap; }
+.fpill.blue, .fpill.dark { background: #888; color: #000; }
+#cfgPill { border-radius: 14px 0 0 14px; }
+#verPill { border-radius: 0 14px 14px 0; }
 #pidPill { display: inline-flex; }
-#pidPill .h, #envPill { background: #888; color: #000; font-family: var(--display); letter-spacing: .08em; min-height: 28px; padding: 6px 10px 2px; font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; text-transform: uppercase; }
+#pidPill .h, #envPill { background: #888; color: #000; font-family: var(--display); letter-spacing: .03em; min-height: 24px; padding: 5px 6px 3px; font-size: 11px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; text-transform: uppercase; white-space: nowrap; }
 #pidPill .h.mono, #pidNum { font-family: var(--mono); font-weight: 400; letter-spacing: 0; text-transform: none; }
 #pidLabel { border-radius: 14px 0 0 14px; }
 #pidNum { border-radius: 0 14px 14px 0; margin-left: 3px; }
-#envPill { border-radius: 14px; margin-left: 5px; }
+#envPill { border-radius: 14px; }
 #btnGroup { display: flex; gap: 4px; }
-.btn { min-height: 28px; padding: 6px 16px 2px; font-size: 15px; border-radius: 0; display: inline-flex; align-items: center; justify-content: center; line-height: 1; color: var(--bg); }
+.btn { min-height: 24px; padding: 5px 7px 3px; font-size: 11px; border-radius: 0; display: inline-flex; align-items: center; justify-content: center; line-height: 1; color: var(--bg); }
 .btn.gr { background: var(--green); }
 .btn.y { background: #ffcc66; }
 .btn.r { background: var(--red); }
@@ -207,6 +309,12 @@ input.mono, .mono input, input[type=number] { font-family: var(--mono); font-siz
 .btn:hover { filter: brightness(1.13); }
 .btn:active { filter: brightness(.88); }
 .btn:focus-visible, .fpill:focus-visible { outline: 2px solid var(--white); outline-offset: 3px; }
+#footRow1 { gap: 8px; }
+#pidGroup { flex: 1; display: flex; justify-content: center; }
+#cfgVerGroup { margin-left: auto; }
+@keyframes restart-attention { 0%, 49% { background: #ffcc66; color: var(--bg); } 50%, 100% { background: var(--bg); color: #ffcc66; } }
+#btnRestart.restart-pending { animation: restart-attention 1.2s steps(1, end) infinite; }
+@media (prefers-reduced-motion: reduce) { #btnRestart.restart-pending { animation: none; outline: 2px solid #ffcc66; } }
 #cfgModal { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; background: rgba(3,3,6,.72); }
 #cfgModal .card { width: 420px; background: var(--bg2); border-top: 6px solid #4455ff; padding: 18px 20px 14px; }
 #cfgModal .card h3 { color: #4455ff; font-family: var(--display); font-size: 18px; letter-spacing: .12em; margin-bottom: 8px; }
@@ -240,14 +348,14 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 </style>
 </head>
 <body>
-<main id="statusView" class="screen" aria-label="Status">
-<div id="statusContent">
-<div id="header">
+<header id="header" class="panel-header">
   <div class="title" id="hName">Splash interface control</div>
   <div class="model" id="hModel">—</div>
   <div class="pill g" id="statusPill" data-tip="Engine state — DOWN: no server · LAUNCH FAIL: engine could not start (see error below, auto-retries) · LOADING: model loading · PREFILL: prompt being processed · DECODE: generating output · QUEUED: waiting for resources · IDLE: no work · RESTART: app is restarting the server">WAITING</div>
-  <button id="btnSettings" aria-label="Open Settings" data-tip="Open Settings"><span></span><span></span><span></span></button>
-</div>
+  <button id="btnSettings" aria-label="Open Settings" data-tip="Open Settings"><span id="headerMenuIcon" class="menu-icon" aria-hidden="true"><span></span><span></span><span></span></span><span id="headerStatusLabel" hidden>Status</span></button>
+</header>
+<main id="statusView" class="screen" aria-label="Status">
+<div id="statusContent">
 
 <section class="performance" data-channel="01" aria-label="Performance">
   <div class="section-heading"><h2>Performance</h2><span>Live telemetry</span></div>
@@ -329,20 +437,10 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 </div>
 </main>
 <main id="settingsView" class="screen s7" aria-label="Settings" hidden>
-<div id="settingsHeader">
-  <div class="s7-top">
-    <div class="title" id="s7Title">Splash settings</div>
-    <button id="btnStatus" data-tip="Return to live status">Status</button>
-  </div>
-  <div class="s7-mid">
-    <div class="s7-profbar"><span id="s7ProfileName">—</span><span class="mono" id="s7ProfileModel">—</span></div>
-    <div class="s7-engstate" id="s7EngState">—</div>
-  </div>
-</div>
 
 <section class="settings-global s7" data-channel="06" aria-label="Global settings">
   <div class="s7-cols">
-    <div class="s7-col s7-nav" data-tip="Global configuration (config.json): the engine, the model folders, and the server's network surface. Every change saves itself.">
+    <div class="s7-col s7-nav" data-tip="Global settings: engine, model folders, and network. Every change saves itself.">
       <div class="s7-navlbl">Global settings</div>
       <button class="gcol on" data-gcol="engine" id="gcolEngine">Engine</button>
       <button class="gcol" data-gcol="folders" id="gcolFolders">Folders</button>
@@ -350,7 +448,8 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
     </div>
     <div class="s7-col s7-detail" style="flex:1">
       <div class="s7-panel" id="gpanelEngine" data-panel="engine">
-        <div class="capbtns" data-tip="Auto walks the documented discovery ladder (manual path, install root, Homebrew, kit registry); Manual uses exactly the path you give it.">
+        <div class="section-heading"><h2>Engine</h2></div>
+        <div class="capbtns" data-tip="Auto uses the highest installed Homebrew Splash version. Manual uses exactly the kit path you choose.">
           <button class="cb" id="capAuto">Auto</button>
           <button class="cb on" id="capManual">Manual</button>
         </div>
@@ -378,6 +477,7 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
           <button class="mini" id="btnBrowseFolder" data-tip="Pick a model folder directory">Browse</button>
           <button class="mini" id="btnAddFolder" data-tip="Add this path as a new model folder">+ Add</button>
         </div>
+        <div id="folderMsg" role="status" aria-live="polite"></div>
       </div>
       <div class="s7-panel network-panel" id="gpanelNetwork" data-panel="network" hidden>
         <div class="section-heading"><h2>Network</h2><span>global — never per profile</span></div>
@@ -393,50 +493,51 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 </section>
 
 <section class="settings-profiles s7" data-channel="07" aria-label="Profiles">
+  <div class="s7-navlbl">Profiles</div>
+  <div class="s7-topbar"><span class="s7-topbar-title">Profile settings</span></div>
   <div class="s7-cols">
     <div class="s7-col s7-nav" data-tip="A profile is a named launch configuration: model + launch options. One is active at a time.">
-      <div class="s7-navlbl">Profiles</div>
       <div id="profileList" style="display:flex;flex-direction:column;gap:2px"></div>
       <button id="btnProfileAdd">+ Add profile</button>
     </div>
+    <div class="s7-profile-frame">
     <div class="s7-col s7-tabs" id="profileTabCol">
-      <div class="s7-tabtitle">Profile settings</div>
       <button class="ptab on" data-ptab="general" id="ptabGeneral">General</button>
+      <button class="ptab" data-ptab="model" id="ptabModel">Model</button>
       <button class="ptab" data-ptab="memory" id="ptabMemory">Memory</button>
-      <button class="ptab" data-ptab="cache" id="ptabCache">Cache</button>
-      <button class="ptab" data-ptab="compute" id="ptabCompute">Compute</button>
       <button class="ptab" data-ptab="api" id="ptabApi">Api</button>
     </div>
     <div class="s7-col s7-editor" id="profileEditor">
       <div id="ptabGeneralPanel" data-ptab-panel="general">
-        <div class="section-heading"><h2>Profile</h2><span id="profileIdLabel" class="mono"></span></div>
-        <div class="frow"><label for="profileName">Name</label><input type="text" id="profileName" aria-label="Profile name"></div>
-        <div class="frow">
+        <div id="profileBasics">
+        <div class="profile-identity">
+          <div class="frow"><label for="profileName">Name</label><input type="text" id="profileName" aria-label="Profile name"></div>
           <div class="capbtns act-caps">
             <button class="cb on act" id="btnProfileActivate">Activate</button>
             <button class="cb" id="btnProfileClone">Clone</button>
             <button class="cb del" id="btnProfileRemove">Delete</button>
           </div>
         </div>
-        <div class="frow" style="margin-top:6px">
-          <button class="modelpill" id="modelPill" data-tip="Choose the model this profile launches">
-            <span class="mp-l">Model</span><span class="mp-name" id="modelPillName">—</span><span class="mp-act" id="modelPillChange">Change</span>
-          </button>
-        </div>
-        <div class="profile-chip" id="profileDrafter"></div>
-        <div id="profileModelAxis" style="margin-top:6px"></div>
         <div class="profile-meta" id="profileLaunchMeta"></div>
+        <div id="profileComputeOptions" class="option-list"></div>
+        </div>
         <div id="profilePreviewBox" hidden>
           <div class="pp-h"><span>Launch preview</span><span class="pp-restart" id="profilePreviewRestart" hidden>· Restart</span></div>
           <div class="pp-args" id="profilePreviewArgs"></div>
         </div>
         <div id="profileRestartPrompt" hidden><span id="profileRestartText"></span><button class="mini" id="btnProfileRestart">Confirm restart</button></div>
       </div>
+      <div id="ptabModelPanel" data-ptab-panel="model" hidden>
+          <button class="modelpill" id="modelPill" data-tip="Choose the model this profile launches">
+            <span class="mp-l">Model</span><span class="mp-name" id="modelPillName">—</span><span class="mp-act" id="modelPillChange">Change</span>
+          </button>
+          <div class="profile-chip" id="profileDrafter"></div>
+          <div id="profileModelAxis" class="option-list"></div>
+      </div>
       <div id="ptabMemoryPanel" data-ptab-panel="memory" hidden></div>
-      <div id="ptabCachePanel" data-ptab-panel="cache" hidden></div>
-      <div id="ptabComputePanel" data-ptab-panel="compute" hidden></div>
       <div id="ptabApiPanel" data-ptab-panel="api" hidden></div>
       <div id="profileStaleSlot" hidden></div>
+    </div>
     </div>
   </div>
 </section>
@@ -459,7 +560,7 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 <div id="cfgModal">
   <div class="card">
     <h3>First run</h3>
-    <p>Welcome. Your engine kit, model folders and launch options live on the <b>Settings</b> screen. Point the app at your 1.3.0 kit and a model folder; every change saves itself. Apply changes with the explicit Restart control.</p>
+    <p>Welcome. Your engine kit, model folders and launch options live on the <b>Settings</b> screen. Point the app at your engine kit and a model folder; every change saves itself. Apply changes with the explicit Restart control.</p>
     <div class="btns">
       <button class="btn" id="modalDismiss" style="background:var(--track);color:var(--white)">Later</button>
       <button class="btn" id="modalCta" style="background:var(--blue);color:var(--bg)">Open Settings</button>
@@ -468,23 +569,17 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 </div>
 <div id="footer">
   <div class="foot-row" id="footRow1">
-    <span class="fpill red" id="restartPill" hidden data-tip="The configuration changed since the engine started — restart to apply.">Restart needed</span>
-    <span style="flex:1"></span>
-    <span id="cfgVerGroup" style="display:inline-flex;gap:4px">
-      <button class="fpill dark" id="cfgPill" data-tip="Open the settings screen">Config</button>
-      <span class="fpill blue" id="verPill" data-tip="The engine kit version (release.json) the running session was started with.">—</span>
-    </span>
-  </div>
-  <div class="foot-row" id="footRow2">
     <span id="btnGroup">
       <button class="btn gr" id="btnStart">Start</button>
       <button class="btn y" id="btnRestart">Restart</button>
       <button class="btn r" id="btnStop">Stop</button>
     </span>
-    <span style="flex:1;display:flex;justify-content:center">
-      <span id="pidPill"><span class="h" id="pidLabel">PID</span><span class="h mono" id="pidNum">—</span></span>
-    </span>
+    <span id="pidGroup"><span id="pidPill"><span class="h" id="pidLabel">PID</span><span class="h mono" id="pidNum">—</span></span></span>
     <span class="h" id="envPill">—</span>
+    <span id="cfgVerGroup" style="display:inline-flex;gap:4px">
+      <button class="fpill dark" id="cfgPill" data-tip="Open the settings screen">Config</button>
+      <span class="fpill blue" id="verPill" data-tip="The engine kit version (release.json) the running session was started with.">—</span>
+    </span>
   </div>
 </div>
 
@@ -496,15 +591,23 @@ const n = (v) => v == null ? "—" : v >= 1e6 ? (v/1e6).toFixed(1)+"M" : v >= 1e
 const nn = (v) => v == null ? "—" : v;
 const ms = (v) => v == null ? "—" : v >= 60000 ? (v/60000).toFixed(1)+" min" : v >= 1000 ? (v/1000).toFixed(1)+" s" : v.toFixed(0)+" ms";
 // View state stays local to this single WebView; switching never rebuilds the draft.
+// The settings window widens to 820; status remains frozen at 520.
+// the app animates the NSWindow frame on this message.
+function postSize(size) { try { window.webkit.messageHandlers.size.postMessage(size) } catch(e) {} }
 window.showView = function(view) {
   const settings = view === "settings";
+  $("hName").textContent = settings ? "Splash settings" : "Splash interface control";
+  $("btnSettings").setAttribute("aria-label", settings ? "Return to Status" : "Open Settings");
+  $("btnSettings").setAttribute("data-tip", settings ? "Return to live status" : "Open Settings");
+  $("headerMenuIcon").hidden = settings;
+  $("headerStatusLabel").hidden = !settings;
   $("statusView").hidden = settings;
   $("settingsView").hidden = !settings;
   $(settings ? "settingsView" : "statusView").scrollTop = 0;
   if (settings) cfKeyRemask();
+  postSize({ w: settings ? 820 : 520 });
 };
-$("btnSettings").onclick = () => window.showView("settings");
-$("btnStatus").onclick = () => window.showView("status");
+$("btnSettings").onclick = () => window.showView($("settingsView").hidden ? "settings" : "status");
 
 function setT(id, v){ $(id).textContent = v == null || v === "" ? "—" : v; }
 
@@ -643,21 +746,21 @@ function render(){
   // footer (shared by both views)
   $("pidNum").textContent = S.server && S.server.pid ? S.server.pid : "—";
   $("envPill").textContent = S.server && S.server.pid ? (S.server.launched_by_app ? "APP-MANAGED" : "EXTERNAL") : "NOT RUNNING";
-  // D13: a config change the running engine doesn't yet apply flags
-  // cfg.restart_required — the RESTART NEEDED pill + the armed RESTART button.
+  // Saved plan changes draw attention without reserving another footer row.
   const rr = S.cfg && S.cfg.restart_required === true;
-  $("restartPill").hidden = !rr;
-  $("btnRestart").textContent = rr ? "Restart to apply" : "Restart";
+  $("btnRestart").classList.toggle("restart-pending", rr);
+  $("btnRestart").setAttribute("data-tip", rr ? "Settings saved. Changes take effect after the engine restarts." : "Restart the current engine session");
+  $("btnRestart").title = $("btnRestart").getAttribute("data-tip");
   if (S.cfg) {
     setT("verPill", S.cfg.engine && S.cfg.engine.version ? "v" + S.cfg.engine.version : "—");
     cfKeyRemask();
   }
   cfRender();
   cfFirstRun();
-  // Only status content determines panel geometry; settings scrolls within it.
+  // Only status content determines the panel's height; the width follows the view.
   if (!$("statusView").hidden) {
-    const h = $("statusContent").scrollHeight + $("footer").offsetHeight + 20;
-    if (h !== lastH) { lastH = h; try { window.webkit.messageHandlers.size.postMessage(h) } catch(e) {} }
+    const h = $("statusContent").scrollHeight + $("header").offsetHeight + 8 + $("footer").offsetHeight + 20;
+    if (h !== lastH) { lastH = h; postSize({ h, w: 520 }); }
   }
 }
 function up(s){ s=Math.max(0,s|0); const h=s/3600|0, m=(s%3600)/60|0, ss=s%60; return (h?h+"h ":"")+(m?m+"m ":"")+ss+"s"; }
@@ -680,6 +783,18 @@ window.__cfgSave = r => {
   if (r.ok && CF.draft && cfDirty() && !CF.saving) cfSave();
 };
 window.__cfgValidate = r => {
+  if (CF.pendingFolder && r.validation_id === CF.pendingFolder.validationID) {
+    const folder = CF.pendingFolder.folder;
+    CF.pendingFolder = null;
+    $("folderMsg").textContent = r.ok ? "" : (r.errors || []).join("; ");
+    if (r.ok && !CF.draft.folders.some(f => f.path === folder.path)) {
+      CF.draft.folders.push(folder);
+      $("folderPath").value = "";
+      cfRenderFolders();
+      cfDebouncedValidate();
+    }
+    return;
+  }
   if (r.validation_id != null && r.validation_id !== CF.validationID) return;
   cfgValidateResult = r; CF.validated = CF.validationBaseline || JSON.stringify(CF.draft); CF.verdicts = r.profiles || [];
   if (r.option_defs) CF.optionDefs = r.option_defs;
@@ -700,7 +815,7 @@ $("btnStop").onclick = () => {
   if (CF.keyRevealed) cfKeyRemask(true);
 };
 $("btnRestart").onclick = () => {
-  if (S.cfg && S.cfg.restart_required === true) { window.showView("settings"); CF.profileId = CF.draft.activeProfile || CF.profileId; cfRenderProfiles(); if ($("profileRestartPrompt") && !$("profileRestartPrompt").hidden) $("profileRestartPrompt").scrollIntoView(); if (CF.keyRevealed) cfKeyRemask(true); }
+  if (S.cfg && S.cfg.restart_required === true) { window.showView("settings"); CF.profileId = CF.draft.activeProfile || CF.profileId; $("ptabGeneral").click(); cfRenderProfiles(); if ($("profileRestartPrompt") && !$("profileRestartPrompt").hidden) $("profileRestartPrompt").scrollIntoView(); if (CF.keyRevealed) cfKeyRemask(true); }
   else cmd("restart");
 };
 $("cfgPill").onclick = () => window.showView("settings");
@@ -709,13 +824,13 @@ $("cfgPill").onclick = () => window.showView("settings");
 const CF = { doc: null, draft: null, baseline: "", validateTimer: null, firstRunShown: false,
   gcol: "engine", ptab: "general", profileId: null,
   saving: false, activating: false, validated: null, validationID: 0, validationBaseline: null,
-  previousResult: null, pendingDoc: null, pendingBaseline: null,
+  previousResult: null, pendingDoc: null, pendingBaseline: null, pendingFolder: null, folderValidationID: 0,
   optionDefs: null, verdicts: [], optionsKey: null,
   keyRevealed: false, keyMask: "· · · · · · · ·",
   chooserOpen: false, chooserSel: null, chooserSrc: "all", chooserSearch: "" };
 
-// The option groups that render into the profile tabs (general is structural).
-const PTABS = ["memory", "cache", "compute", "api"];
+// Dynamic option tabs; GENERAL and MODEL have structural content.
+const PTABS = ["memory", "api"];
 
 // Option definitions come from the tick's contract (or the last validate response).
 function cfOptionDefs() { return CF.optionDefs || (S && S.cfg && S.cfg.option_defs) || []; }
@@ -779,7 +894,7 @@ function cfKeyRemask(force) {
 }
 
 function cfFolderSourceTag(id) {
-  const map = { lmstudio: "LM Studio", ollama: "Ollama", hfhub: "HF Hub", splash: "Splash", installroot: "Install root" };
+  const map = { lmstudio: "LM Studio", ollama: "Ollama", hfhub: "HF Hub", hf: "HF Hub", splash: "Splash", installroot: "Install root" };
   return map[id] || (id && id[0] === "u" ? "Manual" : (id || "Folder"));
 }
 
@@ -791,6 +906,7 @@ function cfRenderFolders() {
     const scanning = st && st.scanning === true;
     const present = st && st.present === true;
     const missing = st && st.present === false;
+    if (missing) return "";
     const models = st && Array.isArray(st.models) ? st.models : null;
     let stat = "…", cls = "scan";
     if (scanning) { stat = "SCANNING"; }
@@ -829,12 +945,12 @@ function cfDebouncedValidate() {
 }
 
 function cfSave() {
-  if (!CF.draft || !cfDirty()) { cfMsg("No changes", ""); return; }
+  if (!CF.draft || !cfDirty()) { cfMsg("", ""); return; }
   if (CF.saving) return;
   CF.previousResult = S && S.cfg && S.cfg.result;
   CF.pendingDoc = cfBuildDoc(); CF.pendingBaseline = JSON.stringify(CF.draft); CF.saving = true;
   cmd("config.save", { doc: CF.pendingDoc });
-  cfMsg("Saving…", "");
+  cfMsg("", "");
 }
 
 // One-time population from the raw doc (config.get), then the draft is ours.
@@ -854,20 +970,15 @@ function cfRender() {
   const cfg = S.cfg;
   if (!cfg) return;
   const e = cfg.engine || {};
-  // Settings header: the active profile + model, and the engine state.
+  // The single shared header shows the same model/state in either view.
   const active = CF.draft ? CF.draft.profiles.find(p => p.id === CF.draft.activeProfile) : null;
-  $("s7ProfileName").textContent = active ? active.name : "—";
-  $("s7ProfileModel").textContent = active && active.model && active.model.id ? " — " + active.model.id : active ? " — model unset" : " — no profile";
-  const up = S.server && S.server.pid;
-  const es = $("s7EngState");
-  es.textContent = up ? String(S.state || "RUNNING").toUpperCase() : (S.state === "down" ? "DOWN" : "—");
-  es.classList.toggle("up", !!up);
+  if (active && !(S.server && S.server.launch_error)) $("hModel").textContent = active.name + " — " + (active.model && active.model.id || "model unset");
   // ENGINE panel: path, version + arch/os, the verdict cap, the ladder.
   $("vCfg").textContent = e.version || "—";
   const arch = e.arch || "", os = e.os || "";
   $("engArch").textContent = [arch, os].filter(Boolean).join(" · ");
   const ev = $("engValid");
-  const verdict = e.verdict, reason = e.verdict_reason;
+  const verdict = e.verdict, reason = e.verdict === "valid" ? null : e.verdict_reason;
   const vmap = { valid: ["VALID", ""], fallback: ["FALLBACK MAPPING", "fallback"], unrunnable: ["UNRUNNABLE", "unrunnable"] };
   if (verdict && vmap[verdict]) {
     ev.textContent = vmap[verdict][0] + (reason ? " — " + reason : "");
@@ -892,7 +1003,7 @@ function cfRender() {
       CF.pendingDoc.profiles.forEach(p => { p.meta = cfProfileMeta(p); });
       CF.doc = CF.pendingDoc; CF.baseline = JSON.stringify(CF.draft); CF.activating = false;
     }
-    cfMsg("Saved — " + (cfg.restart_required === true ? "restart to apply" : "applied on next launch"), "ok");
+    cfMsg("", "");
   } else if (CF.saving && cfg.result && cfg.result !== CF.previousResult && cfg.result.ok === false) {
     CF.saving = false; CF.activating = false;
     cfMsg((cfg.result.errors || []).join("; "), "err");
@@ -943,10 +1054,14 @@ $("btnAddFolder").onclick = () => {
   if (!p) return;
   let id = "folder" + (CF.draft.folders.length + 1);
   while (CF.draft.folders.some(f => f.id === id)) id = id.slice(0, -1) + (parseInt(id.slice(-1), 10) + 1);
-  CF.draft.folders.push({ id, path: p, source: "manual" });
-  $("folderPath").value = "";
-  cfRenderFolders();
-  cfDebouncedValidate();
+  if (CF.draft.folders.some(f => f.path === p)) { $("folderMsg").textContent = "This folder is already listed."; return; }
+  const folder = { id, path: p, source: "manual" };
+  const validationID = "folder-" + (++CF.folderValidationID);
+  CF.pendingFolder = { folder, validationID };
+  const candidate = cfBuildDoc();
+  candidate.globals.model_folders = [...candidate.globals.model_folders, folder];
+  $("folderMsg").textContent = "";
+  cmd("config.validate", { doc: candidate, validation_id: validationID });
 };
 $("folderList").onclick = (ev) => {
   const b = ev.target && ev.target.closest ? ev.target.closest("[data-act]") : null;
@@ -1009,14 +1124,14 @@ function cfRenderProfiles() {
     const sel = p.id === CF.profileId;
     const modelLine = p.model && p.model.id ? esc(p.model.id) : "model unset";
     return '<button class="profrow' + (sel ? " on" : "") + '" data-profile-id="' + esc(p.id) + '" data-tip="' + esc(p.name) + " · " + modelLine + (active ? " · active" : "") + '">' +
-      esc(p.name) + '<span class="profdot' + (active ? " on" : "") + '"></span></button>';
+      '<span class="profile-name">' + esc(p.name) + '</span><span class="profdot' + (active ? " on" : "") + '"></span></button>';
   }).join("");
   if ($("profileList").innerHTML !== list) $("profileList").innerHTML = list;
   if (!cfSelectedProfile() && CF.draft.profiles.length) CF.profileId = CF.draft.profiles[0].id;
   // Version-gated tabs: a tab whose group has no options for the resolved engine
   // version is HIDDEN, not disabled (D3).
   const defs = cfOptionDefs();
-  const groups = new Set(defs.map(o => o.group));
+  const groups = new Set(defs.map(o => o.group === "cache" ? "memory" : o.group));
   PTABS.forEach(t => {
     const el = $("ptab" + t[0].toUpperCase() + t.slice(1));
     if (el) el.hidden = !groups.has(t);
@@ -1035,12 +1150,11 @@ function cfRenderProfiles() {
   $("profileTabCol").hidden = false;
   $("profileEditor").hidden = false;
   // The active tab may have vanished (version-gated away): fall back to GENERAL.
-  if (CF.ptab !== "general" && !groups.has(CF.ptab)) {
+  if (!["general", "model"].includes(CF.ptab) && !groups.has(CF.ptab)) {
     CF.ptab = "general";
     document.querySelectorAll("[data-ptab]").forEach(x => x.classList.toggle("on", x.dataset.ptab === "general"));
     document.querySelectorAll("[data-ptab-panel]").forEach(pp => { pp.hidden = pp.dataset.ptabPanel !== "general"; });
   }
-  $("profileIdLabel").textContent = p.id;
   if (document.activeElement !== $("profileName") && $("profileName").value !== p.name) $("profileName").value = p.name;
   $("btnProfileActivate").classList.toggle("on", p.id === CF.draft.activeProfile);
   $("btnProfileActivate").textContent = p.id === CF.draft.activeProfile ? "Active" : "Activate";
@@ -1060,8 +1174,17 @@ function cfRenderProfiles() {
     const el = $("profilePreviewArgs");
     if (args.length) {
       const line = args.join(" ");
-      const wrap = line.length > 110 ? line.slice(0, 110) + " ⋯" + line.slice(-56) : line;
-      el.textContent = wrap;
+      // G: argv renders as token spans — the box wraps at flag boundaries, and a
+      // token only breaks mid-word when a single token is wider than the box.
+      el.textContent = "";
+      const frag = document.createDocumentFragment();
+      args.forEach((t, i) => {
+        if (i) frag.appendChild(document.createTextNode(" "));
+        const s = document.createElement("span");
+        s.textContent = t;
+        frag.appendChild(s);
+      });
+      el.appendChild(frag);
       el.classList.toggle("err", !!pv.error);
       el.setAttribute("data-tip", line);
     } else if (pv.error) {
@@ -1093,7 +1216,7 @@ function cfOptionRowHtml(o, p) {
   const value = p.options[o.key] ?? o.default ?? "";
   const choices = o.kind === "bool" ? ["true", "false"] : o.choices || [];
   const missing = (o.requires || []).filter(k => { const v = p.options[k] ?? cfOptionDefs().find(d => d.key === k)?.default; return v == null || v === false || v === "false" || v === "0" || v === "" || (Array.isArray(v) && !v.length); });
-  return '<div class="frow option-row" data-option-row="' + esc(o.key) + '" data-req="' + esc(missing.join(",")) + '"><label for="option-' + esc(o.key) + '" data-tip="' + esc(missing.length ? "Requires " + missing.join(", ") + " — set it first" : o.flag) + '">' + esc(o.flag) + '</label><input id="option-' + esc(o.key) + '" data-option="' + esc(o.key) + '" type="' + (choices.length ? 'hidden' : 'text') + '" placeholder="' + esc(o.default || "engine default") + '">' + choices.map(v => '<button class="mini" data-option-choice="' + esc(o.key) + '" data-value="' + esc(v) + '">' + esc(o.kind === "bool" ? (v === "true" ? "ON" : "OFF") : v) + '</button>').join('') + '<button class="mini" data-option-reset="' + esc(o.key) + '" data-tip="Use engine default">Reset</button></div>';
+  return '<div class="frow option-row" data-option-row="' + esc(o.key) + '" data-req="' + esc(missing.join(",")) + '"><label for="option-' + esc(o.key) + '" data-tip="' + esc(missing.length ? "Requires " + missing.join(", ") + " — set it first" : o.flag) + '">' + esc(o.flag) + '</label><input id="option-' + esc(o.key) + '" data-option="' + esc(o.key) + '" type="' + (choices.length ? 'hidden' : 'text') + '" placeholder="' + esc(o.default ?? "engine default") + '">' + (choices.length ? '<span class="option-choices">' + choices.map(v => '<button class="mini" data-option-choice="' + esc(o.key) + '" data-value="' + esc(v) + '">' + esc(o.kind === "bool" ? (v === "true" ? "ON" : "OFF") : v) + '</button>').join('') + '</span>' : '') + '<button class="mini" data-option-reset="' + esc(o.key) + '" data-tip="Use engine default">Reset</button></div>';
 }
 // The per-row sync shared by the tab panels and the GENERAL model-axis rows.
 function cfSyncOption(o, p, input, defs) {
@@ -1105,23 +1228,32 @@ function cfSyncOption(o, p, input, defs) {
   input.setAttribute('aria-invalid', String(!!invalid));
   row.classList.toggle("unmet", !!missing.length);
   row.querySelectorAll('input,button').forEach(c => { c.disabled = !!missing.length; });
-  if (document.activeElement !== input) input.value = Array.isArray(value) ? value.join(", ") : String(value);
+  if (document.activeElement !== input) input.value = p.options[o.key] == null && o.kind !== "bool" && !(o.choices || []).length ? "" : Array.isArray(value) ? value.join(", ") : String(value);
   row.querySelectorAll('[data-option-choice]').forEach(b => b.classList.toggle('on', b.dataset.value === String(value)));
+  row.querySelector('[data-option-reset]').hidden = !Object.prototype.hasOwnProperty.call(p.options, o.key) || p.options[o.key] == null;
   input.onchange = () => cfOptionChanged(o.key, input.value);
 }
 
 function cfRenderOptions(p) {
   if (!p) return;
   const defs = cfOptionDefs(), esc = cfEscape;
+  const compute = defs.filter(o => o.group === "compute");
+  $("profileComputeOptions").innerHTML = compute.map(o => cfOptionRowHtml(o, p)).join("");
+  compute.forEach(o => cfSyncOption(o, p, $("option-" + o.key), defs));
   for (const t of PTABS) {
     const panel = $("ptab" + t[0].toUpperCase() + t.slice(1) + "Panel");
     if (!panel) continue;
-    const items = defs.filter(o => o.group === t);
+    const items = defs.filter(o => o.group === t || (t === "memory" && o.group === "cache"));
     if (!items.length) { panel.innerHTML = '<div class="profile-meta">No options in this group for engine v' + esc((S.cfg && S.cfg.engine && S.cfg.engine.version) || "?") + '.</div>'; continue; }
     const key = t + JSON.stringify(items) + JSON.stringify(Object.keys(p.options || {}).sort());
     if (CF["optKey_" + t] !== key) {
       CF["optKey_" + t] = key;
-      panel.innerHTML = items.map(o => cfOptionRowHtml(o, p)).join("");
+      if (t === "memory") {
+        const memory = items.filter(o => o.group === "memory"), cache = items.filter(o => o.group === "cache");
+        panel.innerHTML = '<div class="section-heading"><h2>Memory</h2></div><div class="option-list">' + memory.map(o => cfOptionRowHtml(o, p)).join("") + '</div>' + (cache.length ? '<div class="profile-subsection"><div class="section-heading"><h2>Cache</h2></div><div class="option-list">' + cache.map(o => cfOptionRowHtml(o, p)).join("") + '</div></div>' : "");
+      } else {
+        panel.innerHTML = items.map(o => cfOptionRowHtml(o, p)).join("");
+      }
     }
     items.forEach(o => {
       const input = $("option-" + o.key);

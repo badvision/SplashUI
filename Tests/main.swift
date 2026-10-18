@@ -949,13 +949,14 @@ do {
     let d = firstRunConfig(home: "/home",
                            brewKeg: { "/opt/homebrew/Cellar/splash/1.3.1" },
                            kitVersion: { $0 == "/opt/homebrew/Cellar/splash/1.3.1/libexec" ? "1.3.1" : nil },
-                           isDir: { $0 == "/opt/homebrew/Cellar/splash/1.3.1/libexec" },
+                           isDir: { ["/opt/homebrew/Cellar/splash/1.3.1/libexec", "/home/.lmstudio/models",
+                                     "/home/.cache/huggingface/hub"].contains($0) },
                            now: now)
     check(d.globals.engine.mode == "auto" && d.globals.engine.manualPath == nil && d.globals.engine.brew,
           "firstRun: keg detected -> engine auto (D2 ladder), brew rung on")
     check(d.globals.port == 8123 && d.globals.apiKey == "splash-standalone-1", "firstRun: documented defaults")
     let ids = d.globals.modelFolders.map { $0.id }
-    check(ids == ["lmstudio", "ollama", "hfhub", "splash", "installroot"], "firstRun: the 5 auto model roots")
+    check(ids == ["lmstudio", "hfhub"], "firstRun: only the two installed model libraries are seeded")
     check(d.globals.modelFolders.allSatisfy { $0.source == "auto" }, "firstRun: roots tagged source auto")
     check(d.profiles.count == 1 && d.profiles[0].name == "Default", "firstRun: one profile named Default (D11)")
     check(d.profiles[0].model.source == "hfid" && d.profiles[0].model.id == "mlx-community/Qwen3.8-27B-4bit"
@@ -1606,16 +1607,12 @@ do {
 }
 
 // ---- S3: resolveKit (the engine ladder extracted from resolveSplashPaths) ----
-// D2: discovery ORDER (never version preference). D9: NO env reads — the
-// install.sh layout rung is the fixed ~/SplashUI + 1.3.0 constants (the
-// rung is a constant, not a var). D16: version from the resolved kit's
-// release.json via the injected kitVersion. The old model-gate on the brew
-// rung is gone (planning-decision 2): first valid kit wins; the model
-// mismatch is the eligibility layer's verdict.
+// AUTO chooses the highest installed Homebrew version; the old SplashUI kit is
+// available through an explicit MANUAL path only. D9: no environment reads.
 
 let fixedKitDir = "/home/SplashUI/kit/splash-1.3.0-arm64-macos26"
 
-// 45. auto mode: the fixed install.sh-layout rung beats the brew keg (order).
+// 45. AUTO ignores the old fixed kit even when it is installed.
 do {
     let (kd, ke) = kitPaths(fixedKitDir)
     let (bd, be) = brewPaths("/opt/homebrew")
@@ -1624,10 +1621,10 @@ do {
         home: "/home",
         isDir: { (kd | bd).contains($0) }, isExecutable: { (ke | be).contains($0) },
         brewKeg: { "/opt/homebrew" },
-        kitVersion: { $0 == fixedKitDir ? "1.3.0" : nil })
-    check(r.kit == fixedKitDir, "resolveKit: the fixed ~/SplashUI + 1.3.0 rung wins over brew (D2 order)")
-    check(r.version == "1.3.0", "resolveKit: version read from the resolved kit's release.json (D16)")
-    check(r.tried == [fixedKitDir, "/opt/homebrew/libexec"], "resolveKit: tried lists every rung in order (brew skipped once a kit is found)")
+        kitVersion: { $0 == "/opt/homebrew/libexec" ? "1.3.1" : "1.3.0" })
+    check(r.kit == "/opt/homebrew/libexec", "resolveKit: AUTO uses Homebrew, not the old SplashUI kit")
+    check(r.version == "1.3.1", "resolveKit: version read from the selected Homebrew kit")
+    check(r.tried == ["/opt/homebrew/libexec"], "resolveKit: AUTO records only the Homebrew kit")
     check(r.error == nil, "resolveKit: no error when a kit resolves")
 }
 
@@ -1640,13 +1637,13 @@ do {
         isDir: { bd.contains($0) }, isExecutable: { be.contains($0) },
         brewKeg: { "/opt/homebrew" },
         kitVersion: { $0.hasPrefix("/opt/homebrew/libexec") ? "1.3.1" : nil })
-    check(r.kit == "/opt/homebrew/libexec", "resolveKit: the brew keg libexec rung (last) resolves")
+    check(r.kit == "/opt/homebrew/libexec", "resolveKit: the Homebrew keg libexec resolves")
     check(r.version == "1.3.1", "resolveKit: the keg version surfaces (1.3.1)")
-    check(r.tried == [fixedKitDir, "/opt/homebrew/libexec"], "resolveKit: both rungs tried before the keg")
+    check(r.tried == ["/opt/homebrew/libexec"], "resolveKit: AUTO does not try an assumed install.sh path")
     check(r.error == nil, "resolveKit: no error")
 }
 
-// 47. manual mode: manualPath replaces rung 1 — a valid manual kit wins over the fixed rung.
+// 47. MANUAL resolves exactly the selected path.
 do {
     let (md, me) = kitPaths("/user/kit")
     let (kd, ke) = kitPaths(fixedKitDir)
@@ -1660,7 +1657,7 @@ do {
     check(r.tried.first == "/user/kit", "resolveKit: manual path tried first")
 }
 
-// 48. manual mode: an INCOMPLETE manual kit (no python) is skipped — the ladder continues.
+// 48. An incomplete MANUAL kit fails without silently changing engine version.
 do {
     let (kd, ke) = kitPaths(fixedKitDir)
     let dirs: Set<String> = kd.union(["/broken/kit"])
@@ -1671,12 +1668,12 @@ do {
         isDir: { dirs.contains($0) }, isExecutable: { exe.contains($0) },
         brewKeg: { nil },
         kitVersion: { $0 == fixedKitDir ? "1.3.0" : nil })
-    check(r.kit == fixedKitDir, "resolveKit: an incomplete manual kit is skipped, the fixed rung wins")
-    check(r.tried == ["/broken/kit", fixedKitDir], "resolveKit: the broken manual path is in the tried list")
-    check(r.error == nil, "resolveKit: no error")
+    check(r.kit == nil, "resolveKit: an incomplete manual kit never falls back to the old kit")
+    check(r.tried == ["/broken/kit"], "resolveKit: only the explicit manual path is tried")
+    check(r.error != nil, "resolveKit: incomplete manual kit returns an actionable error")
 }
 
-// 49. manual mode with an empty path: no rung 1 — the ladder starts at the fixed rung.
+// 49. An empty MANUAL path does not pick an unrelated engine.
 do {
     let (kd, ke) = kitPaths(fixedKitDir)
     let r = resolveKit(
@@ -1684,11 +1681,11 @@ do {
         home: "/home",
         isDir: { kd.contains($0) }, isExecutable: { ke.contains($0) },
         brewKeg: { nil })
-    check(r.kit == fixedKitDir, "resolveKit: an empty manual path contributes no rung")
-    check(r.tried == [fixedKitDir], "resolveKit: only the fixed rung tried (no brew kit present)")
+    check(r.kit == nil, "resolveKit: an empty manual path cannot resolve an engine")
+    check(r.tried.isEmpty, "resolveKit: an empty manual path contributes no tried location")
 }
 
-// 50. the brew rung only exists when the config's brew flag is on.
+// 50. AUTO no longer inherits a legacy disabled-Homebrew rung flag.
 do {
     let (bd, be) = brewPaths("/opt/homebrew")
     let r = resolveKit(
@@ -1696,9 +1693,9 @@ do {
         home: "/home",
         isDir: { bd.contains($0) }, isExecutable: { be.contains($0) },
         brewKeg: { "/opt/homebrew" })
-    check(r.kit == nil, "resolveKit: brew disabled -> the keg is never tried")
-    check(r.tried == [fixedKitDir], "resolveKit: the tried list shows only the fixed rung")
-    check((r.error ?? "").contains("engine kit not found"), "resolveKit: the miss error says kit not found")
+    check(r.kit == "/opt/homebrew/libexec", "resolveKit: AUTO uses Homebrew even with a legacy brew=false")
+    check(r.tried == ["/opt/homebrew/libexec"], "resolveKit: only the Homebrew keg is tried")
+    check(r.error == nil, "resolveKit: the installed Homebrew kit is valid")
 }
 
 // 51. nothing anywhere: an actionable error names every rung tried (today's style).
@@ -1712,8 +1709,40 @@ do {
     check(r.kit == nil && r.version == nil, "resolveKit: nothing found -> no kit, no version")
     let e = r.error ?? ""
     check(e.contains("engine kit not found"), "resolveKit: the error names the failure")
-    check(e.contains(fixedKitDir) && e.contains("/opt/homebrew/libexec"),
-          "resolveKit: the error names every location tried")
+    check(!e.contains(fixedKitDir) && e.contains("/opt/homebrew/libexec"),
+          "resolveKit: the error names the actual Homebrew location, not an assumed fixed kit")
+}
+
+// Highest Homebrew version is numeric, spans both prefixes, and skips incomplete kegs.
+do {
+    let entries = ["/opt/homebrew/Cellar/splash": ["1.3.9", "1.3.10", "libexec", "1.4.0"],
+                   "/usr/local/Cellar/splash": ["1.3.11_1", "1.3.11_2"]]
+    let keg = findBrewKeg(listDir: { entries[$0] }, isExecutable: { !$0.contains("1.4.0/") })
+    check(keg == "/usr/local/Cellar/splash/1.3.11_2", "AUTO: highest numeric installed version/revision across Homebrew prefixes")
+    let numeric = findBrewKeg(prefixes: ["/opt/homebrew"], listDir: { entries[$0] },
+                              isExecutable: { !$0.contains("1.4.0/") })
+    check(numeric == "/opt/homebrew/Cellar/splash/1.3.10", "AUTO: 1.3.10 sorts after 1.3.9; incomplete newer keg is skipped")
+    check(findBrewKeg(listDir: { _ in nil }, isExecutable: { _ in false }) == nil,
+          "AUTO: no installed Homebrew runtime returns nil")
+}
+
+// Common model libraries are conveniences only when their directories exist.
+do {
+    let custom = ModelFolder(id: "custom", path: "/custom/models", source: "manual")
+    let missing = ModelFolder(id: "gone", path: "/gone", source: "auto")
+    let dirs: Set<String> = [custom.path, "/home/.lmstudio/models", "/home/.cache/huggingface/hub"]
+    let folders = existingModelFolders([custom, missing], home: "/home", isDir: { dirs.contains($0) })
+    check(folders.map { $0.id } == ["custom", "lmstudio", "hfhub"], "folders: retain existing custom path and auto-add only installed libraries")
+    check(existingModelFolders(folders, home: "/home", isDir: { dirs.contains($0) }) == folders,
+          "folders: discovery never duplicates an existing path")
+    check(existingModelFolders([], home: "/home", isDir: { _ in false }).isEmpty,
+          "folders: absent defaults do not create phantom registry entries")
+    let errors = modelFolderAdditionErrors([custom, missing], existing: [custom], isDir: { dirs.contains($0) })
+    check(errors == ["model folder does not exist: /gone"], "folders: nonexistent ADD is rejected before persistence")
+    check(modelFolderAdditionErrors([missing], existing: [missing], isDir: { _ in false }).isEmpty,
+          "folders: a disappeared saved folder does not block unrelated changes")
+    let seed = firstRunConfig(home: "/home", brewKeg: { nil }, kitVersion: { _ in nil }, isDir: { _ in false })
+    check(seed.globals.modelFolders.isEmpty, "folders: first run does not seed nonexistent libraries")
 }
 
 // 52. D9: the ladder reads NO environment. With every documented SPLASH_* var
@@ -3410,8 +3439,7 @@ do {
 // checked; on success it is the same (the ladder always appends each rung it
 // examines, not just the one it picks).
 do {
-    // Kit-miss path: manual mode with a bad path -> tried contains the manual
-    // path + the install.sh layout rung (and the brew keg if brew is enabled).
+    // Kit-miss path: MANUAL records only its exact path.
     let cfgMiss = planCfgJSON(engineMode: "manual", manualPath: "/bad/kit",
                                port: 8123, key: "k", name: "default",
                                modelId: "incoai/Qwen3.8-27B-Splash",
@@ -3423,8 +3451,7 @@ do {
     check(planMiss.error != nil, "S5 tried: kit-miss plan errors")
     check(planMiss.tried.contains("/bad/kit"),
           "S5 tried: manual path appears in the kit-miss tried list")
-    check(planMiss.tried.contains("/home/SplashUI/kit/splash-1.3.0-arm64-macos26"),
-          "S5 tried: install.sh layout rung appears in the kit-miss tried list")
+    check(planMiss.tried == ["/bad/kit"], "S5 tried: no assumed install.sh rung on the manual miss path")
 
     // Success path: a valid kit -> tried contains the same rungs.
     var fsS5 = FakeFS()
@@ -3443,8 +3470,7 @@ do {
     check(planOk.error == nil, "S5 tried: success plan is healthy")
     check(planOk.tried.contains("/kits/kit130"),
           "S5 tried: the chosen kit appears in the success-path tried list")
-    check(planOk.tried.contains("/home/SplashUI/kit/splash-1.3.0-arm64-macos26"),
-          "S5 tried: the install.sh rung is also in the success-path tried list")
+    check(planOk.tried == ["/kits/kit130"], "S5 tried: no assumed install.sh rung on the manual success path")
 }
 
 // 92. S5: configTickPayload engine.path — the resolved kit dir (workDir).
@@ -3773,8 +3799,8 @@ do {
     check(fb.verdict == "fallback" && (fb.reason?.contains("FALLBACK") ?? false),
           "S7 verdict: an unmapped version -> fallback")
     let un = engineVerdict(resolved: true, version: "1.3.1", error: nil, mappingFallback: false)
-    check(un.verdict == "valid" && (un.reason?.contains("built against") ?? false) && (un.reason?.contains("1.3.1") ?? false),
-          "S7 verdict: any version is supported — a non-built-against kit -> valid, version as info")
+    check(un.verdict == "valid" && un.reason == nil,
+          "S7 verdict: any supported version is VALID with no build-version annotation")
     let ok = engineVerdict(resolved: true, version: "1.3.0", error: nil, mappingFallback: false)
     check(ok.verdict == "valid" && ok.reason == nil, "S7 verdict: the built-against kit -> valid, no reason")
     check(builtEngineVersion == "1.3.0", "S7: the built-against version is 1.3.0 (informational only)")
@@ -3869,6 +3895,23 @@ do {
     check((prof?.first as? [String: Any])?["preview"] is NSNull, "S7 tick: a stable preview null")
     check(((prof?.first as? [String: Any])?["model"] as? [String: Any])?["size_bytes"] is NSNull,
           "S7 tick: a stable model size null")
+}
+
+// 105. S7 panel size: the settings view widens the window, the status view
+// stays put; the height keeps the app's usual clamps.
+do {
+    let status = panelTargetSize(view: "status", contentHeight: 700, screenHeight: 1000)
+    check(status.width == 520, "panel size: status stays 520 wide")
+    check(status.height == 716, "panel size: height is content + 16, unclamped")
+    let settings = panelTargetSize(view: "settings", contentHeight: 700, screenHeight: 1000)
+    check(settings.width == 820, "panel size: settings widens to 820")
+    check(settings.height == 716, "panel size: the view switch does not change the height")
+    check(panelTargetSize(view: "whatever", contentHeight: 700, screenHeight: 1000).width == 520,
+          "panel size: an unknown view defaults to the status width")
+    check(panelTargetSize(view: "status", contentHeight: 100, screenHeight: 1000).height == 320,
+          "panel size: the 320pt floor holds")
+    check(panelTargetSize(view: "status", contentHeight: 5000, screenHeight: 1000).height == 880,
+          "panel size: the screen cap (screenH - 120) holds")
 }
 
 print(failures == 0 ? "ALL TESTS PASSED" : "\(failures) TEST(S) FAILED")
