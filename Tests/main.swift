@@ -2219,9 +2219,8 @@ func planKit(fs: inout FakeFS, path: String, version: String) {
 /// A config.json with one profile; the knobs the plan-signature tests vary.
 func planCfgJSON(engineMode: String, manualPath: String?, port: Int, key: String,
                  name: String, modelId: String?, modelDir: String?,
-                 options: [String: String], modelSource: String? = nil) -> Data {
-    var opts: [String: Any] = [:]
-    for (k, v) in options { opts[k] = v }
+                 options: [String: Any], modelSource: String? = nil) -> Data {
+    var opts = options
     var engine: [String: Any] = ["mode": engineMode]
     if let manualPath { engine["manual_path"] = manualPath }
     var model: [String: Any] = ["source": modelId == nil ? "none" : (modelSource ?? (modelDir == nil ? "hfid" : "lmstudio"))]
@@ -2262,10 +2261,12 @@ do {
     planKit(fs: &fs, path: "/guard-kit", version: "1.3.1")
     fs.dir("/local/owner/model", ["config.json", "draft/"])
     fs.file("/local/owner/model/draft/config.json")
-    func guardedPlan(_ source: String, _ dir: String?) -> LaunchConfig {
+    func guardedPlan(_ source: String, _ dir: String?, offline: Bool? = nil) -> LaunchConfig {
+        var opts: [String: Any] = ["draft_model": "owner/draft"]
+        if let offline { opts["offline"] = offline }
         let cfg = planCfgJSON(engineMode: "manual", manualPath: "/guard-kit", port: 8123,
             key: "test", name: "Local", modelId: "owner/model", modelDir: dir,
-            options: ["draft_model": "owner/draft"], modelSource: source)
+            options: opts, modelSource: source)
         return planLaunch(cfg, home: "/home", isDir: { fs.isDir($0) },
             isExecutable: { fs.isExecutable($0) }, kitVersion: { readKitVersion(fs: fs, kit: $0) },
             fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
@@ -2274,8 +2275,15 @@ do {
     check(refused.error?.contains("No installed local-folder-capable engine") == true && refused.executable == nil && refused.engineArgs.isEmpty,
           "local model + launcher: refused before a process can spawn")
     let cached = guardedPlan("hfid", "/local/owner/model")
-    check(cached.error == nil && cached.engineArgs.contains("--offline") && cached.engineEnv["HF_HUB_OFFLINE"] == "1", "HF cached model + launcher: launch permitted offline")
-    check(guardedPlan("hfid", nil).error?.contains("Download this model explicitly") == true, "uncached HF model: no silent download")
+    check(cached.error == nil && !cached.engineArgs.contains("--offline") && cached.engineEnv["HF_HUB_OFFLINE"] == nil,
+          "HF id with a local dir + launcher: online unless the profile sets offline")
+    let forcedOffline = guardedPlan("hfid", "/local/owner/model", offline: true)
+    check(forcedOffline.engineArgs.contains("--offline") && forcedOffline.engineEnv["HF_HUB_OFFLINE"] == "1",
+          "HF id + offline set: launch offline")
+    check(guardedPlan("hfid", nil).error == nil && !guardedPlan("hfid", nil).engineArgs.contains("--offline"),
+          "uncached HF model: the engine downloads it when offline is not set")
+    check(guardedPlan("hfid", nil, offline: true).error?.contains("Offline is on") == true,
+          "uncached HF model + offline set: explicit-download error, no silent download")
     planKit(fs: &fs, path: "/guard-kit", version: "1.3.0")
     check(guardedPlan("lmstudio", "/local/owner/model").error == nil, "local model + module: launch permitted")
 }
@@ -2295,7 +2303,7 @@ do {
     }
     let local = autoPlan("lmstudio"), hub = autoPlan("hfhub")
     check(local.version == "1.3.0" && local.engineArgs.prefix(3) == ["-u", "-m", "server.server"] && local.engineArgs.contains("/cached/model/tokenizer"), "AUTO local directory: newest local-capable module engine with tokenizer argv")
-    check(hub.version == "1.3.1" && hub.engineArgs.contains("--offline"), "AUTO cached HF model: highest Homebrew engine offline")
+    check(hub.version == "1.3.1" && !hub.engineArgs.contains("--offline") && hub.engineEnv["HF_HUB_OFFLINE"] == nil, "AUTO cached HF model: highest Homebrew engine, online unless offline is set")
     fs.dirs.remove(old)
     check(autoPlan("lmstudio").error?.contains("No installed local-folder-capable engine") == true, "AUTO local model without a local-capable engine: specific error, no download")
 }
@@ -2336,9 +2344,11 @@ do {
     var fs = FakeFS()
     planKit(fs: &fs, path: "/brew/1.3.2/libexec", version: "1.3.2")
     planKit(fs: &fs, path: home + "/SplashUI/kit/old", version: "1.3.0")
-    func plan() -> LaunchConfig {
+    func plan(offline: Bool? = nil) -> LaunchConfig {
+        var opts: [String: Any] = ["draft_model": "owner/draft"]
+        if let offline { opts["offline"] = offline }
         let data = planCfgJSON(engineMode: "auto", manualPath: nil, port: 8123, key: "test", name: "OptiQ Compact",
-            modelId: id, modelDir: "/lmstudio/local/model", options: ["draft_model": "owner/draft"], modelSource: "lmstudio")
+            modelId: id, modelDir: "/lmstudio/local/model", options: opts, modelSource: "lmstudio")
         return planLaunch(data, home: home,
             isDir: { path in var dir: ObjCBool = false; return fs.isDir(path) || (fm.fileExists(atPath: path, isDirectory: &dir) && dir.boolValue) },
             isExecutable: { fs.isExecutable($0) }, brewKeg: { "/brew/1.3.2" }, kitVersion: { readKitVersion(fs: fs, kit: $0) },
@@ -2362,6 +2372,8 @@ do {
           offline.engineArgs.prefix(5) == ["-u", "install/launcher.py", "serve", "--model", id] &&
           offline.engineArgs.contains("--offline") && offline.engineEnv["HF_HUB_OFFLINE"] == "1" && offline.engineEnv["HF_HUB_CACHE"] == flatRoot,
           "AUTO OptiQ nested vision: Homebrew 1.3.2 offline using isolated flat cache")
+    check(plan(offline: false).error == nil && !plan(offline: false).engineArgs.contains("--offline") && plan(offline: false).engineEnv["HF_HUB_OFFLINE"] == nil,
+          "AUTO OptiQ local-folder model with offline set false: the explicit false is honored")
     try! rewritten.data.write(to: URL(fileURLWithPath: snapshot + "/model.safetensors.index.json"))
     try! fm.createSymbolicLink(atPath: snapshot + "/vision-optiq.safetensors", withDestinationPath: snapshot + "/optiq/optiq_vision.safetensors")
     check(plan().modelDir == snapshot && plan().engineEnv["HF_HUB_CACHE"] == nil,
@@ -2387,7 +2399,7 @@ do {
     }
     func plan(_ supportsGGUF: Bool) -> LaunchConfig {
         let data = planCfgJSON(engineMode: "auto", manualPath: nil, port: 8123, key: "test", name: "3-Bit",
-            modelId: id, modelDir: nil, options: [:], modelSource: "hfhub")
+            modelId: id, modelDir: nil, options: ["offline": true], modelSource: "hfhub")
         return planLaunch(data, home: home,
             isDir: { path in var d: ObjCBool = false; return path == "/brew/libexec" || (fm.fileExists(atPath: path, isDirectory: &d) && d.boolValue) },
             isExecutable: { $0 == "/brew/libexec/engine/splash" || $0 == "/brew/libexec/python/bin/python" },
@@ -4054,6 +4066,24 @@ do {
           "panel size: the 370pt floor holds")
     check(panelTargetSize(view: "status", contentHeight: 5000, screenHeight: 1000).height == 880,
           "panel size: the screen cap (screenH - 120) holds")
+}
+
+// Coding-agent integration: what the Model Provider buttons put on the clipboard.
+do {
+    let oc = providerSnippet(target: .openCode, profileName: "Qwen", servedName: "served-x",
+                             host: "0.0.0.0", port: 8123, apiKey: "k")
+    let pi = providerSnippet(target: .pi, profileName: "Qwen", servedName: "served-x",
+                             host: "127.0.0.1", port: 9000, apiKey: "k")
+    check(oc.contains("\"baseURL\" : \"http://127.0.0.1:8123/v1\""),
+          "provider snippet: a 0.0.0.0 bind dials loopback in the OpenCode baseURL")
+    check(oc.contains("\"served-x\" : {"),
+          "provider snippet: OpenCode keys the models map by the served name")
+    check(pi.contains("\"baseUrl\" : \"http://127.0.0.1:9000/v1\""),
+          "provider snippet: Pi baseUrl follows the configured host and port")
+    check(pi.contains("\"id\" : \"served-x\""),
+          "provider snippet: Pi lists the served name as the model id")
+    check(loopbackHost("192.168.1.5") == "192.168.1.5",
+          "loopbackHost: a concrete LAN address is left alone")
 }
 
 print(failures == 0 ? "ALL TESTS PASSED" : "\(failures) TEST(S) FAILED")

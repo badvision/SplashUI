@@ -79,9 +79,11 @@ Startup failures remain stopped until an explicit Start/Restart; dismissing the
 error never retries. **Copy to Clipboard** copies the complete error through the
 native pasteboard bridge. AUTO first checks the selected repo id against the local
 Hub cache, regardless of its original library (including `local/name` models from
-LM Studio). A complete current snapshot uses the newest Homebrew engine offline;
-only uncached local-folder models need a local-folder-capable engine. Absent or
-incompatible cached files produce an explicit-download error, never a silent download.
+LM Studio). A complete current snapshot uses the newest Homebrew engine; the profile's
+`offline` option governs downloads. Unset, a model from a local folder runs offline and
+a Hugging Face id may download through the engine; set `offline` on or off to override.
+Offline with absent or incompatible cached files produces an explicit-download error,
+never a silent download; only local-folder models need a local-folder-capable engine.
 For indexed checkpoints with nested vision shards, SplashUI maintains a separate
 `~/Library/Application Support/SplashUI/hf-flat` cache: only its index is rewritten;
 all weights and metadata link to the originals. Vision tensors stay present. The
@@ -89,7 +91,7 @@ child uses `HF_HUB_CACHE` only when the original snapshot has unsupported nested
 shard names. Neither the real Hub cache nor the Homebrew engine is patched.
 Engines with the installed GGUF target adapter (1.3.2+) also accept cached GGUF
 targets offline, including their mmproj vision projector; these snapshots do not
-need MLX config/tokenizer files. SplashUI never downloads missing model data.
+need MLX config/tokenizer files. Downloads happen only when the profile's offline option is off.
 
 `./install.sh` still reads a couple of its own vars for the one-shot install (it predates the
 panel and is unaffected). `start.sh` no longer exports any of them — it launches its own engine

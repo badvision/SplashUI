@@ -1684,6 +1684,9 @@ public func planLaunch(_ data: Data,
     let source = g.modelFolders.first(where: { $0.id == profile.model.source && $0.source != "auto" })?.source ?? profile.model.source
     let parts = (profile.model.id ?? "").split(separator: "/", omittingEmptySubsequences: false)
     let localModel = hubSnapshot == nil && (!["hfid", "hfhub", "hf"].contains(source) || parts.count != 2 || parts.contains(where: { $0.isEmpty }))
+    // Offline is a launch option. Unset means offline only for a model specified from a
+    // local folder; a Hugging Face id downloads (one-time) unless the profile sets offline.
+    let offlineLaunch = profile.options["offline"]?.bool ?? !["hfid", "hfhub", "hf", "none"].contains(source)
     var engine = g.engine
     if localModel && (engine.mode == "auto" || contractFor(engine.manualPath.flatMap(kitVersion), registry: launchRegistry).contract.flavor == .launcher) {
         var candidates: [String] = []
@@ -1750,10 +1753,12 @@ public func planLaunch(_ data: Data,
                 error: "Engine \(kr.version ?? contract.version) does not support GGUF targets. Choose an installed engine whose upstream adapter supports GGUF (1.3.2 or later).",
                 profileId: profile.id, profileName: profile.name)
         }
-        guard let dir, isDir(dir), fileContents(dir + "/config.json") != nil || (supportsGGUF && ggufFiles.count == 1) else {
-            return LaunchConfig(modelId: mid, version: kr.version, tried: kr.tried,
-                error: "Installed model files for \(mid) are missing a compatible MLX or GGUF snapshot. Download this model explicitly before starting; SplashUI will not download it automatically.",
-                profileId: profile.id, profileName: profile.name)
+        if offlineLaunch {
+            guard let dir, isDir(dir), fileContents(dir + "/config.json") != nil || (supportsGGUF && ggufFiles.count == 1) else {
+                return LaunchConfig(modelId: mid, version: kr.version, tried: kr.tried,
+                    error: "Installed model files for \(mid) are missing a compatible MLX or GGUF snapshot. Offline is on, so nothing downloads them: download this model explicitly or turn off the profile's offline option.",
+                    profileId: profile.id, profileName: profile.name)
+            }
         }
     }
     let files = modelDirFiles(dir, isDir: isDir, fileContents: fileContents)
@@ -1776,9 +1781,9 @@ public func planLaunch(_ data: Data,
     var launchModel = model
     launchModel.dir = dir
     var options = profile.options
-    if contract.flavor == .launcher { options["offline"] = .bool(true) }
+    if contract.flavor == .launcher { options["offline"] = .bool(offlineLaunch) }
     var built = buildArgv(contract, profileValues: options, model: launchModel, globals: g)
-    if contract.flavor == .launcher { built.env["HF_HUB_OFFLINE"] = "1" }
+    if contract.flavor == .launcher, offlineLaunch { built.env["HF_HUB_OFFLINE"] = "1" }
     if contract.flavor == .launcher, let hubSnapshot, hubSnapshot.hasPrefix(flatRoot + "/") {
         built.env["HF_HUB_CACHE"] = flatRoot
     }
@@ -3433,4 +3438,64 @@ public final class ConfigStore {
         }
         return true
     }
+}
+
+// MARK: Coding-agent integration (Model Provider buttons, Web UI OPEN)
+
+/// The external coding agent a provider snippet targets.
+public enum ProviderTarget: String {
+    case openCode = "opencode"
+    case pi
+}
+
+/// The host a local client dials. A 0.0.0.0 or :: bind listens on every
+/// interface, so loopback is the address this machine can always reach.
+public func loopbackHost(_ host: String) -> String {
+    host == "0.0.0.0" || host == "::" ? "127.0.0.1" : host
+}
+
+/// The id a coding agent must send: the profile's served_model_name override
+/// when it is set and non-blank, else the model id. nil when the profile has
+/// no model (such a profile cannot serve).
+public func servedModelName(for profile: Profile) -> String? {
+    var override: String? = nil
+    switch profile.options["served_model_name"] {
+    case .string(let s)?: override = s
+    case .array(let items)?:
+        if case .string(let s)? = items.first { override = s }
+    default: break
+    }
+    if let o = override?.trimmingCharacters(in: .whitespaces), !o.isEmpty { return o }
+    return profile.model.id
+}
+
+/// Config block for OpenCode (@ai-sdk/openai-compatible) or Pi (models.json).
+public func providerSnippet(target: ProviderTarget, profileName: String, servedName: String,
+                            host: String, port: Int, apiKey: String) -> String {
+    let base = "http://\(loopbackHost(host)):\(port)/v1"
+    let obj: [String: Any]
+    switch target {
+    case .openCode:
+        obj = [
+            "$schema": "https://opencode.ai/config.json",
+            "provider": ["splash": [
+                "npm": "@ai-sdk/openai-compatible",
+                "name": profileName,
+                "options": ["baseURL": base, "apiKey": apiKey],
+                "models": [servedName: ["name": profileName]],
+            ] as [String: Any]],
+        ]
+    case .pi:
+        obj = [
+            "providers": ["splash": [
+                "baseUrl": base,
+                "api": "openai-completions",
+                "apiKey": apiKey,
+                "models": [["id": servedName]],
+            ] as [String: Any]],
+        ]
+    }
+    let data = (try? JSONSerialization.data(withJSONObject: obj,
+        options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])) ?? Data()
+    return String(decoding: data, as: UTF8.self)
 }

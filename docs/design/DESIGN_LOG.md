@@ -437,3 +437,11 @@ Source of truth for every design delta. Newest last. Mock: /tmp/mock/settings_pa
   config.json nor tokenizer JSON; the engine derives those from its header. Keep
   --offline and HF_HUB_OFFLINE=1, do not append an unnecessary variant, and refuse
   older engines with an accurate capability error rather than blaming the cache.
+
+- v67 (user ruling, 2026-10-18): the launcher's `offline` option is honored. It
+  is no longer forced on. When unset, offline is assumed only for a model specified
+  from a local folder (profile source is not hfid/hfhub/hf/none); a Hugging Face
+  id downloads through the engine unless offline is set. `HF_HUB_OFFLINE=1` follows
+  the effective value. With offline on, a missing or incomplete snapshot is refused
+  with an explicit-download error; with it off, the launch is not pre-refused.
+  Supersedes the forced-offline clauses of v61 and v63.

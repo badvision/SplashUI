@@ -528,6 +528,40 @@ try {
     assert.equal(w.getComputedStyle(row.querySelector('.option-choices')).flexWrap, 'wrap');
     assert.ok(row.querySelector('[data-option-reset]').hidden);
   });
+  check('a focused option input keeps its typed value through telemetry ticks and commits on change', () => {
+    const q = panel();
+    try {
+      const { w, $, tick, flushTimers } = q;
+      w.showView('settings');
+      const input = $('option-draft_model');
+      input.focus();
+      input.value = 'org/draft';
+      tick();
+      tick();
+      assert.equal($('option-draft_model'), input, 'a tick must not rebuild the focused row');
+      assert.equal(w.document.activeElement, input);
+      assert.equal(input.value, 'org/draft');
+      input.dispatchEvent(new w.Event('change'));
+      flushTimers();
+      assert.equal(q.doc().profiles[0].options.draft_model, 'org/draft');
+    } finally { q.close(); }
+  });
+  check('option hover help stays hidden while its input has focus', () => {
+    const q = panel();
+    try {
+      const { w, $, flushTimers } = q;
+      w.showView('settings');
+      const input = $('option-draft_model');
+      const hover = () => input.dispatchEvent(new w.MouseEvent('mousemove', { bubbles: true }));
+      hover();
+      flushTimers();
+      assert.equal(w.document.getElementById('tip').style.display, 'block', 'control: unfocused hover shows help');
+      input.focus();
+      hover();
+      flushTimers();
+      assert.notEqual(w.document.getElementById('tip').style.display, 'block', 'focused input must not show help');
+    } finally { q.close(); }
+  });
   check('ANE is per-profile: the selected profile owns its compute option', () => {
     const draft = w.__test.draft();
     assert.equal(draft.profiles[1].options.ane, false);   // p2 selected, p1 keeps its own value

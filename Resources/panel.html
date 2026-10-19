@@ -248,6 +248,11 @@ section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 
 #profilePreviewBox .pp-args { font-family: var(--mono); font-size: 10px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--white); line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; }
 #profilePreviewBox .pp-args.err { color: var(--peach); }
 #profilePreviewBox .pp-restart { color: var(--peach); font-family: var(--mono); font-size: 12px; font-weight: 400; }
+.mprov { margin-top: 6px; background: var(--bg2); border: 1px solid var(--track); border-radius: 8px; padding: 6px 8px; }
+.mprov .pp-h { display: flex; justify-content: space-between; align-items: center; color: var(--teal); font-family: var(--display); font-size: 13px; letter-spacing: .1em; border-bottom: 2px solid var(--track); padding-bottom: 4px; margin-bottom: 6px; }
+.mprov-btns { display: flex; gap: 8px; }
+.mprov-pill { background: var(--green); color: #000; border: 0; border-radius: 999px; padding: 4px 16px; font-family: var(--display); font-size: 12px; letter-spacing: .08em; cursor: pointer; }
+.mprov-pill:disabled { opacity: .4; cursor: default; }
 #profileRestartPrompt { margin: 4px 0 0; padding: 0; font-size: 10px; line-height: 1.2; display: flex; align-items: center; gap: 8px; }
 #profileRestartText { flex: 1; min-width: 0; }
 #profileRestartPrompt .mini { flex-shrink: 0; min-height: 24px; padding: 4px 8px 2px; font-size: 11px; }
@@ -493,7 +498,7 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
         <div class="frow" data-tip="The API key rides the engine's environment, never its argv. Masked at rest; the eye reveals it while held open — it re-masks on blur, on modal close, and on the next tick."><label for="cfgKey">API key</label><input type="text" class="mono" id="cfgKey" readonly placeholder="· · · · · · · ·" spellcheck="false"><button class="mini" id="btnKeyEye" aria-pressed="false" data-tip="Reveal / hide the API key">◉</button></div>
         <div class="frow" data-tip="Extra Host names the engine accepts (--allowed-host, repeatable; comma-separated). The bind host is always accepted."><label for="cfgAllowedHost">Allowed-host</label><input type="text" class="mono" id="cfgAllowedHost" placeholder="engine host, extra hosts…" spellcheck="false"></div>
         <div class="frow" data-tip="Origins whose pages may call the API from a browser or webview (--allowed-origin, repeatable; comma-separated)."><label for="cfgAllowedOrigin">Allowed-origin</label><input type="text" class="mono" id="cfgAllowedOrigin" placeholder="http://host, tauri://localhost…" spellcheck="false"></div>
-        <div class="frow" data-tip="The engine's built-in chat page. ON = the engine default; OFF passes --no-webui."><span class="label" style="margin:0;min-width:84px">Web UI</span><div class="capbtns"><button class="cb on" id="webUiOn">On</button><button class="cb" id="webUiOff">Off</button></div></div>
+        <div class="frow" data-tip="The engine's built-in chat page. ON = the engine default; OFF passes --no-webui."><span class="label" style="margin:0;min-width:84px">Web UI</span><div class="capbtns"><button class="cb on" id="webUiOn">On</button><button class="cb" id="webUiOff">Off</button></div><button class="mini" id="webUiOpen" hidden data-tip="Open the engine's web UI in your default browser (the engine must be running)">OPEN</button></div>
       </div>
     </div>
   </div>
@@ -531,6 +536,12 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
         <div id="profilePreviewBox" hidden>
           <div class="pp-h"><span>Launch preview</span><span class="pp-restart" id="profilePreviewRestart" hidden>· Restart</span></div>
           <div class="pp-args" id="profilePreviewArgs"></div>
+        </div>
+        <div id="modelProviderBox" class="mprov" hidden>
+          <div class="pp-h"><span>Model provider</span><span class="mprov-btns">
+            <button class="mprov-pill" id="btnProviderOpenCode" data-tip="Copy an OpenCode provider block for this profile: engine URL, served model name, API key.">OpenCode</button>
+            <button class="mprov-pill" id="btnProviderPi" data-tip="Copy a Pi models.json provider block for this profile: engine URL, served model name, API key.">Pi</button>
+          </span></div>
         </div>
         <div id="profileRestartPrompt" hidden><span id="profileRestartText"></span><button class="mini" id="btnProfileRestart">Confirm restart</button></div>
       </div>
@@ -649,6 +660,11 @@ function placeTip(el) {
   tip.style.top = (r.top - tip.offsetHeight < 4 ? r.bottom + 6 : r.top - tip.offsetHeight - 6) + "px";
 }
 function hideTip() { if (tipTimer) { clearTimeout(tipTimer); tipTimer = null; } tipEl = null; tip.style.display = "none"; }
+// Help never competes with typing: no hover tip while an input in the element has focus.
+function focusedInputIn(el) {
+  const a = document.activeElement;
+  return !!a && el.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName);
+}
 document.addEventListener("mousemove", e => {
   const el = e.target && e.target.closest ? e.target.closest("[data-tip]") : null;
   if (el === tipEl) { if (tip.style.display === "block") placeTip(el); return; }
@@ -658,13 +674,14 @@ document.addEventListener("mousemove", e => {
   if (tip.style.display === "block") tip.style.display = "none";
   tipTimer = setTimeout(() => {
     tipTimer = null;
-    if (tipEl !== el || !el.isConnected) return;
+    if (tipEl !== el || !el.isConnected || focusedInputIn(el)) return;
     tip.textContent = el.getAttribute("data-tip");
     tip.style.display = "block";
     placeTip(el);
   }, 500);
 });
 document.addEventListener("mouseleave", hideTip);
+document.addEventListener("focusin", hideTip);
 
 function render(){
   if(!S) return;
@@ -774,6 +791,7 @@ function render(){
   // footer (shared by both views)
   $("pidNum").textContent = S.server && S.server.pid ? S.server.pid : "—";
   $("envPill").textContent = S.server && S.server.pid ? (S.server.launched_by_app ? "APP-MANAGED" : "EXTERNAL") : "NOT RUNNING";
+  $("webUiOpen").hidden = !(S.server && S.server.pid && CF.draft && CF.draft.webUI);
   // Saved plan changes draw attention without reserving another footer row.
   const rr = S.cfg && S.cfg.restart_required === true;
   $("btnRestart").classList.toggle("restart-pending", rr);
@@ -1071,6 +1089,14 @@ $("cfgAllowedHost").onchange = () => { if (!CF.draft) return; CF.draft.allowedHo
 $("cfgAllowedOrigin").onchange = () => { if (!CF.draft) return; CF.draft.allowedOrigins = $("cfgAllowedOrigin").value.split(",").map(s => s.trim()).filter(Boolean); cfDebouncedValidate(); };
 $("webUiOn").onclick = () => { if (!CF.draft) return; CF.draft.webUI = true; cfSyncForm(); cfDebouncedValidate(); };
 $("webUiOff").onclick = () => { if (!CF.draft) return; CF.draft.webUI = false; cfSyncForm(); cfDebouncedValidate(); };
+$("webUiOpen").onclick = () => window.webkit.messageHandlers.cmd.postMessage({cmd: "webui.open"});
+$("btnProviderOpenCode").onclick = () => cfCopyProvider("opencode");
+$("btnProviderPi").onclick = () => cfCopyProvider("pi");
+function cfCopyProvider(target) {
+  const p = cfSelectedProfile();
+  if (!p) return;
+  window.webkit.messageHandlers.cmd.postMessage({cmd: "provider.copy", target, profileId: p.id});
+}
 $("btnKeyEye").onclick = () => {
   if (CF.keyRevealed) { cfKeyRemask(true); return; }
   CF.keyRevealed = true;
@@ -1202,6 +1228,8 @@ function cfRenderProfiles() {
   const cfgP = (S.cfg.profiles || []).find(v => v.id === p.id);
   const pv = cfgP && cfgP.preview && typeof cfgP.preview === "object" ? cfgP.preview : null;
   $("profilePreviewBox").hidden = !pv;
+  $("modelProviderBox").hidden = !p;
+  $("btnProviderOpenCode").disabled = $("btnProviderPi").disabled = !(p.model && p.model.id);
   if (pv) {
     const args = Array.isArray(pv.args) ? pv.args : [];
     const el = $("profilePreviewArgs");
@@ -1229,8 +1257,7 @@ function cfRenderProfiles() {
   }
   // The model-axis options (draft override etc.) render under the model pill.
   const axis = defs.filter(o => o.group === "model-axis");
-  $("profileModelAxis").innerHTML = axis.map(o => cfOptionRowHtml(o, p)).join("");
-  axis.forEach(o => { const input = $("option-" + o.key); if (input) cfSyncOption(o, p, input, defs); });
+  cfPaintOptionRows("profileModelAxis", axis, p, defs);
   cfRenderOptions(p);
   // Stale keys (kept for downgrade safety) show once, in the active tab slot.
   const staleKeys = Object.keys(p.options || {}).filter(k => !defs.some(o => o.key === k)).sort();
@@ -1267,12 +1294,18 @@ function cfSyncOption(o, p, input, defs) {
   input.onchange = () => cfOptionChanged(o.key, input.value);
 }
 
+// Rebuild a row group only when its definitions change; a tick only re-syncs values,
+// so a focused input keeps its typed text and its change event still fires on blur.
+function cfPaintOptionRows(id, items, p, defs) {
+  const el = $(id), key = JSON.stringify(items);
+  if (el.dataset.optKey !== key) { el.dataset.optKey = key; el.innerHTML = items.map(o => cfOptionRowHtml(o, p)).join(""); }
+  items.forEach(o => { const input = $("option-" + o.key); if (input) cfSyncOption(o, p, input, defs); });
+}
 function cfRenderOptions(p) {
   if (!p) return;
   const defs = cfOptionDefs(), esc = cfEscape;
   const compute = defs.filter(o => o.group === "compute");
-  $("profileComputeOptions").innerHTML = compute.map(o => cfOptionRowHtml(o, p)).join("");
-  compute.forEach(o => cfSyncOption(o, p, $("option-" + o.key), defs));
+  cfPaintOptionRows("profileComputeOptions", compute, p, defs);
   for (const t of PTABS) {
     const panel = $("ptab" + t[0].toUpperCase() + t.slice(1) + "Panel");
     if (!panel) continue;

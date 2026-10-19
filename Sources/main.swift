@@ -652,6 +652,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(text, forType: .string)
             }
+        case "provider.copy":
+            // Model Provider buttons: the snippet is built from the saved config,
+            // so the key never passes through the panel's JS.
+            guard let raw = body["target"] as? String, let target = ProviderTarget(rawValue: raw),
+                  let id = body["profileId"] as? String,
+                  let p = configStore.doc.profiles.first(where: { $0.id == id }),
+                  let served = servedModelName(for: p) else { return }
+            let g = configStore.doc.globals
+            let text = providerSnippet(target: target, profileName: p.name, servedName: served,
+                                       host: g.host, port: g.port, apiKey: g.apiKey)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        case "webui.open":
+            let g = configStore.doc.globals
+            guard g.webUI, let url = URL(string: "http://\(loopbackHost(g.host)):\(g.port)/") else { return }
+            NSWorkspace.shared.open(url)
         case "error.dismiss": errorModalOpen = false
         case "start": presentedLaunchError = nil; server.clearLaunchError(); server.launch()
         case "stop":
