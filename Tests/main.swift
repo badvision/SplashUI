@@ -4086,5 +4086,19 @@ do {
           "loopbackHost: a concrete LAN address is left alone")
 }
 
+// Offline's effective value: unset follows the model's source; an explicit value wins.
+do {
+    let local = Profile(id: "a", name: "a", model: ProfileModel(source: "lmstudio", id: "x/y"))
+    let hf = Profile(id: "b", name: "b", model: ProfileModel(source: "hfid", id: "x/y"))
+    let forcedOn = Profile(id: "c", name: "c", model: ProfileModel(source: "hfid", id: "x/y"),
+                           options: ["offline": .bool(true)])
+    check(offlineEffective(local, folders: []) == true,
+          "offline unset + local-folder model: effective ON")
+    check(offlineEffective(hf, folders: []) == false,
+          "offline unset + Hugging Face id: effective OFF (it downloads)")
+    check(offlineEffective(forcedOn, folders: []) == true,
+          "offline set explicitly: the explicit value wins over the source default")
+}
+
 print(failures == 0 ? "ALL TESTS PASSED" : "\(failures) TEST(S) FAILED")
 exit(failures == 0 ? 0 : 1)

@@ -1611,6 +1611,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             // the same pipeline over their own options (pure, no process).
             let pid = profile["id"] as? String
             if let p = doc.profiles.first(where: { $0.id == pid }) {
+                merged["offline_effective"] = offlineEffective(p, folders: doc.globals.modelFolders)
                 if p.id == plan.profileId, plan.error == nil, plan.executable != nil {
                     merged["preview"] = ["args": plan.engineArgs as [Any], "error": NSNull() as Any,
                                           "restart": plan.restartRequired,

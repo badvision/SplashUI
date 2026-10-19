@@ -1686,7 +1686,7 @@ public func planLaunch(_ data: Data,
     let localModel = hubSnapshot == nil && (!["hfid", "hfhub", "hf"].contains(source) || parts.count != 2 || parts.contains(where: { $0.isEmpty }))
     // Offline is a launch option. Unset means offline only for a model specified from a
     // local folder; a Hugging Face id downloads (one-time) unless the profile sets offline.
-    let offlineLaunch = profile.options["offline"]?.bool ?? !["hfid", "hfhub", "hf", "none"].contains(source)
+    let offlineLaunch = offlineEffective(profile, folders: g.modelFolders)
     var engine = g.engine
     if localModel && (engine.mode == "auto" || contractFor(engine.manualPath.flatMap(kitVersion), registry: launchRegistry).contract.flavor == .launcher) {
         var candidates: [String] = []
@@ -3498,4 +3498,12 @@ public func providerSnippet(target: ProviderTarget, profileName: String, servedN
     let data = (try? JSONSerialization.data(withJSONObject: obj,
         options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])) ?? Data()
     return String(decoding: data, as: UTF8.self)
+}
+
+/// The effective offline value. Unset means offline only for a model from a local
+/// folder; a Hugging Face id downloads (one-time) unless the profile sets offline.
+/// The launch planner and the panel's shown value both call this, so they agree.
+public func offlineEffective(_ profile: Profile, folders: [ModelFolder]) -> Bool {
+    let source = folders.first(where: { $0.id == profile.model.source && $0.source != "auto" })?.source ?? profile.model.source
+    return profile.options["offline"]?.bool ?? !["hfid", "hfhub", "hf", "none"].contains(source)
 }

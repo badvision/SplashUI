@@ -1271,16 +1271,26 @@ function cfRenderProfiles() {
   }
 }
 
+// The value an UNSET option displays. Offline shows the engine's effective value
+// (what the launch will do: local-folder model = ON, Hugging Face id = OFF); the
+// reset control stays hidden until the option is explicitly set.
+function cfOptionFallback(o, p) {
+  if (o.key === "offline") {
+    const cp = S && S.cfg && (S.cfg.profiles || []).find(v => v.id === p.id);
+    if (cp && typeof cp.offline_effective === "boolean") return cp.offline_effective;
+  }
+  return o.default;
+}
 function cfOptionRowHtml(o, p) {
   const esc = cfEscape;
-  const value = p.options[o.key] ?? o.default ?? "";
+  const value = p.options[o.key] ?? cfOptionFallback(o, p) ?? "";
   const choices = o.kind === "bool" ? ["true", "false"] : o.choices || [];
   const missing = (o.requires || []).filter(k => { const v = p.options[k] ?? cfOptionDefs().find(d => d.key === k)?.default; return v == null || v === false || v === "false" || v === "0" || v === "" || (Array.isArray(v) && !v.length); });
   return '<div class="frow option-row" data-option-row="' + esc(o.key) + '" data-req="' + esc(missing.join(",")) + '"><label for="option-' + esc(o.key) + '" data-tip="' + esc(missing.length ? "Requires " + missing.join(", ") + " — set it first" : o.flag) + '">' + esc(o.flag) + '</label><input id="option-' + esc(o.key) + '" data-option="' + esc(o.key) + '" type="' + (choices.length ? 'hidden' : 'text') + '" placeholder="' + esc(o.default ?? "engine default") + '">' + (choices.length ? '<span class="option-choices">' + choices.map(v => '<button class="mini" data-option-choice="' + esc(o.key) + '" data-value="' + esc(v) + '">' + esc(o.kind === "bool" ? (v === "true" ? "ON" : "OFF") : v) + '</button>').join('') + '</span>' : '') + '<button class="mini" data-option-reset="' + esc(o.key) + '" data-tip="Use engine default">Reset</button></div>';
 }
 // The per-row sync shared by the tab panels and the GENERAL model-axis rows.
 function cfSyncOption(o, p, input, defs) {
-  const value = p.options[o.key] ?? o.default ?? "";
+  const value = p.options[o.key] ?? cfOptionFallback(o, p) ?? "";
   const missing = (o.requires || []).filter(k => { const v = p.options[k] ?? defs.find(d => d.key === k)?.default; return v == null || v === false || v === "false" || v === "0" || v === "" || (Array.isArray(v) && !v.length); });
   const row = input.closest('[data-option-row]');
   const invalid = (cfgValidateResult?.errors || []).find(e => e.includes("profile " + p.id + " option " + o.key + ":"));
