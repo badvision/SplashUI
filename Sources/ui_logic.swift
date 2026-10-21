@@ -739,11 +739,48 @@ public let contract132 = VersionContract(
         FamilyRule(configKey: "model_type", value: "qwen3_5", family: "Qwen3.8-27B"),
     ])
 
+/// The 1.3.2 shared set as it appears in 1.4.0 (the real 1.4.0 keg's
+/// serve_options.py, diffed against the 1.3.2 tag): 1.3.2 + the 4 new flags — the 3 memory budgets
+/// (--ple-memory after --max-context, --expert-memory and --sparse-kv-memory
+/// beside each other, all default auto) and --verify-rows beside the other
+/// request-tuning flags (default auto). Every 1.3.2 flag, group, default and
+/// env/secret attribute is unchanged, so the 1.3.2 cross-checks
+/// (announce-served-name, persistent-cache, max-cache-disk-writes, cache-dir)
+/// still hold verbatim.
+private let sharedOptions140: [OptionDef] = sharedOptions132 + [
+    OptionDef(flag: "--ple-memory", key: "ple_memory", kind: .value, group: "memory", defValue: "auto"),
+    OptionDef(flag: "--expert-memory", key: "expert_memory", kind: .value, group: "memory", defValue: "auto"),
+    OptionDef(flag: "--sparse-kv-memory", key: "sparse_kv_memory", kind: .value, group: "memory", defValue: "auto"),
+    OptionDef(flag: "--verify-rows", key: "verify_rows", kind: .value, group: "requests",
+              defValue: "auto", choices: ["auto", "all"]),
+]
+
+/// The 1.4.0 contract: 1.3.2 + the 4 new flags + the Qwen3.8-Flash-Next family.
+/// The 1.4.0 tag's families.py adds the Flash-Next family (its DFlash2 draft
+/// incoai/Qwen3.8-Flash-Next-DFlash2); the target model's config.json says
+/// model_type "qwen4_exp" (verified against Qwen/Qwen3.8-Flash-Next and the
+/// mlx-community 4bit quant on the Hub), so the rule maps it — the repo name
+/// alone would be ambiguous. The engine detects the family itself at load;
+/// the rule only pre-resolves the draft for the offline-cache check.
+public let contract140 = VersionContract(
+    version: "1.4.0", flavor: .launcher,
+    options: sharedOptions140 + launcherModelOptions,
+    familyRegistry: [
+        "Qwen3.8-27B": "incoai/Qwen3.8-27B-DFlash2",
+        "Qwen3.6-35B-A3B": "incoai/Qwen3.6-35B-A3B-DFlash2",
+        "Qwen3.8-Flash-Next": "incoai/Qwen3.8-Flash-Next-DFlash2",
+    ],
+    familyRules: [
+        FamilyRule(configKey: "model_type", value: "qwen3_5", family: "Qwen3.8-27B"),
+        FamilyRule(configKey: "model_type", value: "qwen4_exp", family: "Qwen3.8-Flash-Next"),
+    ])
+
 /// The default registry: every authored version.
 public let launchRegistry = LaunchRegistry(contracts: [
     "1.3.0": contract130,
     "1.3.1": contract131,
     "1.3.2": contract132,
+    "1.4.0": contract140,
 ])
 
 /// D16: the contract for a kit's release.json version. An exact hit when the
