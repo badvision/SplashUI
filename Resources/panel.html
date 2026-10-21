@@ -10,8 +10,10 @@
   --teal: #88ccff; --teal-dim: #33518a;
   --lavender: #cc88ff; --peach: #ffcc99;
   --gray: #ccaa88; --gray-dim: #666688;
-  --white: #ffebde; --red: #dd4444; --yellow: #ffcc33; --green: #33cc99;
+  --white: #ffebde; --red: #dd4444; --yellow: #ffcc33; --green: #33cc99; --blue: #4455ff;
+  --green-deep: color-mix(in srgb, var(--green) 80%, var(--bg));
   --display: "DIN Condensed", "Avenir Next Condensed", "Arial Narrow", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -22,6 +24,11 @@ body {
   width: 100%; padding: 10px; text-transform: uppercase; overflow-x: hidden;
   -webkit-user-select: none; user-select: none;
 }
+body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+.screen { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+[hidden] { display: none !important; }
+#footer { flex-shrink: 0; }
+#btnSettings:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
 /* Flat instrument fields, separated by the LCARS rail rather than cards. */
 .row { display: flex; gap: 8px; margin-bottom: 4px; align-items: stretch; }
 .col { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -36,11 +43,7 @@ body {
 .o { background: var(--orange); color: var(--bg); } .t { background: var(--teal); color: var(--bg); }
 .g { background: var(--lavender); color: var(--bg); } .r { background: var(--red); color: var(--bg); }
 .y { background: var(--yellow); color: var(--bg); } .gr { background: var(--green); color: var(--bg); }
-/* Upper elbow joins the orange masthead to the segmented port-side rail. */
-#header { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 100px; grid-template-rows: 28px 28px; gap: 6px; padding-left: 64px; margin-bottom: 8px; height: 62px; }
-#header::before { content: ""; position: absolute; top: 0; left: 0; width: 64px; height: 62px; border-left: 42px solid #4455ff; border-top: 28px solid #4455ff; border-top-left-radius: 58px 48px; pointer-events: none; }
-#header .title { grid-column: 1 / -1; background: #4455ff; color: var(--bg); display: flex; align-items: center; padding: 5px 14px 0; font-family: var(--display); font-size: 25px; font-weight: 700; letter-spacing: .12em; line-height: 1; border-radius: 0 14px 14px 0; }
-#header .model { background: var(--peach); color: var(--bg); display: flex; align-items: center; padding: 2px 8px 0; font-size: 11px; line-height: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+/* One masthead joins the shared chrome to the segmented port-side rail. */
 #statusPill { border-radius: 0 14px 14px 0; display: flex; justify-content: center; align-items: center; padding: 3px 6px 0; line-height: 1; white-space: pre-line; text-align: center; }
 section { --accent: var(--lavender); position: relative; padding: 0 0 8px 64px; margin-bottom: 6px; }
 section::before { content: attr(data-channel); position: absolute; left: 0; top: 0; bottom: 0; width: 42px; background: var(--accent); color: var(--bg); display: flex; align-items: flex-end; justify-content: flex-end; padding: 8px 6px; font-family: var(--display); font-size: 23px; font-weight: 700; }
@@ -50,10 +53,287 @@ section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 
 .cache-panel { --accent: var(--teal); }
 .memory-panel { --accent: var(--peach); }
 .requests-panel { --accent: var(--lavender); }
+/* S7 settings: channel 06 keeps its lilac rail; channel 07 is green (approved). */
+.settings-global { --accent: var(--lavender); }
+.settings-profiles { --accent: var(--green); }
+.mono { font-family: var(--mono); font-size: 11px; font-weight: 400; letter-spacing: 0; text-transform: none; }
+.capbtns { display: flex; }
+.capbtns .cb { min-height: 22px; padding: 4px 16px 1px; font-size: 13px; background: var(--track); color: var(--gray); }
+.capbtns .cb.on { background: var(--accent); color: var(--bg); }
+.capbtns .cb:first-child { border-radius: 14px 0 0 14px; }
+.capbtns .cb:last-child { border-radius: 0 14px 14px 0; }
+/* Base row idioms (shared shape; the fidelity pass below rescales the settings scope). */
+.s7-cols { display: flex; gap: 6px; align-items: stretch; }
+.s7-col { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.s7-nav { flex-shrink: 0; }
+.profrow { position: relative; width: 100%; text-align: left; background: var(--track); color: var(--white); line-height: 1.1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.profrow .profdot { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 7px; height: 7px; border-radius: 7px; background: var(--white); opacity: 0; }
+.profrow .profdot.on { opacity: 1; }
+.profrow .profdot + .profdot { display: none; }
+.frow { display: flex; gap: 6px; margin-bottom: 4px; align-items: stretch; }
+.frow .fname { background: var(--accent); color: var(--bg); display: flex; align-items: center; font-weight: 700; min-width: 78px; max-width: 120px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.frow .fstat { color: var(--green); } .frow .fstat.miss { color: var(--red); } .frow .fstat.scan { color: var(--yellow); }
+.frow .fmeta { flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: 8px; color: var(--gray); overflow: hidden; white-space: nowrap; }
+.frow .fpath { flex: 1; min-width: 0; font-family: var(--mono); font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--gray); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tried { color: var(--gray-dim); line-height: 1.5; margin: 2px 0 0 6px; text-transform: none; letter-spacing: 0; font-family: var(--mono); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.engpath { margin: 0; flex: 1; min-width: 0; font-family: var(--mono); font-weight: 400; letter-spacing: 0; text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.warn-cap { border-radius: 14px; padding: 2px 8px; display: inline-flex; align-items: center; white-space: nowrap; }
+.verdict-cap { border-radius: 14px; padding: 2px 8px; background: var(--track); color: var(--gray); white-space: nowrap; }
+.verdict-cap.valid { background: var(--green); color: var(--bg); }
+.verdict-cap.fallback { background: var(--peach); color: var(--bg); }
+.verdict-cap.unrunnable { background: var(--red); color: var(--bg); }
+.profile-cap { background: var(--peach); color: var(--bg); border-radius: 14px; padding: 2px 8px; }
+.profile-cap.runnable { background: var(--teal); color: var(--bg); }
+.profile-cap.unrunnable { background: var(--peach); }
+.profile-cap.blocked { background: var(--peach); }
+.profile-cap.unknown { background: var(--track); color: var(--gray); }
+.modelpill { display: flex; width: 100%; background: var(--track); border-radius: 14px; overflow: hidden; }
+.modelpill .mp-l { padding: 4px 10px 1px; }
+.modelpill .mp-name { flex: 1; min-width: 0; padding: 3px 8px 2px; font-family: var(--mono); font-weight: 400; letter-spacing: 0; text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.modelpill .mp-act { padding: 4px 12px 1px; }
+.profile-chip { color: var(--teal); overflow-wrap: anywhere; }
+.profile-meta { color: var(--gray); line-height: 1.5; overflow-wrap: anywhere; }
+#profileDrafter { margin: 6px 0; }
+#profilePreviewBox .pp-args { font-family: var(--mono); font-weight: 400; letter-spacing: 0; text-transform: none; }
+#profilePreviewBox .pp-restart { color: var(--peach); font-family: var(--mono); font-weight: 400; letter-spacing: 0; }
+.stale-group { margin: 8px 0; }
+.stale-bar { display: flex; justify-content: space-between; align-items: center; width: 100%; background: var(--track); color: var(--gray-dim); border-radius: 0 14px 14px 0; padding: 4px 10px; text-align: left; font-family: var(--display); letter-spacing: .1em; cursor: pointer; border: none; }
+.stale-bar[aria-expanded="true"] { background: var(--accent); color: var(--bg); }
+.stale-body { display: none; padding: 4px 0; }
+.stale-group.open .stale-body { display: block; }
+.stale-row { display: flex; align-items: center; gap: 8px; margin: 6px 0 6px 3px; color: var(--gray-dim); }
+.stale-row label { flex: 1; }
+.stale-row input { width: 140px; }
+.stale-bar, .stale-row, .profile-chip, .profile-meta, .frow .fname, .frow .fmeta, .frow .fpath, .tried, .engpath, .warn-cap, .verdict-cap, .profile-cap { font-size: 11px; }
+#profilePreviewBox .pp-args, #profilePreviewBox .pp-restart { font-size: 11px; }
+#profilePreviewBox .pp-args { line-height: 1.5; color: var(--white); white-space: pre-wrap; }
+#profilePreviewBox .pp-args.err { color: var(--peach); }
+
+/* Fixed settings boxes fit their tab contents without changing shared chrome. */
+#settingsView { display: flex; flex-direction: column; scrollbar-width: none; }
+#settingsView * { scrollbar-width: none; }
+#settingsView::-webkit-scrollbar, #settingsView ::-webkit-scrollbar { display: none; }
+.settings-global, .settings-profiles { padding-left: 64px; flex-shrink: 0; }
+.settings-global { flex: 2 0 270px; min-height: 270px; height: 270px; }
+.settings-profiles { flex: 3 0 390px; min-height: 390px; margin-bottom: 0; display: flex; flex-direction: column; }
+.settings-global .s7-cols { height: 100%; padding: 12px 0 16px; }
+.settings-global .s7-nav, .settings-profiles .s7-nav { width: 160px; }
+.s7-navlbl { color: var(--accent); font-family: var(--display); font-size: 15px; letter-spacing: .12em; line-height: 1; padding: 0 0 12px; white-space: nowrap; }
+.s7 .gcol, .s7 .profrow, #btnProfileAdd { background: var(--bg2); color: var(--white); min-height: 30px; padding: 7px 12px; font-size: 13px; text-align: left; border-radius: 12px 0 0 12px; }
+.s7 .gcol { border-radius: 12px; }
+.s7 .gcol.on { background: var(--lavender); color: var(--bg); }
+.s7 .profrow.on { background: var(--green-deep); color: var(--bg); }
+#btnProfileAdd { color: var(--white); }
+.settings-global .s7-detail { overflow: auto; padding: 0 10px 0 12px; }
+.s7-panel > .section-heading { margin-bottom: 12px; }
+.panel-header { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 100px; grid-template-rows: 28px 28px; gap: 6px; padding-left: 64px; margin-bottom: 8px; height: 62px; flex-shrink: 0; }
+.panel-header::before { content: ""; position: absolute; top: 0; left: 0; width: 64px; height: 62px; border-left: 42px solid var(--blue); border-top: 28px solid var(--blue); border-top-left-radius: 58px 48px; pointer-events: none; }
+.panel-header .title { grid-column: 1 / -1; background: var(--blue); color: var(--bg); display: flex; justify-content: center; align-items: center; padding: 5px 44px 0 4px; font-family: var(--display); font-size: 25px; font-weight: 700; letter-spacing: .12em; line-height: 1; border-radius: 0 14px 14px 0; white-space: nowrap; }
+.panel-header .model { background: var(--peach); color: var(--bg); display: flex; align-items: center; padding: 2px 8px 0; font-size: 11px; line-height: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#btnSettings { position: absolute; right: 10px; top: 4px; width: 56px; height: 20px; padding: 3px 8px 1px; font-size: 12px; background: var(--bg); border-radius: 10px; color: var(--white); display: flex; justify-content: center; align-items: center; }
+#btnSettings .menu-icon { display: flex; flex-direction: column; gap: 3px; }
+#btnSettings .menu-icon span { display: block; width: 14px; height: 2px; background: currentColor; }
+.settings-profiles > .s7-navlbl { flex: 0 0 34px; min-height: 0; padding: 10px 0 9px; }
+.settings-profiles .s7-cols { flex: 1; min-height: 0; gap: 0; }
+.settings-profiles .s7-nav { position: relative; z-index: 4; padding-right: 0; overflow: visible; }
+.s7-topbar { position: absolute; z-index: 2; top: 34px; left: 224px; right: 0; height: 30px; padding: 6px 12px 4px 112px; background: var(--green-deep); color: var(--bg); border-radius: 0 15px 15px 0; font-family: var(--display); font-size: 15px; letter-spacing: .12em; }
+.s7-profile-frame { position: relative; z-index: 1; display: flex; flex: 1; min-width: 0; border-radius: 0 20px 5px 20px; background: linear-gradient(to bottom, transparent calc(100% - 10px), var(--green-deep) 0); overflow: hidden; }
+.s7-profile-frame { background-image: linear-gradient(var(--green-deep), var(--green-deep)), linear-gradient(to bottom, transparent calc(100% - 10px), var(--green-deep) 0); background-position: 99px 30px, 0 0; background-size: 21px calc(100% - 40px), calc(100% - 5px) 100%; background-repeat: no-repeat; }
+.s7-profile-frame::after { content: ""; position: absolute; right: 0; bottom: 0; width: 10px; height: 10px; border-radius: 50%; background: var(--green-deep); pointer-events: none; }
+.s7-tabs { width: 100px; flex-shrink: 0; padding: 70px 0 12px 8px; background: var(--green-deep); border-radius: 0 0 0 20px; border-bottom: 10px solid var(--green-deep); }
+.settings-profiles:has(#profileList .profrow.on:not(:first-child)) .s7-topbar,
+.settings-profiles:has(#profileList .profrow.on:not(:first-child)) .s7-profile-frame { border-top-left-radius: 20px; }
+.ptab { position: relative; width: 100%; text-align: center; background: transparent; color: var(--bg); min-height: 38px; padding: 8px 4px; font-size: 13px; line-height: 1.1; border-radius: 14px 0 0 14px; }
+.ptab.on { background: var(--bg); color: var(--white); z-index: 1; }
+.ptab.on::before, .ptab.on::after { content: ""; position: absolute; right: 0; width: 20px; height: 20px; pointer-events: none; }
+.ptab.on::before { bottom: 100%; background: radial-gradient(circle at 0 0, transparent 20px, var(--bg) 20px); }
+.ptab.on::after { top: 100%; background: radial-gradient(circle at 0 100%, transparent 20px, var(--bg) 20px); }
+.s7-editor { flex: 1; min-width: 0; position: relative; margin-top: 30px; margin-bottom: 10px; padding: 20px 12px 8px; background: var(--bg); border-radius: 20px 0 0 20px; overflow-y: auto; }
+.s7-editor .frow label, .network-panel .frow label { color: var(--gray); font-size: 12px; min-width: 106px; display: flex; align-items: center; }
+.s7 input[type=text], .s7 input[type=number], #modelSearch, .network-panel input {
+  flex: 1; min-width: 0; background: var(--track); color: var(--white); border: none;
+  padding: 6px 8px; font: inherit; letter-spacing: .04em; border-radius: 0;
+}
+.s7 input[type=text], .s7 input[type=number], #modelSearch, .network-panel input { font-family: var(--mono); font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; }
+.s7 input:focus-visible, #modelSearch:focus-visible { outline: 2px solid var(--accent, var(--blue)); outline-offset: 1px; }
+/* G + F: the mock's instrument pills — one shade of the existing gray, black-on-it. */
+.s7 .mini { min-height: 26px; padding: 4px 12px 1px; font-size: 13px; background: var(--gray-dim); color: var(--white); border-radius: 0; }
+.s7 .mini:hover { filter: brightness(1.25); }
+.s7 .mini.del { background: rgba(221,68,68,.25); color: var(--red); }
+/* G: long paths ellipsize instead of wrapping mid-word. */
+.s7 .engpath { color: var(--white); font-size: 12px; margin: 0; flex: 1; min-width: 0; font-family: var(--mono); font-weight: 400; letter-spacing: 0; text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--gray-dim); padding: 6px 10px; }
+#cfgMsg { color: var(--gray); font-size: 12px; margin: 6px 0 0 6px; }
+#cfgMsg.ok { color: var(--green); } #cfgMsg.err { color: var(--red); }
+/* F: the caps + rows follow the settings scale. */
+.s7 .warn-cap { background: var(--peach); color: var(--bg); border-radius: 14px; padding: 2px 8px; font-size: 12px; display: inline-flex; align-items: center; white-space: nowrap; }
+.s7 .verdict-cap { border-radius: 14px; padding: 2px 10px; font-size: 12px; background: var(--gray-dim); color: var(--white); white-space: nowrap; }
+.s7 .verdict-cap.valid { background: var(--green); color: var(--bg); }
+.s7 .verdict-cap.fallback { background: var(--peach); color: var(--bg); }
+.s7 .verdict-cap.unrunnable { background: var(--red); color: var(--bg); }
+.s7 .profile-cap { background: var(--peach); color: var(--bg); border-radius: 14px; padding: 2px 8px; font-size: 12px; }
+.s7 .profile-cap.runnable { background: var(--teal); color: var(--bg); }
+.s7 .profile-cap.unrunnable { background: var(--peach); }
+.s7 .profile-cap.blocked { background: var(--peach); }
+.s7 .profile-cap.unknown { background: var(--gray-dim); color: var(--white); }
+.s7 .section-heading { margin: 0 0 6px; font-size: 15px; letter-spacing: .14em; }
+.s7 .capbtns, #modelSrcCaps { gap: 4px; }
+.s7 .capbtns .cb { min-height: 26px; padding: 5px 16px 2px; font-size: 13px; background: var(--gray-dim); color: var(--bg); border-radius: 0; }
+.s7 .capbtns .cb:first-child { border-radius: 14px 0 0 14px; }
+.s7 .capbtns .cb:last-child { border-radius: 0 14px 14px 0; }
+.s7 .capbtns .cb.on { background: var(--accent); color: var(--bg); }
+#gpanelEngine > .capbtns { width: 240px; margin-bottom: 10px; }
+#gpanelEngine > .capbtns .cb { flex: 1; }
+#manualPath { border-radius: 14px 0 0 14px; color: var(--bg); background: var(--gray-dim); }
+#btnBrowseEngine { border-radius: 0 14px 14px 0; }
+.network-panel .frow { min-height: 26px; margin-bottom: 5px; }
+.network-panel .section-heading span { display: none; }
+.network-panel input::placeholder, .s7 input::placeholder { color: var(--gray-dim); opacity: 1; }
+#gpanelEngine .frow:has(#engPath) { display: none; }
+.s7-panel > .section-heading { color: var(--teal); }
+.profrow.on { overflow: visible; z-index: 5; }
+.profrow .profile-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profrow.on::after { content: ""; position: absolute; right: 0; top: 100%; width: 16px; height: 16px; background: radial-gradient(circle at 0 100%, transparent 16px, var(--green-deep) 16px); pointer-events: none; }
+#profileList .profrow.on:not(:first-child)::before { content: ""; position: absolute; right: 0; bottom: 100%; width: 16px; height: 16px; background: radial-gradient(circle at 0 0, transparent 16px, var(--green-deep) 16px); pointer-events: none; }
+#folderList .fname { flex: 0 0 90px; min-width: 90px; max-width: 90px; }
+#folderList .fpath { flex: 1 1 0; white-space: normal; overflow-wrap: anywhere; align-self: center; overflow: visible; text-overflow: clip; }
+#folderList .fmeta { flex: 0 0 auto; gap: 6px; }
+#folderList .fstat { font-size: 10px; min-width: 52px !important; }
+#folderList .mini { padding-left: 8px; padding-right: 8px; }
+#folderMsg { color: var(--red); font-size: 11px; text-transform: none; margin-top: 4px; }
+#gpanelNetwork .frow > label, #gpanelNetwork .frow > .label { flex: 0 0 106px; min-width: 106px; }
+.option-row label { width: 128px; flex-shrink: 0; overflow-wrap: anywhere; }
+.option-choices { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; gap: 4px; }
+.option-list { display: flex; flex-direction: column; }
+.s7-editor .option-row { min-width: 0; min-height: 20px; margin-bottom: 2px; }
+.s7-editor .option-row label { width: 160px; min-width: 160px; font-size: 11px; }
+.s7 .s7-editor .option-row input { padding: 3px 6px; font-size: 11px; }
+.s7 .s7-editor .option-row .mini { padding: 3px 8px 2px; font-size: 11px; min-height: 20px; }
+.s7 .mini[data-option-reset] { border-radius: 14px; color: var(--bg); background: var(--gray-dim); }
+.profile-subsection { margin-top: 6px; padding-top: 6px; border-top: 3px solid var(--green-deep); border-image: linear-gradient(to right, var(--green-deep) 58%, transparent 58% 60%, var(--green-deep) 60% 82%, transparent 82% 84%, var(--green-deep) 84%) 1; }
+.profile-identity { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
+.profile-identity .frow { flex: 1; margin: 0; min-width: 0; }
+.profile-identity .frow label { min-width: 38px; }
+.profile-identity .capbtns { flex-shrink: 0; }
+#profileComputeOptions { margin-top: 4px; }
+#profileModelAxis { margin-top: 4px; }
+#profileBasics { min-width: 0; }
+#profileBasics .profile-identity { flex-direction: column; align-items: stretch; gap: 4px; }
+#profileBasics .profile-identity .frow { flex: none; }
+#ptabApiPanel .option-row:has([data-option="reasoning_effort"]) .option-choices { flex: 0 1 260px; }
+.option-row:has([data-option="reasoning_effort"]) { align-items: center; }
+.s7 .option-choices .mini { color: var(--bg); }
+.s7 .option-choices .mini:first-child { border-radius: 14px 0 0 14px; }
+.s7 .option-choices .mini:last-child { border-radius: 0 14px 14px 0; }
+.s7 .option-choices .mini.on { background: var(--green); }
+#profilePreviewArgs span { display: inline-block; max-width: 100%; overflow-wrap: anywhere; vertical-align: top; }
+.model-row:has(.match-tag) { background: var(--blue); color: var(--bg); }
+.model-row:has(.match-tag) .m-src { color: var(--bg); }
+.s7 .frow .fname { min-height: 30px; padding: 4px 12px 1px; font-size: 12px; }
+.s7 .frow .fmeta { font-size: 11px; }
+.s7 .frow .fpath { font-size: 12px; }
+/* Identity and launch preview stay in GENERAL; model selection has its own tab. */
+.s7 .act-caps .cb.on.act { background: var(--green); }
+.s7 .act-caps .cb.on.del { background: var(--red); }
+.s7 .modelpill { display: flex; gap: 4px; width: 100%; min-height: 28px; background: transparent; border-radius: 14px; overflow: hidden; }
+.s7 .modelpill .mp-l { background: var(--gray-dim); color: var(--bg); padding: 5px 12px 1px; font-size: 13px; }
+.s7 .modelpill .mp-name { flex: 1; min-width: 0; background: var(--gray-dim); color: var(--bg); padding: 4px 10px 2px; font-family: var(--mono); font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.s7 .modelpill .mp-act { background: var(--gray-dim); color: var(--white); padding: 5px 12px 1px; font-size: 13px; }
+.s7 .profile-chip { color: var(--teal); font-size: 12px; overflow-wrap: anywhere; }
+.s7 .profile-meta { color: var(--gray); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+#profileDrafter { margin: 3px 0; }
+#profilePreviewBox { margin-top: 6px; background: var(--bg2); border: 1px solid var(--track); border-radius: 8px; padding: 6px 8px; }
+#profilePreviewBox .pp-h { color: var(--teal); font-family: var(--display); font-size: 13px; letter-spacing: .1em; border-bottom: 2px solid var(--track); padding-bottom: 4px; margin-bottom: 6px; display: flex; justify-content: space-between; }
+/* G: the argv renders as token spans — it wraps at flag boundaries, and a token only
+   breaks mid-word when a single token is wider than the box. */
+#profilePreviewBox .pp-args { font-family: var(--mono); font-size: 10px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--white); line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; }
+#profilePreviewBox .pp-args.err { color: var(--peach); }
+#profilePreviewBox .pp-restart { color: var(--peach); font-family: var(--mono); font-size: 12px; font-weight: 400; }
+.mprov { margin-top: 6px; background: var(--bg2); border: 1px solid var(--track); border-radius: 8px; padding: 6px 8px; }
+.mprov .pp-h { display: flex; justify-content: space-between; align-items: center; color: var(--teal); font-family: var(--display); font-size: 13px; letter-spacing: .1em; border-bottom: 2px solid var(--track); padding-bottom: 4px; margin-bottom: 6px; }
+.mprov-btns { display: flex; gap: 8px; }
+.mprov-pill { background: var(--green); color: #000; border: 0; border-radius: 999px; padding: 4px 16px; font-family: var(--display); font-size: 12px; letter-spacing: .08em; cursor: pointer; }
+.mprov-pill:disabled { opacity: .4; cursor: default; }
+#profileRestartPrompt { margin: 4px 0 0; padding: 0; font-size: 10px; line-height: 1.2; display: flex; align-items: center; gap: 8px; }
+#profileRestartText { flex: 1; min-width: 0; }
+#profileRestartPrompt .mini { flex-shrink: 0; min-height: 24px; padding: 4px 8px 2px; font-size: 11px; }
+.s7 .stale-group { margin: 8px 0; }
+.s7 .stale-bar { display: flex; justify-content: space-between; align-items: center; width: 100%; background: var(--gray-dim); color: var(--bg); border-radius: 14px; padding: 5px 10px; font-size: 12px; text-align: left; font-family: var(--display); letter-spacing: .1em; cursor: pointer; border: none; }
+.s7 .stale-bar[aria-expanded="true"] { background: var(--accent); color: var(--bg); }
+.s7 .stale-body { display: none; padding: 4px 0; }
+.s7 .stale-group.open .stale-body { display: block; }
+.s7 .stale-row { display: flex; align-items: center; gap: 8px; margin: 6px 0 6px 3px; color: var(--gray-dim); font-size: 12px; }
+.s7 .stale-row label { flex: 1; }
+.s7 .stale-row input { width: 140px; }
+.option-row.unmet label, .option-row.unmet input, .option-row.unmet button { color: var(--gray-dim); }
+.option-row input[aria-invalid="true"] { border-bottom: 1px solid var(--red); }
+/* The model chooser modal: the cfgModal pattern, a blue-framed card. */
+#modelModal { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; background: rgba(3,3,6,.7); }
+#modelModal .card { width: 460px; max-width: 96vw; height: 75vh; background: var(--bg2); border: 4px solid var(--blue); border-radius: 14px; padding: 14px 16px 12px; display: flex; flex-direction: column; }
+#modelModal .card > :not(#modelRows) { flex-shrink: 0; }
+#modelModal .mhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+#modelModal .mhead h3 { color: var(--teal); font-family: var(--display); font-size: 18px; letter-spacing: .12em; }
+#modelModal .mhead .mclose { background: var(--track); color: var(--gray); width: 24px; height: 20px; border-radius: 10px; font-size: 14px; }
+#modelModal .mhead .mclose:hover { color: var(--white); }
+#modelSearch { width: 100%; flex: 0 0 30px; height: 30px; margin-bottom: 8px; border-radius: 8px; }
+#modelSrcCaps .cb.on { background: var(--blue); }
+#modelRows { flex: 1; min-height: 0; overflow-y: auto; margin-bottom: 8px; scrollbar-width: none; }
+#modelRows::-webkit-scrollbar { display: none; }
+.model-row { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: transparent; color: var(--white); padding: 5px 8px; border-radius: 8px; font-size: 11px; }
+.model-row:hover { background: var(--track); }
+.model-row.sel { background: var(--blue); color: var(--bg); }
+.model-row .m-name { flex: 1; min-width: 0; font-family: var(--mono); font-weight: 400; letter-spacing: 0; text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-row .m-src { color: var(--gray); font-size: 10px; }
+.model-row.sel .m-src { color: var(--bg); }
+.model-row .match-tag { background: var(--peach); color: var(--bg); border-radius: 8px; padding: 1px 6px; font-size: 10px; }
+.mnote { color: var(--gray-dim); font-family: var(--mono); font-size: 10px; font-weight: 400; letter-spacing: 0; text-transform: uppercase; border-top: 2px solid var(--track); padding-top: 6px; margin-bottom: 10px; }
+#modelModal .btns { display: flex; justify-content: flex-end; gap: 8px; }
+/* Both views share this single compact footer and blue return swoop. */
+#footer { position: relative; margin-top: 0; padding: 8px 0 23px 64px; }
+#footer::before { content: ""; position: absolute; left: 0; bottom: 0; width: 64px; height: 100%; border-left: 42px solid var(--blue); border-bottom: 12px solid var(--blue); border-bottom-left-radius: 58px 38px; pointer-events: none; }
+#footer::after { content: ""; position: absolute; left: 64px; right: 0; bottom: 0; height: 12px; background: var(--blue); border-radius: 0 6px 6px 0; }
+.foot-row { display: flex; align-items: center; gap: 5px; }
+.foot-row.right { justify-content: flex-end; }
+.foot-row.center { justify-content: center; flex: 1; }
+.fpill { background: #888; color: #000; border-radius: 14px; padding: 5px 6px 3px; font-family: var(--display); font-size: 11px; letter-spacing: .03em; line-height: 1; display: inline-flex; align-items: center; white-space: nowrap; }
+.fpill.blue, .fpill.dark { background: #888; color: #000; }
+#cfgPill { border-radius: 14px 0 0 14px; }
+#verPill { border-radius: 0 14px 14px 0; }
+#pidPill { display: inline-flex; }
+#pidPill .h, #envPill { background: #888; color: #000; font-family: var(--display); letter-spacing: .03em; min-height: 24px; padding: 5px 6px 3px; font-size: 11px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; text-transform: uppercase; white-space: nowrap; }
+#pidPill .h.mono, #pidNum { font-family: var(--mono); font-weight: 400; letter-spacing: 0; text-transform: none; }
+#pidLabel { border-radius: 14px 0 0 14px; }
+#pidNum { border-radius: 0 14px 14px 0; margin-left: 3px; }
+#envPill { border-radius: 14px; }
+#btnGroup { display: flex; gap: 4px; }
+.btn { min-height: 24px; padding: 5px 7px 3px; font-size: 11px; border-radius: 0; display: inline-flex; align-items: center; justify-content: center; line-height: 1; color: var(--bg); }
+.btn.gr { background: var(--green); }
+.btn.y { background: #ffcc66; }
+.btn.r { background: var(--red); }
+#btnGroup .btn:first-child { border-radius: 14px 0 0 14px; }
+#btnGroup .btn:last-child { border-radius: 0 14px 14px 0; }
+.btn:hover { filter: brightness(1.13); }
+.btn:active { filter: brightness(.88); }
+.btn:focus-visible, .fpill:focus-visible { outline: 2px solid var(--white); outline-offset: 3px; }
+#footRow1 { gap: 8px; }
+#pidGroup { flex: 1; display: flex; justify-content: center; }
+#cfgVerGroup { margin-left: auto; }
+@keyframes restart-attention { 0%, 49% { background: #ffcc66; color: var(--bg); } 50%, 100% { background: var(--bg); color: #ffcc66; } }
+#btnRestart.restart-pending { animation: restart-attention 1.2s steps(1, end) infinite; }
+@media (prefers-reduced-motion: reduce) { #btnRestart.restart-pending { animation: none; outline: 2px solid #ffcc66; } }
+#cfgModal { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; background: rgba(3,3,6,.72); }
+#cfgModal .card { width: 420px; background: var(--bg2); border-top: 6px solid #4455ff; padding: 18px 20px 14px; }
+#cfgModal .card h3 { color: #4455ff; font-family: var(--display); font-size: 18px; letter-spacing: .12em; margin-bottom: 8px; }
+#cfgModal .card p { color: var(--white); text-transform: none; letter-spacing: 0; font-size: 11px; line-height: 1.5; margin-bottom: 14px; font-family: "Avenir Next", "Helvetica Neue", sans-serif; font-weight: 400; }
+#cfgModal .card .btns { display: flex; justify-content: flex-end; gap: 8px; }
+#errorModal { position: fixed; inset: 0; z-index: 70; display: none; align-items: center; justify-content: center; background: rgba(3,3,6,.8); }
+#errorModal .card { width: 620px; max-width: 94vw; max-height: 90vh; padding: 22px; background: var(--bg2); border-top: 6px solid var(--red); display: flex; flex-direction: column; gap: 14px; }
+#errorModal h3 { color: var(--red); font-size: 22px; }
+#errorText { white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; max-height: 50vh; font: 12px/1.5 var(--mono); text-transform: none; user-select: text; -webkit-user-select: text; }
+#errorCopy { align-self: flex-start; }
+#errorModal .btns { display: flex; justify-content: flex-end; gap: 8px; }
 .section-heading, section > .label:first-child { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 0 0 5px; color: var(--accent); font-family: var(--display); font-size: 14px; letter-spacing: .12em; line-height: 1; }
 .section-heading h2 { font: inherit; }
 .section-heading span { color: var(--gray); font-size: 11px; letter-spacing: .08em; }
-.section-heading, section > .label:first-child { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 0 0 5px; color: var(--accent); font-family: var(--display); font-size: 14px; letter-spacing: .12em; line-height: 1; }
 /* Black breaks turn the meters into LCARS segments without changing their scale. */
 .track, .bar, .seg { position: relative; background: var(--track); border-radius: 0 7px 7px 0; height: 14px; overflow: hidden; }
 .track { flex: 1; }
@@ -63,27 +343,12 @@ section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 
 .track::after, .bar::after, .seg::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 34px, var(--bg) 34px 37px); pointer-events: none; }
 #spark { background: var(--bg2); border-radius: 0; border-bottom: 1px solid var(--teal-dim); }
 table { width: 100%; border-collapse: separate; border-spacing: 0 3px; font-size: 11px; line-height: 1.2; }
+.recent-wrap { min-height: 120px; }
 th { background: var(--lavender); color: var(--bg); font-family: var(--display); font-size: 12px; text-align: right; padding: 4px 4px 2px; font-weight: 600; letter-spacing: .08em; line-height: 1; }
 th:first-child, td:first-child { text-align: left; }
 td { text-align: right; padding: 2px 4px; border-bottom: 1px solid var(--track); line-height: 1; }
 td:first-child { background: var(--lavender); color: var(--bg); border-bottom: 0; font-weight: 700; }
 button { font-family: var(--display); text-transform: uppercase; letter-spacing: .08em; border: none; cursor: pointer; }
-.btn { min-height: 28px; padding: 6px 16px 2px; font-size: 15px; border-radius: 0; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
-.btn.gr { background: var(--green); }
-.btn.y { background: #ffcc66; }
-.btn:first-child { border-radius: 14px 0 0 14px; }
-.btn:last-of-type { border-radius: 0 14px 14px 0; }
-.btn:hover { filter: brightness(1.13); }
-.btn:active { filter: brightness(.88); }
-.btn:focus-visible { outline: 2px solid var(--white); outline-offset: 3px; }
-#footer { position: relative; display: grid; grid-template-columns: repeat(3, max-content) 1fr; gap: 5px; align-items: center; margin-top: 6px; padding: 0 0 23px 64px; }
-#footer::before { content: ""; position: absolute; left: 0; bottom: 0; width: 64px; height: 100%; border-left: 42px solid #4455ff; border-bottom: 12px solid #4455ff; border-bottom-left-radius: 58px 38px; pointer-events: none; }
-#footer::after { content: ""; position: absolute; left: 64px; right: 0; bottom: 0; height: 12px; background: #4455ff; border-radius: 0 6px 6px 0; }
-#pidPill { display: inline-flex; }
-#pidPill .h, #envPill { background: #888; color: #000; font-family: var(--display); letter-spacing: .08em; min-height: 28px; padding: 6px 10px 2px; font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; text-transform: uppercase; }
-#pidLabel { border-radius: 14px 0 0 14px; }
-#pidNum { border-radius: 0 14px 14px 0; margin-left: 3px; }
-#envPill { border-radius: 14px; margin-left: 5px; }
 #tip { position: fixed; display: none; z-index: 10; pointer-events: none;
   background: var(--bg); border: 1px solid var(--gray-dim); border-left: 4px solid var(--lavender); border-radius: 0;
   color: var(--white); font-family: "Avenir Next", "Helvetica Neue", sans-serif; font-size: 10px; font-weight: 400; text-transform: none;
@@ -95,11 +360,14 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 </style>
 </head>
 <body>
-<div id="header">
+<header id="header" class="panel-header">
   <div class="title" id="hName">Splash interface control</div>
   <div class="model" id="hModel">—</div>
   <div class="pill g" id="statusPill" data-tip="Engine state — DOWN: no server · LAUNCH FAIL: engine could not start (see error below, auto-retries) · LOADING: model loading · PREFILL: prompt being processed · DECODE: generating output · QUEUED: waiting for resources · IDLE: no work · RESTART: app is restarting the server">WAITING</div>
-</div>
+  <button id="btnSettings" aria-label="Open Settings" data-tip="Open Settings"><span id="headerMenuIcon" class="menu-icon" aria-hidden="true"><span></span><span></span><span></span></span><span id="headerStatusLabel" hidden>Status</span></button>
+</header>
+<main id="statusView" class="screen" aria-label="Status">
+<div id="statusContent">
 
 <section class="performance" data-channel="01" aria-label="Performance">
   <div class="section-heading"><h2>Performance</h2><span>Live telemetry</span></div>
@@ -173,17 +441,174 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
 <section class="requests-panel" data-channel="05" aria-label="Requests">
   <div class="label" data-tip="Live requests. The counters are session totals; the table shows the last 8 completions."><span>Requests <span id="reqTotals"></span></span><b id="reqActive">—</b></div>
   <div id="activeList" style="margin-bottom:6px"></div>
-  <table id="recentTable">
+  <div class="recent-wrap"><table id="recentTable">
     <thead><tr><th data-tip="Prompt tokens">Req</th><th data-tip="Prompt tokens">Input</th><th data-tip="Prompt tokens served from cached KV — these skipped prefill">Cached</th><th data-tip="Output tokens generated">Out</th><th data-tip="Time to first output token — includes thinking for reasoning models">TTFT</th><th data-tip="Streamed output rate from the completion log">tok/s</th></tr></thead>
     <tbody id="recentBody"></tbody>
-  </table>
+  </table></div>
+</section>
+</div>
+</main>
+<main id="settingsView" class="screen s7" aria-label="Settings" hidden>
+
+<section class="settings-global s7" data-channel="06" aria-label="Global settings">
+  <div class="s7-cols">
+    <div class="s7-col s7-nav" data-tip="Global settings: engine, model folders, and network. Every change saves itself.">
+      <div class="s7-navlbl">Global settings</div>
+      <button class="gcol on" data-gcol="engine" id="gcolEngine">Engine</button>
+      <button class="gcol" data-gcol="folders" id="gcolFolders">Folders</button>
+      <button class="gcol" data-gcol="network" id="gcolNetwork">Network</button>
+    </div>
+    <div class="s7-col s7-detail" style="flex:1">
+      <div class="s7-panel" id="gpanelEngine" data-panel="engine">
+        <div class="section-heading"><h2>Engine</h2></div>
+        <div class="capbtns" data-tip="Auto uses the highest installed Homebrew Splash version. Manual uses exactly the kit path you choose.">
+          <button class="cb" id="capAuto">Auto</button>
+          <button class="cb on" id="capManual">Manual</button>
+        </div>
+        <div class="frow" data-tip="The kit directory (release.json + server/) — manual mode only.">
+          <input type="text" class="mono engpath" id="manualPath" placeholder="/path/to/kit-directory" spellcheck="false">
+          <button class="mini" id="btnBrowseEngine" data-tip="Pick the engine kit directory">Browse</button>
+        </div>
+        <div class="frow">
+          <span class="engpath" id="engPath" data-tip="The resolved kit directory the engine actually runs (Auto discovery result or your Manual path)."></span>
+        </div>
+        <div class="tried" id="engTried" data-tip="Every rung the discovery ladder tried, in order."></div>
+        <div class="frow" style="margin-top:4px">
+          <span class="k" style="color:var(--teal)">v<b id="vCfg" style="color:var(--teal)">—</b></span>
+          <span class="k mono" id="engArch"></span>
+          <span style="flex:1"></span>
+          <span class="verdict-cap" id="engValid" data-tip="">—</span>
+        </div>
+        <div id="cfgMsg"></div>
+      </div>
+      <div class="s7-panel" id="gpanelFolders" data-panel="folders" hidden>
+        <div class="section-heading"><h2>Model folders</h2><span data-tip="Where the app discovers models. Each folder is scanned in the background; PRESENT/MISSING reflects the directory, the count the models found.">scanned live</span></div>
+        <div id="folderList"></div>
+        <div class="frow" style="margin-top:6px">
+          <input type="text" class="mono" id="folderPath" placeholder="add a model folder path…">
+          <button class="mini" id="btnBrowseFolder" data-tip="Pick a model folder directory">Browse</button>
+          <button class="mini" id="btnAddFolder" data-tip="Add this path as a new model folder">+ Add</button>
+        </div>
+        <div id="folderMsg" role="status" aria-live="polite"></div>
+      </div>
+      <div class="s7-panel network-panel" id="gpanelNetwork" data-panel="network" hidden>
+        <div class="section-heading"><h2>Network</h2><span>global — never per profile</span></div>
+        <div class="frow"><label for="cfgHost" data-tip="HTTP bind address. 127.0.0.1 keeps the engine local-only; 0.0.0.0 exposes it on the network.">Host</label><input type="text" class="mono" id="cfgHost" placeholder="127.0.0.1" spellcheck="false"></div>
+        <div class="frow"><label for="cfgPort" data-tip="The port the engine serves on (1–65535). An engine already serving it is adopted.">Port</label><input type="number" id="cfgPort" min="1" max="65535" placeholder="8123"></div>
+        <div class="frow" data-tip="The API key rides the engine's environment, never its argv. Masked at rest; the eye reveals it while held open — it re-masks on blur, on modal close, and on the next tick."><label for="cfgKey">API key</label><input type="text" class="mono" id="cfgKey" readonly placeholder="· · · · · · · ·" spellcheck="false"><button class="mini" id="btnKeyEye" aria-pressed="false" data-tip="Reveal / hide the API key">◉</button></div>
+        <div class="frow" data-tip="Extra Host names the engine accepts (--allowed-host, repeatable; comma-separated). The bind host is always accepted."><label for="cfgAllowedHost">Allowed-host</label><input type="text" class="mono" id="cfgAllowedHost" placeholder="engine host, extra hosts…" spellcheck="false"></div>
+        <div class="frow" data-tip="Origins whose pages may call the API from a browser or webview (--allowed-origin, repeatable; comma-separated)."><label for="cfgAllowedOrigin">Allowed-origin</label><input type="text" class="mono" id="cfgAllowedOrigin" placeholder="http://host, tauri://localhost…" spellcheck="false"></div>
+        <div class="frow" data-tip="The engine's built-in chat page. ON = the engine default; OFF passes --no-webui."><span class="label" style="margin:0;min-width:84px">Web UI</span><div class="capbtns"><button class="cb on" id="webUiOn">On</button><button class="cb" id="webUiOff">Off</button></div><button class="mini" id="webUiOpen" hidden data-tip="Open the engine's web UI in your default browser (the engine must be running)">OPEN</button></div>
+      </div>
+    </div>
+  </div>
 </section>
 
+<section class="settings-profiles s7" data-channel="07" aria-label="Profiles">
+  <div class="s7-navlbl">Profiles</div>
+  <div class="s7-topbar"><span class="s7-topbar-title">Profile settings</span></div>
+  <div class="s7-cols">
+    <div class="s7-col s7-nav" data-tip="A profile is a named launch configuration: model + launch options. One is active at a time.">
+      <div id="profileList" style="display:flex;flex-direction:column;gap:2px"></div>
+      <button id="btnProfileAdd">+ Add profile</button>
+    </div>
+    <div class="s7-profile-frame">
+    <div class="s7-col s7-tabs" id="profileTabCol">
+      <button class="ptab on" data-ptab="general" id="ptabGeneral">General</button>
+      <button class="ptab" data-ptab="model" id="ptabModel">Model</button>
+      <button class="ptab" data-ptab="memory" id="ptabMemory">Memory</button>
+      <button class="ptab" data-ptab="api" id="ptabApi">Api</button>
+    </div>
+    <div class="s7-col s7-editor" id="profileEditor">
+      <div id="ptabGeneralPanel" data-ptab-panel="general">
+        <div id="profileBasics">
+        <div class="profile-identity">
+          <div class="frow"><label for="profileName">Name</label><input type="text" id="profileName" aria-label="Profile name"></div>
+          <div class="capbtns act-caps">
+            <button class="cb on act" id="btnProfileActivate">Activate</button>
+            <button class="cb" id="btnProfileClone">Clone</button>
+            <button class="cb del" id="btnProfileRemove">Delete</button>
+          </div>
+        </div>
+        <div class="profile-meta" id="profileLaunchMeta"></div>
+        <div id="profileComputeOptions" class="option-list"></div>
+        </div>
+        <div id="profilePreviewBox" hidden>
+          <div class="pp-h"><span>Launch preview</span><span class="pp-restart" id="profilePreviewRestart" hidden>· Restart</span></div>
+          <div class="pp-args" id="profilePreviewArgs"></div>
+        </div>
+        <div id="modelProviderBox" class="mprov" hidden>
+          <div class="pp-h"><span>Model provider</span><span class="mprov-btns">
+            <button class="mprov-pill" id="btnProviderOpenCode" data-tip="Copy an OpenCode provider block for this profile: engine URL, served model name, API key.">OpenCode</button>
+            <button class="mprov-pill" id="btnProviderPi" data-tip="Copy a Pi models.json provider block for this profile: engine URL, served model name, API key.">Pi</button>
+          </span></div>
+        </div>
+        <div id="profileRestartPrompt" hidden><span id="profileRestartText"></span><button class="mini" id="btnProfileRestart">Confirm restart</button></div>
+      </div>
+      <div id="ptabModelPanel" data-ptab-panel="model" hidden>
+          <button class="modelpill" id="modelPill" data-tip="Choose the model this profile launches">
+            <span class="mp-l">Model</span><span class="mp-name" id="modelPillName">—</span><span class="mp-act" id="modelPillChange">Change</span>
+          </button>
+          <div class="profile-chip" id="profileDrafter"></div>
+          <div id="profileModelAxis" class="option-list"></div>
+      </div>
+      <div id="ptabMemoryPanel" data-ptab-panel="memory" hidden></div>
+      <div id="ptabApiPanel" data-ptab-panel="api" hidden></div>
+      <div id="profileStaleSlot" hidden></div>
+    </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<div id="modelModal">
+  <div class="card">
+    <div class="mhead"><h3>Choose model</h3><button class="mclose" id="modelClose" aria-label="Close">×</button></div>
+    <input id="modelSearch" type="text" class="mono" placeholder="search · hugging face id…" spellcheck="false">
+    <div class="capbtns" id="modelSrcCaps" style="margin-bottom:8px"></div>
+    <div id="modelRows"></div>
+    <div class="mnote">HF id matches a downloaded model → shown as a search result</div>
+    <div class="btns">
+      <button class="btn" id="modelCancel" style="background:var(--track);color:var(--white)">Cancel</button>
+      <button class="btn" id="modelOk" style="background:var(--blue);color:var(--bg)">Ok</button>
+    </div>
+  </div>
+</div>
+
+<div id="errorModal" role="dialog" aria-modal="true" aria-labelledby="errorTitle">
+  <div class="card">
+    <h3 id="errorTitle">Engine could not start</h3>
+    <p>SplashUI will stay open. Fix your settings, then try Start again.</p>
+    <pre id="errorText"></pre>
+    <button class="btn" id="errorCopy">Copy to Clipboard</button>
+    <div class="btns"><button class="btn" id="errorDismiss">Dismiss</button><button class="btn" id="errorSettings">Open Settings</button></div>
+  </div>
+</div>
+
+<div id="cfgModal">
+  <div class="card">
+    <h3>First run</h3>
+    <p>Welcome. Your engine kit, model folders and launch options live on the <b>Settings</b> screen. Point the app at your engine kit and a model folder; every change saves itself. Apply changes with the explicit Restart control.</p>
+    <div class="btns">
+      <button class="btn" id="modalDismiss" style="background:var(--track);color:var(--white)">Later</button>
+      <button class="btn" id="modalCta" style="background:var(--blue);color:var(--bg)">Open Settings</button>
+    </div>
+  </div>
+</div>
 <div id="footer">
-  <button class="btn gr" id="btnStart">Start</button>
-  <button class="btn y" id="btnRestart">Restart</button>
-  <button class="btn r" id="btnStop">Stop</button>
-  <span style="display:inline-flex;flex-wrap:nowrap;white-space:nowrap"><span id="pidPill"><span class="h" id="pidLabel">PID</span><span class="h" id="pidNum">—</span></span><span class="h" id="envPill">—</span></span>
+  <div class="foot-row" id="footRow1">
+    <span id="btnGroup">
+      <button class="btn gr" id="btnStart">Start</button>
+      <button class="btn y" id="btnRestart">Restart</button>
+      <button class="btn r" id="btnStop">Stop</button>
+    </span>
+    <span id="pidGroup"><span id="pidPill"><span class="h" id="pidLabel">PID</span><span class="h mono" id="pidNum">—</span></span></span>
+    <span class="h" id="envPill">—</span>
+    <span id="cfgVerGroup" style="display:inline-flex;gap:4px">
+      <button class="fpill dark" id="cfgPill" data-tip="Open the settings screen">Config</button>
+      <span class="fpill blue" id="verPill" data-tip="The engine kit version (release.json) the running session was started with.">—</span>
+    </span>
+  </div>
 </div>
 
 <script>
@@ -193,8 +618,37 @@ const g = (b) => b >= 1073741824 ? (b/1073741824).toFixed(1)+" GiB" : b >= 10485
 const n = (v) => v == null ? "—" : v >= 1e6 ? (v/1e6).toFixed(1)+"M" : v >= 1e3 ? (v/1e3).toFixed(1)+"K" : String(v);
 const nn = (v) => v == null ? "—" : v;
 const ms = (v) => v == null ? "—" : v >= 60000 ? (v/60000).toFixed(1)+" min" : v >= 1000 ? (v/1000).toFixed(1)+" s" : v.toFixed(0)+" ms";
+// View state stays local to this single WebView; switching never rebuilds the draft.
+// The settings window widens to 820; status remains frozen at 520.
+// the app animates the NSWindow frame on this message.
+function postSize(size) { try { window.webkit.messageHandlers.size.postMessage(size) } catch(e) {} }
+window.showView = function(view) {
+  const settings = view === "settings";
+  $("hName").textContent = settings ? "Splash settings" : "Splash interface control";
+  $("btnSettings").setAttribute("aria-label", settings ? "Return to Status" : "Open Settings");
+  $("btnSettings").setAttribute("data-tip", settings ? "Return to live status" : "Open Settings");
+  $("headerMenuIcon").hidden = settings;
+  $("headerStatusLabel").hidden = !settings;
+  $("statusView").hidden = settings;
+  $("settingsView").hidden = !settings;
+  $(settings ? "settingsView" : "statusView").scrollTop = 0;
+  if (settings) cfKeyRemask();
+  postSize({ w: settings ? 820 : 520 });
+};
+$("btnSettings").onclick = () => window.showView($("settingsView").hidden ? "settings" : "status");
 
 function setT(id, v){ $(id).textContent = v == null || v === "" ? "—" : v; }
+window.showLaunchFailure = message => {
+  setT("errorText", message);
+  $("errorModal").style.display = "flex";
+};
+$("errorCopy").onclick = () => cmd("error.copy");
+function dismissLaunchFailure() {
+  $("errorModal").style.display = "none";
+  cmd("error.dismiss");
+}
+$("errorDismiss").onclick = dismissLaunchFailure;
+$("errorSettings").onclick = () => { dismissLaunchFailure(); window.showView("settings"); };
 
 // ---- hover help (shows after a short hover delay, hides immediately on leave)
 const tip = document.createElement("div"); tip.id = "tip"; document.body.appendChild(tip);
@@ -206,6 +660,11 @@ function placeTip(el) {
   tip.style.top = (r.top - tip.offsetHeight < 4 ? r.bottom + 6 : r.top - tip.offsetHeight - 6) + "px";
 }
 function hideTip() { if (tipTimer) { clearTimeout(tipTimer); tipTimer = null; } tipEl = null; tip.style.display = "none"; }
+// Help never competes with typing: no hover tip while an input in the element has focus.
+function focusedInputIn(el) {
+  const a = document.activeElement;
+  return !!a && el.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName);
+}
 document.addEventListener("mousemove", e => {
   const el = e.target && e.target.closest ? e.target.closest("[data-tip]") : null;
   if (el === tipEl) { if (tip.style.display === "block") placeTip(el); return; }
@@ -215,13 +674,14 @@ document.addEventListener("mousemove", e => {
   if (tip.style.display === "block") tip.style.display = "none";
   tipTimer = setTimeout(() => {
     tipTimer = null;
-    if (tipEl !== el || !el.isConnected) return;
+    if (tipEl !== el || !el.isConnected || focusedInputIn(el)) return;
     tip.textContent = el.getAttribute("data-tip");
     tip.style.display = "block";
     placeTip(el);
   }, 500);
 });
 document.addEventListener("mouseleave", hideTip);
+document.addEventListener("focusin", hideTip);
 
 function render(){
   if(!S) return;
@@ -328,11 +788,26 @@ function render(){
     "<tr><td>#"+r.id+'</td><td>'+n(r.input)+"</td><td>"+n(r.cached)+"</td><td>"+n(r.output)+"</td><td>"+(r.ttft_s?r.ttft_s.toFixed(1)+"s":"—")+"</td><td>"+(r.tps?r.tps.toFixed(1):"—")+"</td></tr>"
   ).join("");
 
-  // footer
+  // footer (shared by both views)
   $("pidNum").textContent = S.server && S.server.pid ? S.server.pid : "—";
   $("envPill").textContent = S.server && S.server.pid ? (S.server.launched_by_app ? "APP-MANAGED" : "EXTERNAL") : "NOT RUNNING";
-  const h = document.body.scrollHeight;
-  if (h !== lastH) { lastH = h; try { window.webkit.messageHandlers.size.postMessage(h) } catch(e) {} }
+  $("webUiOpen").hidden = !(S.server && S.server.pid && CF.draft && CF.draft.webUI);
+  // Saved plan changes draw attention without reserving another footer row.
+  const rr = S.cfg && S.cfg.restart_required === true;
+  $("btnRestart").classList.toggle("restart-pending", rr);
+  $("btnRestart").setAttribute("data-tip", rr ? "Settings saved. Changes take effect after the engine restarts." : "Restart the current engine session");
+  $("btnRestart").title = $("btnRestart").getAttribute("data-tip");
+  if (S.cfg) {
+    setT("verPill", S.cfg.engine && S.cfg.engine.version ? "v" + S.cfg.engine.version : "—");
+    cfKeyRemask();
+  }
+  cfRender();
+  cfFirstRun();
+  // Only status content determines the panel's height; the width follows the view.
+  if (!$("statusView").hidden) {
+    const h = $("statusContent").scrollHeight + $("header").offsetHeight + 8 + $("footer").offsetHeight + 20;
+    if (h !== lastH) { lastH = h; postSize({ h, w: 520 }); }
+  }
 }
 function up(s){ s=Math.max(0,s|0); const h=s/3600|0, m=(s%3600)/60|0, ss=s%60; return (h?h+"h ":"")+(m?m+"m ":"")+ss+"s"; }
 function drawSpark(){
@@ -343,11 +818,663 @@ function drawSpark(){
   hist.forEach((v,i)=>{ const px = i/(89)*c.width, py = c.height - v/max*(c.height-4) - 2; i?x.lineTo(px,py):x.moveTo(px,py); });
   x.stroke();
 }
-window.update = d => { S = d; render(); };
-const cmd = c => { try { window.webkit.messageHandlers.cmd.postMessage(c); } catch(e) {} };
+window.update = d => { if (!("cfg" in d) && S && S.cfg) d.cfg = S.cfg; S = d; render(); };
+const cmd = (c, args) => { try { window.webkit.messageHandlers.cmd.postMessage(Object.assign({ cmd: c }, args || {})); } catch(e) {} };
+let cfgDoc = null, cfgSaveResult = null, cfgValidateResult = null;
+window.__cfgGet = d => { cfgDoc = d; cfInit(d); };
+window.__cfgSave = r => {
+  cfgSaveResult = r;
+  // D14: everything auto-saves on change — a passing validation that still has
+  // a dirty draft commits itself (the Save buttons are gone from the UI).
+  if (r.ok && CF.draft && cfDirty() && !CF.saving) cfSave();
+};
+window.__cfgValidate = r => {
+  if (CF.pendingFolder && r.validation_id === CF.pendingFolder.validationID) {
+    const folder = CF.pendingFolder.folder;
+    CF.pendingFolder = null;
+    $("folderMsg").textContent = r.ok ? "" : (r.errors || []).join("; ");
+    if (r.ok && !CF.draft.folders.some(f => f.path === folder.path)) {
+      CF.draft.folders.push(folder);
+      $("folderPath").value = "";
+      cfRenderFolders();
+      cfDebouncedValidate();
+    }
+    return;
+  }
+  if (r.validation_id != null && r.validation_id !== CF.validationID) return;
+  cfgValidateResult = r; CF.validated = CF.validationBaseline || JSON.stringify(CF.draft); CF.verdicts = r.profiles || [];
+  if (r.option_defs) CF.optionDefs = r.option_defs;
+  if (!r.ok) cfMsg((r.errors || []).join("; "), "err");
+  else if (cfDirty() && !CF.saving) cfSave();
+  cfRenderProfiles();
+};
+// The eye toggle (S7): the raw key, on explicit user action only (D6's "never
+// rendered" is passive — an explicit reveal re-masks on blur/modal-close/tick).
+window.__cfgRevealKey = r => {
+  if (CF.keyRevealed && typeof r === "object" && r.key) {
+    if (document.activeElement !== $("cfgKey")) $("cfgKey").value = r.key;
+  }
+};
 $("btnStart").onclick = () => cmd("start");
-$("btnStop").onclick = () => cmd("stop");
-$("btnRestart").onclick = () => cmd("restart");
+$("btnStop").onclick = () => {
+  cmd("stop");
+  if (CF.keyRevealed) cfKeyRemask(true);
+};
+$("btnRestart").onclick = () => {
+  if (S.cfg && S.cfg.restart_required === true) { window.showView("settings"); CF.profileId = CF.draft.activeProfile || CF.profileId; $("ptabGeneral").click(); cfRenderProfiles(); if ($("profileRestartPrompt") && !$("profileRestartPrompt").hidden) $("profileRestartPrompt").scrollIntoView(); if (CF.keyRevealed) cfKeyRemask(true); }
+  else cmd("restart");
+};
+$("cfgPill").onclick = () => window.showView("settings");
+
+// ---- S7: global settings (channel 06) + profiles (channel 07) + chooser ----
+const CF = { doc: null, draft: null, baseline: "", validateTimer: null, firstRunShown: false,
+  gcol: "engine", ptab: "general", profileId: null,
+  saving: false, activating: false, validated: null, validationID: 0, validationBaseline: null,
+  previousResult: null, pendingDoc: null, pendingBaseline: null, pendingFolder: null, folderValidationID: 0,
+  optionDefs: null, verdicts: [], optionsKey: null,
+  keyRevealed: false, keyMask: "· · · · · · · ·",
+  chooserOpen: false, chooserSel: null, chooserSrc: "all", chooserSearch: "" };
+
+// Dynamic option tabs; GENERAL and MODEL have structural content.
+const PTABS = ["memory", "api"];
+
+// Option definitions come from the tick's contract (or the last validate response).
+function cfOptionDefs() { return CF.optionDefs || (S && S.cfg && S.cfg.option_defs) || []; }
+
+function cfDraft(doc) {
+  const g = doc.globals || {};
+  return { engineMode: (g.engine && g.engine.mode) || "auto",
+           manualPath: (g.engine && g.engine.manual_path) || "",
+           host: g.host || "127.0.0.1",
+           port: g.port || 8123,
+           allowedHosts: (g.allowed_hosts || []).slice(),
+           allowedOrigins: (g.allowed_origins || []).slice(),
+           webUI: g.web_ui !== false,
+           folders: (g.model_folders || []).map(f => Object.assign({}, f)),
+           profiles: JSON.parse(JSON.stringify(doc.profiles || [])), activeProfile: doc.active_profile };
+}
+
+// The whole doc, raw (the tick payload only carries the mask — the raw api_key
+// must round-trip untouched, so save edits CF.doc, never a reconstructed doc).
+function cfBuildDoc() {
+  const d = JSON.parse(JSON.stringify(CF.doc));
+  const dr = CF.draft;
+  d.globals.engine.mode = dr.engineMode;
+  d.globals.engine.manual_path = dr.engineMode === "manual" ? dr.manualPath : null;
+  d.globals.host = dr.host;
+  d.globals.port = dr.port;
+  d.globals.allowed_hosts = dr.allowedHosts;
+  d.globals.allowed_origins = dr.allowedOrigins;
+  d.globals.web_ui = dr.webUI;
+  d.globals.model_folders = dr.folders;
+  d.profiles = JSON.parse(JSON.stringify(dr.profiles));
+  d.active_profile = dr.activeProfile;
+  d.profiles.forEach(p => { p.meta = cfProfileMeta(p); });   // per-profile network keys never reach here — the Swift normalizer strips them on load/save
+  return d;
+}
+
+function cfSyncForm() {
+  const d = CF.draft;
+  if (!d) return;
+  $("capAuto").classList.toggle("on", d.engineMode === "auto");
+  $("capManual").classList.toggle("on", d.engineMode === "manual");
+  if ($("manualPath").value !== d.manualPath) $("manualPath").value = d.manualPath;
+  if ($("manualPath").disabled !== (d.engineMode !== "manual")) $("manualPath").disabled = d.engineMode !== "manual";
+  if ($("cfgHost").value !== d.host) $("cfgHost").value = d.host;
+  if ($("cfgPort").value != String(d.port)) $("cfgPort").value = d.port;
+  const ah = d.allowedHosts.join(", ");
+  if ($("cfgAllowedHost").value !== ah) $("cfgAllowedHost").value = ah;
+  const ao = d.allowedOrigins.join(", ");
+  if ($("cfgAllowedOrigin").value !== ao) $("cfgAllowedOrigin").value = ao;
+  $("webUiOn").classList.toggle("on", d.webUI);
+  $("webUiOff").classList.toggle("on", !d.webUI);
+}
+
+function cfKeyRemask(force) {
+  if (!force && !CF.keyRevealed) return;
+  CF.keyRevealed = false;
+  if ($("cfgKey").value !== CF.keyMask) $("cfgKey").value = CF.keyMask;
+  $("btnKeyEye").textContent = "◉";
+  $("btnKeyEye").setAttribute("aria-pressed", "false");
+  $("btnKeyEye").setAttribute("data-tip", "Reveal the API key");
+}
+
+function cfFolderSourceTag(id) {
+  const map = { lmstudio: "LM Studio", ollama: "Ollama", hfhub: "HF Hub", hf: "HF Hub", splash: "Splash", installroot: "Install root" };
+  return map[id] || (id && id[0] === "u" ? "Manual" : (id || "Folder"));
+}
+
+function cfRenderFolders() {
+  const d = CF.draft;
+  if (!d) return;
+  $("folderList").innerHTML = d.folders.map((f, i) => {
+    const st = (S.cfg && S.cfg.folders || []).find(x => x && x.id === f.id);
+    const scanning = st && st.scanning === true;
+    const present = st && st.present === true;
+    const missing = st && st.present === false;
+    if (missing) return "";
+    const models = st && Array.isArray(st.models) ? st.models : null;
+    let stat = "…", cls = "scan";
+    if (scanning) { stat = "SCANNING"; }
+    else if (present) { stat = "PRESENT"; cls = ""; }
+    else if (missing) { stat = "MISSING"; cls = "miss"; }
+    const count = models === null ? "" : (models.length + " model" + (models.length === 1 ? "" : "s"));
+    return '<div class="frow"><span class="fname" data-tip="' + cfEscape(f.path) + '" title="' + cfEscape(f.path) + '">' + cfEscape(cfFolderSourceTag(f.id)) + '</span>' +
+      '<span class="fpath" data-tip="' + cfEscape(f.path) + '">' + cfEscape(f.path) + '</span>' +
+      '<span class="fstat ' + cls + '" style="min-width:66px">' + stat + '</span>' +
+      '<span class="fmeta">' + count +
+      '<button class="mini" data-act="scan" data-i="' + i + '" data-tip="Force-rescan this folder">Scan</button>' +
+      '<button class="mini del" data-act="del" data-i="' + i + '" data-tip="Remove this folder from the registry">Del</button>' +
+      '</span></div>';
+  }).join("");
+}
+
+function cfDirty() { return CF.draft ? JSON.stringify(CF.draft) !== CF.baseline : false; }
+
+function cfMsg(text, kind) {
+  const m = $("cfgMsg");
+  if (m) { m.textContent = text; m.className = kind || ""; }
+}
+
+function cfValidate() {
+  if (!cfDirty()) { cfMsg("", ""); return; }
+  if (!CF.doc) return;
+  CF.validationBaseline = JSON.stringify(CF.draft);
+  cmd("config.validate", { doc: cfBuildDoc(), validation_id: CF.validationID });
+}
+function cfDebouncedValidate() {
+  if (!CF.draft) return;
+  CF.validated = null; cfgValidateResult = null;
+  CF.validationID = (CF.validationID || 0) + 1; CF.validationBaseline = null;
+  if (CF.validateTimer) clearTimeout(CF.validateTimer);
+  CF.validateTimer = setTimeout(cfValidate, 400);
+}
+
+function cfSave() {
+  if (!CF.draft || !cfDirty()) { cfMsg("", ""); return; }
+  if (CF.saving) return;
+  CF.previousResult = S && S.cfg && S.cfg.result;
+  CF.pendingDoc = cfBuildDoc(); CF.pendingBaseline = JSON.stringify(CF.draft); CF.saving = true;
+  cmd("config.save", { doc: CF.pendingDoc });
+  cfMsg("", "");
+}
+
+// One-time population from the raw doc (config.get), then the draft is ours.
+function cfInit(doc) {
+  if (CF.draft) { window.__cfgReady = true; return; }
+  window.__cfgReady = true;
+  CF.doc = doc;
+  CF.draft = cfDraft(doc);
+  CF.profileId = doc.active_profile || (doc.profiles || [])[0]?.id || null;
+  CF.baseline = JSON.stringify(CF.draft);
+  cfKeyRemask(true);
+  cfSyncForm();
+  cfRenderProfiles();
+}
+
+function cfRender() {
+  const cfg = S.cfg;
+  if (!cfg) return;
+  const e = cfg.engine || {};
+  // The single shared header shows the same model/state in either view.
+  const active = CF.draft ? CF.draft.profiles.find(p => p.id === CF.draft.activeProfile) : null;
+  if (active && !(S.server && S.server.launch_error)) $("hModel").textContent = active.name + " — " + (active.model && active.model.id || "model unset");
+  // ENGINE panel: path, version + arch/os, the verdict cap, the ladder.
+  $("vCfg").textContent = e.version || "—";
+  const arch = e.arch || "", os = e.os || "";
+  $("engArch").textContent = [arch, os].filter(Boolean).join(" · ");
+  const ev = $("engValid");
+  const verdict = e.verdict, reason = e.verdict === "valid" ? null : e.verdict_reason;
+  const vmap = { valid: ["VALID", ""], fallback: ["FALLBACK MAPPING", "fallback"], unrunnable: ["UNRUNNABLE", "unrunnable"] };
+  if (verdict && vmap[verdict]) {
+    ev.textContent = vmap[verdict][0] + (reason ? " — " + reason : "");
+    ev.className = "verdict-cap " + (vmap[verdict][1] || "valid");
+    // A fallback mapping carries the registry report (what is missing, both ways).
+    const tip = verdict === "fallback" ? cfRegistryReport(cfg.registry_report, cfg.mapping_used, e.version) : (reason ? String(reason) : null);
+    if (tip) ev.setAttribute("data-tip", tip); else ev.removeAttribute("data-tip");
+  } else if (e.valid === true) { ev.textContent = "VALID"; ev.className = "verdict-cap valid"; ev.removeAttribute("data-tip"); }
+  else if (e.valid === false) { ev.textContent = "UNRUNNABLE" + (e.error ? " — " + e.error : ""); ev.className = "verdict-cap unrunnable"; if (e.error) ev.setAttribute("data-tip", String(e.error)); }
+  else { ev.textContent = "—"; ev.className = "verdict-cap"; ev.removeAttribute("data-tip"); }
+  setT("engPath", e.path || e.manual_path || "");
+  const tried = Array.isArray(e.tried) ? e.tried : [];
+  $("engTried").textContent = tried.length ? "ladder: " + tried.join(" → ") : "";
+  if (CF.draft && CF.draft.engineMode === "auto" && e.version) {
+    const active = (cfg.profiles || []).find(p => p.id === cfg.active_profile);
+    const local = active && active.preview && (active.preview.args || []).includes("server.server");
+    $("engTried").textContent = "AUTO: " + (local ? "local folder model" : "cached Hugging Face model") + " → engine " + e.version + (tried.length ? " · " + tried.join(" → ") : "");
+  }
+  // Only a pending save may rebase: telemetry retains cfg between change-gated ticks.
+  if (CF.saving && cfg.result && cfg.result !== CF.previousResult && cfg.result.ok === true) {
+    CF.saving = false;
+    CF.doc = CF.pendingDoc;
+    CF.baseline = CF.pendingBaseline;
+    if (CF.activating) {
+      CF.draft.activeProfile = cfg.active_profile;
+      CF.pendingDoc.active_profile = cfg.active_profile;
+      CF.pendingDoc.profiles.forEach(p => { p.meta = cfProfileMeta(p); });
+      CF.doc = CF.pendingDoc; CF.baseline = JSON.stringify(CF.draft); CF.activating = false;
+    }
+    cfMsg("", "");
+  } else if (CF.saving && cfg.result && cfg.result !== CF.previousResult && cfg.result.ok === false) {
+    CF.saving = false; CF.activating = false;
+    cfMsg((cfg.result.errors || []).join("; "), "err");
+  }
+  // A browse pick is consumed on exactly one tick.
+  if (cfg.picked && typeof cfg.picked === "object") {
+    const pk = cfg.picked;
+    if (pk.context === "engine" && CF.draft) { CF.draft.manualPath = pk.path; if (CF.draft.engineMode !== "manual") CF.draft.engineMode = "manual"; cfSyncForm(); cfDebouncedValidate(); }
+    else if (pk.context === "model_folder") { $("folderPath").value = pk.path; }
+  }
+  cfRenderFolders();
+  cfRenderProfiles();
+}
+
+
+// Global column selection drives which detail panel shows.
+document.querySelectorAll("[data-gcol]").forEach(b => {
+  b.onclick = () => {
+    CF.gcol = b.dataset.gcol;
+    document.querySelectorAll("[data-gcol]").forEach(x => x.classList.toggle("on", x === b));
+    document.querySelectorAll("[data-panel]").forEach(p => { p.hidden = p.dataset.panel !== CF.gcol; });
+  };
+});
+
+$("capAuto").onclick = () => { if (!CF.draft) return; CF.draft.engineMode = "auto"; cfSyncForm(); cfDebouncedValidate(); };
+$("capManual").onclick = () => { if (!CF.draft) return; CF.draft.engineMode = "manual"; cfSyncForm(); cfDebouncedValidate(); };
+$("manualPath").onchange = () => { if (!CF.draft) return; CF.draft.manualPath = $("manualPath").value; cfDebouncedValidate(); };
+$("btnBrowseEngine").onclick = () => cmd("browse", { context: "engine" });
+$("cfgHost").onchange = () => { if (!CF.draft) return; CF.draft.host = $("cfgHost").value.trim() || "127.0.0.1"; cfDebouncedValidate(); };
+$("cfgPort").onchange = () => { if (!CF.draft) return; const v = parseInt($("cfgPort").value, 10); if (v > 0 && v < 65536) { CF.draft.port = v; cfDebouncedValidate(); } };
+$("cfgAllowedHost").onchange = () => { if (!CF.draft) return; CF.draft.allowedHosts = $("cfgAllowedHost").value.split(",").map(s => s.trim()).filter(Boolean); cfDebouncedValidate(); };
+$("cfgAllowedOrigin").onchange = () => { if (!CF.draft) return; CF.draft.allowedOrigins = $("cfgAllowedOrigin").value.split(",").map(s => s.trim()).filter(Boolean); cfDebouncedValidate(); };
+$("webUiOn").onclick = () => { if (!CF.draft) return; CF.draft.webUI = true; cfSyncForm(); cfDebouncedValidate(); };
+$("webUiOff").onclick = () => { if (!CF.draft) return; CF.draft.webUI = false; cfSyncForm(); cfDebouncedValidate(); };
+$("webUiOpen").onclick = () => window.webkit.messageHandlers.cmd.postMessage({cmd: "webui.open"});
+$("btnProviderOpenCode").onclick = () => cfCopyProvider("opencode");
+$("btnProviderPi").onclick = () => cfCopyProvider("pi");
+function cfCopyProvider(target) {
+  const p = cfSelectedProfile();
+  if (!p) return;
+  window.webkit.messageHandlers.cmd.postMessage({cmd: "provider.copy", target, profileId: p.id});
+}
+$("btnKeyEye").onclick = () => {
+  if (CF.keyRevealed) { cfKeyRemask(true); return; }
+  CF.keyRevealed = true;
+  $("btnKeyEye").textContent = "○";
+  $("btnKeyEye").setAttribute("aria-pressed", "true");
+  $("btnKeyEye").setAttribute("data-tip", "Hide the API key");
+  cmd("config.reveal_key");
+};
+$("cfgKey").addEventListener("blur", () => { if (CF.keyRevealed) cfKeyRemask(true); });
+$("btnBrowseFolder").onclick = () => cmd("browse", { context: "model_folder" });
+$("btnAddFolder").onclick = () => {
+  if (!CF.draft) return;
+  const p = $("folderPath").value.trim();
+  if (!p) return;
+  let id = "folder" + (CF.draft.folders.length + 1);
+  while (CF.draft.folders.some(f => f.id === id)) id = id.slice(0, -1) + (parseInt(id.slice(-1), 10) + 1);
+  if (CF.draft.folders.some(f => f.path === p)) { $("folderMsg").textContent = "This folder is already listed."; return; }
+  const folder = { id, path: p, source: "manual" };
+  const validationID = "folder-" + (++CF.folderValidationID);
+  CF.pendingFolder = { folder, validationID };
+  const candidate = cfBuildDoc();
+  candidate.globals.model_folders = [...candidate.globals.model_folders, folder];
+  $("folderMsg").textContent = "";
+  cmd("config.validate", { doc: candidate, validation_id: validationID });
+};
+$("folderList").onclick = (ev) => {
+  const b = ev.target && ev.target.closest ? ev.target.closest("[data-act]") : null;
+  if (!b || !CF.draft) return;
+  const i = parseInt(b.dataset.i, 10);
+  if (b.dataset.act === "del") { CF.draft.folders.splice(i, 1); cfRenderFolders(); cfDebouncedValidate(); }
+  else if (b.dataset.act === "scan") { const f = CF.draft.folders[i]; if (f) cmd("config.scan", { id: f.id }); }
+};
+
+// ---- S7: profile draft CRUD; the only writer remains config.save. ----
+function cfSelectedProfile() { return CF.draft && CF.draft.profiles.find(p => p.id === CF.profileId); }
+function cfProfileMeta(p) {
+  const saved = S && S.cfg && (S.cfg.profiles || []).find(v => v.id === p.id);
+  return Object.assign({}, p.meta, saved ? saved.meta : {});
+}
+function cfEscape(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[c])); }
+function cfModels() {
+  const ids = new Set(CF.draft.folders.map(f => f.id));
+  return (S.cfg.folders || []).filter(f => ids.has(f.id)).flatMap(f => (f.models || []).filter(m => m && typeof m === "object"));
+}
+// S7: the registry report behind a fallback mapping, rendered as an actionable tip.
+function cfRegistryReport(report, used, actual) {
+  const bits = [];
+  if (report && typeof report === "object") {
+    if (report.missing_in_contract && report.missing_in_contract.length) bits.push("mapping lacks: " + report.missing_in_contract.join(", "));
+    if (report.missing_in_kit && report.missing_in_kit.length) bits.push("kit lacks: " + report.missing_in_kit.join(", "));
+    if (report.unrecognized && report.unrecognized.length) bits.push("kit declares unrecognized: " + report.unrecognized.join(", "));
+  }
+  const detail = bits.length ? bits.join("; ") + ". " : "";
+  return "Running on the latest authored mapping v" + used + " because engine v" + actual + " is not in the version registry." + detail + "Run a matching engine v" + used + " or update the mapping registry to clear this.";
+}
+function cfProfileFacts(p) {
+  const preview = (CF.verdicts || []).find(v => v.id === p.id);
+  if (preview) return preview;
+  const saved = (S.cfg.profiles || []).find(v => v.id === p.id);
+  if (saved && ['source', 'id', 'dir'].every(k => (saved.model[k] || null) === (p.model[k] || null)) && JSON.stringify(saved.options) === JSON.stringify(p.options)) return saved;
+  return cfModels().find(m => m.id === p.model.id && m.source === p.model.source) || { eligibility: p.model.source === "none" ? "unrunnable" : "unknown", drafter: "UNKNOWN — validate to resolve drafter" };
+}
+function cfVerdict(facts) {
+  const verdict = facts.eligibility || "unknown", label = verdict === "blocked" ? "UNRUNNABLE" : verdict.toUpperCase();
+  return '<span class="profile-cap ' + cfEscape(verdict) + '" data-tip="' + cfEscape(facts.eligibility_reason || "") + '">' + label + (facts.eligibility_reason ? ' — ' + cfEscape(facts.eligibility_reason) : '') + '</span>';
+}
+function cfSize(bytes) { return bytes ? g(bytes) : ""; }
+
+document.querySelectorAll("[data-ptab]").forEach(b => {
+  b.onclick = () => {
+    CF.ptab = b.dataset.ptab;
+    document.querySelectorAll("[data-ptab]").forEach(x => x.classList.toggle("on", x === b));
+    document.querySelectorAll("[data-ptab-panel]").forEach(p => { p.hidden = p.dataset.ptabPanel !== CF.ptab; });
+    cfRenderOptions(cfSelectedProfile());
+  };
+});
+
+function cfRenderProfiles() {
+  if (!CF.draft || !S || !S.cfg) return;
+  const esc = cfEscape;
+  const list = CF.draft.profiles.map(p => {
+    const meta = cfProfileMeta(p);
+    const active = p.id === CF.draft.activeProfile;
+    const sel = p.id === CF.profileId;
+    const modelLine = p.model && p.model.id ? esc(p.model.id) : "model unset";
+    return '<button class="profrow' + (sel ? " on" : "") + '" data-profile-id="' + esc(p.id) + '" data-tip="' + esc(p.name) + " · " + modelLine + (active ? " · active" : "") + '">' +
+      '<span class="profile-name">' + esc(p.name) + '</span><span class="profdot' + (active ? " on" : "") + '"></span></button>';
+  }).join("");
+  if ($("profileList").innerHTML !== list) $("profileList").innerHTML = list;
+  if (!cfSelectedProfile() && CF.draft.profiles.length) CF.profileId = CF.draft.profiles[0].id;
+  // Version-gated tabs: a tab whose group has no options for the resolved engine
+  // version is HIDDEN, not disabled (D3).
+  const defs = cfOptionDefs();
+  const groups = new Set(defs.map(o => o.group === "cache" ? "memory" : o.group));
+  PTABS.forEach(t => {
+    const el = $("ptab" + t[0].toUpperCase() + t.slice(1));
+    if (el) el.hidden = !groups.has(t);
+  });
+  // The in-flight restart prompt (D5: never auto-restart).
+  const rr = S.cfg.restart_required === true;
+  $("profileRestartPrompt").hidden = !rr;
+  $("profileRestartText").textContent = "RESTART REQUIRED — " + (S.cfg.in_flight || 0) + " in-flight requests will be interrupted. Restart now? ";
+  const p = cfSelectedProfile();
+  if (!p) {
+    // No profiles: the tabs + editor are meaningless (the + ADD row stays).
+    $("profileTabCol").hidden = true;
+    $("profileEditor").hidden = true;
+    return;
+  }
+  $("profileTabCol").hidden = false;
+  $("profileEditor").hidden = false;
+  // The active tab may have vanished (version-gated away): fall back to GENERAL.
+  if (!["general", "model"].includes(CF.ptab) && !groups.has(CF.ptab)) {
+    CF.ptab = "general";
+    document.querySelectorAll("[data-ptab]").forEach(x => x.classList.toggle("on", x.dataset.ptab === "general"));
+    document.querySelectorAll("[data-ptab-panel]").forEach(pp => { pp.hidden = pp.dataset.ptabPanel !== "general"; });
+  }
+  if (document.activeElement !== $("profileName") && $("profileName").value !== p.name) $("profileName").value = p.name;
+  $("btnProfileActivate").classList.toggle("on", p.id === CF.draft.activeProfile);
+  $("btnProfileActivate").textContent = p.id === CF.draft.activeProfile ? "Active" : "Activate";
+  // An unvalidated dirty draft cannot activate (with the save buttons gone, the
+  // validation state is the only gate left).
+  $("btnProfileActivate").disabled = CF.saving || (cfDirty() && !(CF.validated === JSON.stringify(CF.draft) && cfgValidateResult && cfgValidateResult.ok));
+  $("modelPillName").textContent = (p.model && p.model.id) ? p.model.id : "— model unset —";
+  $("profileDrafter").textContent = "Drafter · " + (cfProfileFacts(p).drafter || "UNKNOWN — engine decides at load");
+  const meta = cfProfileMeta(p);
+  $("profileLaunchMeta").innerHTML = "Created " + esc(meta.created_at || "—") + " · Used " + esc(meta.last_used_at || "Never") + (meta.last_failure ? "<br>Last failure · " + esc(meta.last_failure.at) + " — " + esc(meta.last_failure.message) : "") + (meta.last_successful_launch ? "<br>Last successful launch · " + esc(meta.last_successful_launch) : "");
+  // LAUNCH PREVIEW: the argv this profile would launch with (from the tick).
+  const cfgP = (S.cfg.profiles || []).find(v => v.id === p.id);
+  const pv = cfgP && cfgP.preview && typeof cfgP.preview === "object" ? cfgP.preview : null;
+  $("profilePreviewBox").hidden = !pv;
+  $("modelProviderBox").hidden = !p;
+  $("btnProviderOpenCode").disabled = $("btnProviderPi").disabled = !(p.model && p.model.id);
+  if (pv) {
+    const args = Array.isArray(pv.args) ? pv.args : [];
+    const el = $("profilePreviewArgs");
+    if (args.length) {
+      const line = args.join(" ");
+      // G: argv renders as token spans — the box wraps at flag boundaries, and a
+      // token only breaks mid-word when a single token is wider than the box.
+      el.textContent = "";
+      const frag = document.createDocumentFragment();
+      args.forEach((t, i) => {
+        if (i) frag.appendChild(document.createTextNode(" "));
+        const s = document.createElement("span");
+        s.textContent = t;
+        frag.appendChild(s);
+      });
+      el.appendChild(frag);
+      el.classList.toggle("err", !!pv.error);
+      el.setAttribute("data-tip", line);
+    } else if (pv.error) {
+      el.textContent = pv.error;
+      el.classList.add("err");
+      el.removeAttribute("data-tip");
+    } else { el.textContent = "—"; }
+    $("profilePreviewRestart").hidden = pv.restart !== true;
+  }
+  // The model-axis options (draft override etc.) render under the model pill.
+  const axis = defs.filter(o => o.group === "model-axis");
+  cfPaintOptionRows("profileModelAxis", axis, p, defs);
+  cfRenderOptions(p);
+  // Stale keys (kept for downgrade safety) show once, in the active tab slot.
+  const staleKeys = Object.keys(p.options || {}).filter(k => !defs.some(o => o.key === k)).sort();
+  $("profileStaleSlot").hidden = !staleKeys.length || CF.ptab === "general";
+  if (staleKeys.length) {
+    const ver = (S.cfg && S.cfg.engine && S.cfg.engine.version) || "?";
+    $("profileStaleSlot").innerHTML = '<div class="stale-group" data-tip="Not in the active engine mapping (v' + esc(ver) + ') — the saved values are preserved and will apply when a matching engine is active."><div class="stale-bar" aria-expanded="false"><span>STALE OPTIONS — ' + staleKeys.length + ' KEPT</span><span class="warn-cap">STALE</span></div><div class="stale-body">' + staleKeys.map(k => {
+      const vs = p.options[k];
+      return '<div class="stale-row" data-tip="Not in the active engine mapping (v' + esc(ver) + ') — preserved, not emitted to the engine."><label>' + esc(k) + '</label><input id="option-stale-' + esc(k) + '" disabled value="' + esc(Array.isArray(vs) ? vs.join(", ") : vs) + '"><span class="profile-cap">KEPT</span></div>';
+    }).join('') + '</div></div>';
+  }
+}
+
+// The value an UNSET option displays. Offline shows the engine's effective value
+// (what the launch will do: local-folder model = ON, Hugging Face id = OFF); the
+// reset control stays hidden until the option is explicitly set.
+function cfOptionFallback(o, p) {
+  if (o.key === "offline") {
+    const cp = S && S.cfg && (S.cfg.profiles || []).find(v => v.id === p.id);
+    if (cp && typeof cp.offline_effective === "boolean") return cp.offline_effective;
+  }
+  return o.default;
+}
+function cfOptionRowHtml(o, p) {
+  const esc = cfEscape;
+  const value = p.options[o.key] ?? cfOptionFallback(o, p) ?? "";
+  const choices = o.kind === "bool" ? ["true", "false"] : o.choices || [];
+  const missing = (o.requires || []).filter(k => { const v = p.options[k] ?? cfOptionDefs().find(d => d.key === k)?.default; return v == null || v === false || v === "false" || v === "0" || v === "" || (Array.isArray(v) && !v.length); });
+  return '<div class="frow option-row" data-option-row="' + esc(o.key) + '" data-req="' + esc(missing.join(",")) + '"><label for="option-' + esc(o.key) + '" data-tip="' + esc(missing.length ? "Requires " + missing.join(", ") + " — set it first" : o.flag) + '">' + esc(o.flag) + '</label><input id="option-' + esc(o.key) + '" data-option="' + esc(o.key) + '" type="' + (choices.length ? 'hidden' : 'text') + '" placeholder="' + esc(o.default ?? "engine default") + '">' + (choices.length ? '<span class="option-choices">' + choices.map(v => '<button class="mini" data-option-choice="' + esc(o.key) + '" data-value="' + esc(v) + '">' + esc(o.kind === "bool" ? (v === "true" ? "ON" : "OFF") : v) + '</button>').join('') + '</span>' : '') + '<button class="mini" data-option-reset="' + esc(o.key) + '" data-tip="Use engine default">Reset</button></div>';
+}
+// The per-row sync shared by the tab panels and the GENERAL model-axis rows.
+function cfSyncOption(o, p, input, defs) {
+  const value = p.options[o.key] ?? cfOptionFallback(o, p) ?? "";
+  const missing = (o.requires || []).filter(k => { const v = p.options[k] ?? defs.find(d => d.key === k)?.default; return v == null || v === false || v === "false" || v === "0" || v === "" || (Array.isArray(v) && !v.length); });
+  const row = input.closest('[data-option-row]');
+  const invalid = (cfgValidateResult?.errors || []).find(e => e.includes("profile " + p.id + " option " + o.key + ":"));
+  if (invalid) row.dataset.tip = invalid; else row.dataset.tip = missing.length ? "Requires " + missing.join(", ") + " — set it first" : o.flag;
+  input.setAttribute('aria-invalid', String(!!invalid));
+  row.classList.toggle("unmet", !!missing.length);
+  row.querySelectorAll('input,button').forEach(c => { c.disabled = !!missing.length; });
+  if (document.activeElement !== input) input.value = p.options[o.key] == null && o.kind !== "bool" && !(o.choices || []).length ? "" : Array.isArray(value) ? value.join(", ") : String(value);
+  row.querySelectorAll('[data-option-choice]').forEach(b => b.classList.toggle('on', b.dataset.value === String(value)));
+  row.querySelector('[data-option-reset]').hidden = !Object.prototype.hasOwnProperty.call(p.options, o.key) || p.options[o.key] == null;
+  input.onchange = () => cfOptionChanged(o.key, input.value);
+}
+
+// Rebuild a row group only when its definitions change; a tick only re-syncs values,
+// so a focused input keeps its typed text and its change event still fires on blur.
+function cfPaintOptionRows(id, items, p, defs) {
+  const el = $(id), key = JSON.stringify(items);
+  if (el.dataset.optKey !== key) { el.dataset.optKey = key; el.innerHTML = items.map(o => cfOptionRowHtml(o, p)).join(""); }
+  items.forEach(o => { const input = $("option-" + o.key); if (input) cfSyncOption(o, p, input, defs); });
+}
+function cfRenderOptions(p) {
+  if (!p) return;
+  const defs = cfOptionDefs(), esc = cfEscape;
+  const compute = defs.filter(o => o.group === "compute");
+  cfPaintOptionRows("profileComputeOptions", compute, p, defs);
+  for (const t of PTABS) {
+    const panel = $("ptab" + t[0].toUpperCase() + t.slice(1) + "Panel");
+    if (!panel) continue;
+    const items = defs.filter(o => o.group === t || (t === "memory" && o.group === "cache"));
+    if (!items.length) { panel.innerHTML = '<div class="profile-meta">No options in this group for engine v' + esc((S.cfg && S.cfg.engine && S.cfg.engine.version) || "?") + '.</div>'; continue; }
+    const key = t + JSON.stringify(items) + JSON.stringify(Object.keys(p.options || {}).sort());
+    if (CF["optKey_" + t] !== key) {
+      CF["optKey_" + t] = key;
+      if (t === "memory") {
+        const memory = items.filter(o => o.group === "memory"), cache = items.filter(o => o.group === "cache");
+        panel.innerHTML = '<div class="section-heading"><h2>Memory</h2></div><div class="option-list">' + memory.map(o => cfOptionRowHtml(o, p)).join("") + '</div>' + (cache.length ? '<div class="profile-subsection"><div class="section-heading"><h2>Cache</h2></div><div class="option-list">' + cache.map(o => cfOptionRowHtml(o, p)).join("") + '</div></div>' : "");
+      } else {
+        panel.innerHTML = items.map(o => cfOptionRowHtml(o, p)).join("");
+      }
+    }
+    items.forEach(o => {
+      const input = $("option-" + o.key);
+      if (!input) return;
+      cfSyncOption(o, p, input, defs);
+    });
+  }
+}
+
+function cfOptionChanged(key, value) {
+  const p = cfSelectedProfile(), o = cfOptionDefs().find(o => o.key === key);
+  if (!p || !o) return;
+  if (value === "") delete p.options[key];
+  else p.options[key] = o.kind === "bool" ? value === "true" : o.kind === "append" ? value.split(',').map(v => v.trim()).filter(Boolean) : value;
+  cfProfileChanged();
+}
+$("profileEditor").addEventListener("click", (ev) => {
+  const bar = ev.target.closest && ev.target.closest('.stale-bar');
+  if (bar) { const g = bar.parentElement; g.classList.toggle('open'); bar.setAttribute('aria-expanded', String(g.classList.contains('open'))); return; }
+  const b = ev.target.closest && ev.target.closest('button'); if (!b) return;
+  if (b.dataset.optionChoice) cfOptionChanged(b.dataset.optionChoice, b.dataset.value);
+  if (b.dataset.optionReset) cfOptionChanged(b.dataset.optionReset, "");
+});
+
+$("profileList").onclick = ev => {
+  const b = ev.target.closest && ev.target.closest('[data-profile-id]');
+  if (b) { CF.profileId = b.dataset.profileId; CF.verdicts = []; CF.ptab = "general"; document.querySelectorAll("[data-ptab]").forEach(x => x.classList.toggle("on", x.dataset.ptab === "general")); document.querySelectorAll("[data-ptab-panel]").forEach(pp => { pp.hidden = pp.dataset.ptabPanel !== "general"; }); cfRenderProfiles(); }
+};
+$("btnProfileAdd").onclick = () => cfNewProfile(null);
+function cfNewProfile(cloneFrom) {
+  if (!CF.draft) return;
+  let id;
+  do { const random = new Uint16Array(1); crypto.getRandomValues(random); id = 'p-' + Date.now() + '-' + random[0].toString(16).padStart(4, '0'); } while (CF.draft.profiles.some(p => p.id === id));
+  // Decision: a new profile is the current contract's default option set + a
+  // sequential name + no model. No template system.
+  let n = CF.draft.profiles.length + 1;
+  while (CF.draft.profiles.some(p => p.name === "Profile " + n)) n++;
+  const base = cloneFrom ? cloneFrom : null;
+  const p = base ? JSON.parse(JSON.stringify(base)) : { model: { source: "none", id: null, dir: null }, options: { ane: true } };
+  Object.assign(p, { id, name: base ? null : "Profile " + n, meta: { created_at: new Date().toISOString(), last_used_at: null, last_successful_launch: null, last_failure: null } });
+  if (base) { let cn = 2; p.name = base.name + " copy"; while (CF.draft.profiles.some(x => x.name === p.name)) { cn++; p.name = base.name + " copy " + cn; } }
+  CF.draft.profiles.push(p); CF.profileId = id; cfProfileChanged();
+}
+$("btnProfileClone").onclick = () => { const p = cfSelectedProfile(); if (p) cfNewProfile(p); };
+$("btnProfileRemove").onclick = () => {
+  const p = cfSelectedProfile(); if (!p || !CF.draft) return;
+  CF.draft.profiles = CF.draft.profiles.filter(v => v.id !== p.id);
+  if (CF.draft.activeProfile === p.id) CF.draft.activeProfile = null;
+  CF.profileId = CF.draft.profiles[0]?.id || null; cfProfileChanged();
+};
+$("profileName").onchange = () => { const p = cfSelectedProfile(); if (p) { p.name = $("profileName").value; cfProfileChanged(); } };
+
+// ---- S7: the model chooser (never loads; OK = confirm into the draft) ----
+function openModelChooser() {
+  if (!CF.draft) return;
+  CF.chooserOpen = true; CF.chooserSel = null; CF.chooserSrc = "all"; CF.chooserSearch = "";
+  $("modelSearch").value = "";
+  $("modelModal").style.display = "flex";
+  renderModelChooser();
+  $("modelSearch").focus();
+}
+function closeModelChooser() {
+  CF.chooserOpen = false;
+  $("modelModal").style.display = "none";
+  if (CF.keyRevealed) cfKeyRemask(true);
+}
+function cfChooserModels() {
+  const q = CF.chooserSearch.trim().toLowerCase();
+  let ms = cfModels();
+  if (CF.chooserSrc !== "all") ms = ms.filter(m => m.source === CF.chooserSrc);
+  if (q) ms = ms.filter(m => String(m.id).toLowerCase().includes(q) || cfFolderSourceTag(m.source).toLowerCase().includes(q));
+  return ms;
+}
+function renderModelChooser() {
+  const esc = cfEscape;
+  const all = cfModels();
+  const srcs = ["all", ...new Set(all.map(m => m.source))];
+  $("modelSrcCaps").innerHTML = srcs.map(s => {
+    const count = s === "all" ? all.length : all.filter(m => m.source === s).length;
+    return '<button class="cb' + (CF.chooserSrc === s ? " on" : "") + '" data-msrc="' + esc(s) + '">' + (s === "all" ? "All" : cfFolderSourceTag(s)) + " · " + count + "</button>";
+  }).join("");
+  const q = CF.chooserSearch.trim().toLowerCase();
+  const hfLike = q.includes("/") && !q.includes(" ");
+  const ms = cfChooserModels();
+  $("modelRows").innerHTML = ms.map((m, i) => {
+    const match = hfLike && String(m.id).toLowerCase() === q;
+    const sel = CF.chooserSel === i;
+    const size = m.size_bytes ? " · " + cfSize(m.size_bytes) : "";
+    return '<button class="model-row' + (sel ? " sel" : "") + '" data-mrow="' + i + '"><span class="m-name">' + esc(m.id) + "</span>" + (match ? '<span class="match-tag">Match</span>' : "") + '<span class="m-src">' + esc(cfFolderSourceTag(m.source)) + size + "</span></button>";
+  }).join("") || '<div class="profile-meta" style="padding:8px">No downloaded models match.</div>';
+}
+$("modelPill").onclick = openModelChooser;
+$("modelClose").onclick = closeModelChooser;
+$("modelCancel").onclick = closeModelChooser;
+$("modelModal").addEventListener("click", ev => { if (ev.target === $("modelModal")) closeModelChooser(); });
+$("modelSearch").addEventListener("input", () => { CF.chooserSearch = $("modelSearch").value; CF.chooserSel = null; renderModelChooser(); });
+$("modelSrcCaps").addEventListener("click", ev => { const b = ev.target.closest && ev.target.closest("[data-msrc]"); if (b) { CF.chooserSrc = b.dataset.msrc; CF.chooserSel = null; renderModelChooser(); } });
+$("modelRows").addEventListener("click", ev => { const b = ev.target.closest && ev.target.closest("[data-mrow]"); if (b) { CF.chooserSel = Number(b.dataset.mrow); renderModelChooser(); } });
+$("modelOk").onclick = () => {
+  const p = cfSelectedProfile();
+  const m = cfChooserModels()[CF.chooserSel];
+  if (p && m) {
+    p.model = { source: m.source, id: m.id, dir: m.dir || null };
+    cfProfileChanged();
+  }
+  closeModelChooser();
+};
+document.addEventListener("keydown", ev => {
+  if (ev.key === "Escape") {
+    if (CF.chooserOpen) closeModelChooser();
+    else if ($("cfgModal").style.display === "flex") cfFirstRunDone();
+  }
+});
+
+function cfProfileChanged() { CF.verdicts = []; cfRenderProfiles(); cfDebouncedValidate(); }
+
+$("btnProfileActivate").onclick = () => {
+  // D14: activation commits the (possibly dirty) draft first — one atomic write
+  // carries the doc + the active-id change + the last_used_at stamp.
+  if (CF.saving || !CF.draft || !cfSelectedProfile()) return;
+  CF.previousResult = S && S.cfg && S.cfg.result; CF.pendingDoc = cfBuildDoc(); CF.pendingBaseline = JSON.stringify(CF.draft);
+  CF.saving = true; CF.activating = true;
+  cmd("config.activate", { doc: CF.pendingDoc, profileId: CF.profileId });
+};
+$("btnProfileRestart").onclick = () => cmd("restart");
+
+// ---- D10: first-run modal (shown once; dismissal persists via the store) ----
+function cfFirstRun() {
+  if (!(S.cfg && S.cfg.first_run === true) || CF.firstRunShown) return;
+  CF.firstRunShown = true;
+  window.showView("settings");
+  $("cfgModal").style.display = "flex";
+}
+function cfFirstRunDone() {
+  cmd("config.firstRunDone");
+  $("cfgModal").style.display = "none";
+  if (CF.keyRevealed) cfKeyRemask(true);
+}
+$("modalCta").onclick = () => {
+  cfFirstRunDone();
+  window.showView("settings");
+};
+$("modalDismiss").onclick = cfFirstRunDone;
+// One-time: fetch the raw doc so the settings draft can round-trip api_key.
+cmd("config.get");
 
 if (location.search.includes("demo")) {
   const D = { t:Date.now()/1000, state:"decode", ready:true, model:"incoai/Qwen3.8-27B-Splash", ctx:262144,
@@ -362,7 +1489,6 @@ if (location.search.includes("demo")) {
     req:{active:[{id:9, input:161870, age_s:12, pct:64}], recent:[{id:8,input:159779,cached:156448,output:1740,ttft_s:40.4,tps:27.2},{id:7,input:131555,cached:0,output:8635,ttft_s:1475,tps:22.4}], completed_total:8, failed_total:0, cancelled_total:0},
     sys:{phys_bytes:5.15e10, free_bytes:4.3e8, active_bytes:8.6e9, inactive_bytes:8.3e9, wired_bytes:3.05e10, compressed_bytes:2.5e9, swap_total_bytes:6.4e9, swap_used_bytes:5.3e9, engine_footprint_bytes:3.3e10},
     server:{pid:67911, launched_by_app:true, up_seconds:3725} };
-  $("pidNum").textContent = D.server.pid; $("envPill").textContent = "APP-MANAGED";
   (function loop(){ D.state = Math.random()<.7?"decode":"prefill"; if(D.state==="prefill"){D.prefill={pct:20+Math.random()*70, input:161870}; D.rates.prefill_tps=600+Math.random()*900; D.rates.decode_tps=0; D.engine.pressure=Math.random()<.1?"warning":"normal";} else {D.prefill=null; D.rates.decode_tps=60+Math.random()*60; D.engine.pressure="normal";} D.sys.free_bytes=3e8+Math.random()*2e9; D.sys.swap_used_bytes=5.3e9+Math.random()*5e8; window.update({...D, t:Date.now()/1000}); setTimeout(loop, 1000); })();
 }
 </script>

@@ -1,5 +1,6 @@
 import AppKit
 import WebKit
+import QuartzCore
 import Foundation
 import Darwin
 
@@ -10,50 +11,20 @@ enum Cfg {
     static let logLink = "/tmp/splash-standalone.log"
 }
 
-// Resolve the engine paths + engine argv from the documented env contract
-// (README "Configuration (environment)"). Re-resolved on every launch attempt so a
-// user fixing the install while the app is running takes effect on the next try.
-func isDir(_ path: String) -> Bool {
-    var values = [FileAttributeKey: Any]()
-    do { try values = FileManager.default.attributesOfItem(atPath: path) } catch { return false }
-    return values[.type] as? FileAttributeType == .typeDirectory
+// D9: the SPLASH_* env contract is retired. The engine launch is planned from
+// config.json by `planLaunch` (ui_logic.swift); AppDelegate wires it with the
+// real FS closures below. Nothing reads the process environment for engine
+// configuration.
+
+/// planLaunch's `fileContents`: the file's UTF-8 text, nil when absent.
+func fileContents(_ path: String) -> String? {
+    guard let d = FileManager.default.contents(atPath: path) else { return nil }
+    return String(data: d, encoding: .utf8)
 }
 
-// The README ./install.sh default install root (SPLASHUI_HOME).
-let defaultRoot = NSHomeDirectory() + "/SplashUI"
-
-// The Homebrew keg of the splash formula, if installed. The formula versions
-// its Cellar path per release, so the newest version dir is picked.
-func findBrewKeg() -> String? {
-    for base in ["/opt/homebrew", "/usr/local"] {
-        let cellar = base + "/Cellar/splash"
-        let versions = (try? FileManager.default.contentsOfDirectory(atPath: cellar)) ?? []
-        if let v = versions.sorted().last {
-            let keg = cellar + "/" + v
-            if access(keg + "/bin/splash", X_OK) == 0 { return keg }
-        }
-    }
-    return nil
-}
-
-// A kit's on-disk engine version, from its release.json — the flavor
-// discriminator the launch contract is keyed to. nil when absent (the test
-// harness injects its own).
-func kitVersion(_ kit: String) -> String? {
-    guard let data = FileManager.default.contents(atPath: kit + "/release.json") else { return nil }
-    guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-    return obj["version"] as? String
-}
-
-func resolve() -> SplashPaths {
-    resolveSplashPaths(
-        env: ProcessInfo.processInfo.environment,
-        defaultRoot: defaultRoot,
-        home: NSHomeDirectory(),
-        isDir: isDir,
-        isExecutable: { access($0, X_OK) == 0 },
-        brewKeg: findBrewKeg,
-        kitVersion: kitVersion)
+/// planLaunch's `listDir`: the dir's entry names, nil when not a directory.
+func listDir(_ path: String) -> [String]? {
+    (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? nil
 }
 
 // MARK: - Process helpers
@@ -76,11 +47,11 @@ func serverPids(port: Int) -> [Int32] {
 
 // Is anything listening on the engine port? Ground truth for "a server exists" —
 // a raw socket connect: no child process, no pgrep, immune to spawn flakiness.
-func portAlive(port: Int) -> Bool {
+func portAlive(port: Int, host: String = Cfg.host) -> Bool {
     var addr = sockaddr_in()
     addr.sin_family = sa_family_t(AF_INET)
     addr.sin_port = UInt16(port).bigEndian
-    addr.sin_addr = in_addr(s_addr: inet_addr(Cfg.host))
+    addr.sin_addr = in_addr(s_addr: inet_addr(host))
     let fd = socket(AF_INET, SOCK_STREAM, 0)
     guard fd >= 0 else { return false }
     defer { close(fd) }
@@ -117,19 +88,25 @@ final class ServerProc {
     // True once the app has started (or adopted) a server that is serving: the
     // auto-quit policy only applies to a service that actually ran.
     private(set) var everUp = false
+    private var launchReady = false
     private var launchDate = Date()
     private var restartDates: [Date] = []
     private var outHandle: FileHandle?
+    // D13: the session baseline from the last successful launch or adoption
+    // (nil before either). restart_required = current signature != this.
+    var lastSuccessfulPlanSignature: String?
 
-    // Resolved engine paths/config. Re-resolved on every launch attempt so a fixed
-    // install takes effect; also read each tick for the poll endpoint's port.
-    var slash: SplashPaths
+    // The launch plan (S4/D9): planned from config.json by planLaunch, consumed
+    // here. Re-planned on every launch attempt + each tick so a user fixing the
+    // install while the app is running takes effect on the next try.
+    var plan: LaunchConfig = LaunchConfig(port: 8123)
 
-    init() { slash = resolve() }
+    /// The engine port (the config's global; the adopt ground truth reads it).
+    var port: Int { plan.port ?? 8123 }
 
     var pid: Int32? {
         if let p = process, p.isRunning { return p.processIdentifier }
-        return serverPids(port: slash.port).first
+        return serverPids(port: port).first
     }
 
     func upSeconds() -> Double {
@@ -139,7 +116,13 @@ final class ServerProc {
     }
 
     // App-side adoption of an already-serving engine (e.g. one started by start.sh).
-    func adopt() { everUp = true }
+    func adopt() {
+        everUp = true
+        // An external engine's full argv is unknown. Treat the current config
+        // as this session's baseline so later edits still prompt for restart.
+        // This is in-memory only, just like a successful launch's signature.
+        lastSuccessfulPlanSignature = plan.signature
+    }
 
     // Clear the error state so a user-pressed Start/Restart begins a fresh attempt.
     func clearLaunchError() {
@@ -147,9 +130,16 @@ final class ServerProc {
         launchFailRetries = 0
     }
 
+    /// Tag a plan error with the active profile's name (the S3 error style names the
+    /// profile + the actionable reason). A profile-less plan error (config parse) is
+    /// left untouched.
+    private func tag(_ message: String) -> String {
+        let name = plan.profileName ?? plan.profileId ?? ""
+        return name.isEmpty ? message : "[\(name)] " + message
+    }
+
     func launch() {
-        slash = resolve()
-        guard pid == nil, !portAlive(port: slash.port) else { return }
+        guard pid == nil, !portAlive(port: port, host: plan.host ?? Cfg.host) else { return }
         // Fresh engine log + tail symlink on every attempt, before the pre-flight,
         // so even a missing-install failure lands in /tmp (the panel + `tail -f`).
         let stamp = ISO8601DateFormatter().string(from: Date())
@@ -161,14 +151,19 @@ final class ServerProc {
         try? FileManager.default.removeItem(atPath: Cfg.logLink)
         try? FileManager.default.createSymbolicLink(atPath: Cfg.logLink, withDestinationPath: logPath)
 
-        // Pre-flight: if the install is missing/broken, record it and stop —
+        // Pre-flight: a failed plan (no kit / no model / eligibility blocked) —
         // no process is touched, and the app stays up showing the actionable error.
-        if let e = slash.error { recordLaunchFailure(e, logPath: logPath); return }
-        guard let executable = slash.executable else { return }
+        if let e = plan.error { recordLaunchFailure(tag(e), logPath: logPath); return }
+        guard let executable = plan.executable else { return }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: executable)
-        if let dir = slash.workDir { p.currentDirectoryURL = URL(fileURLWithPath: dir) }
-        p.arguments = slash.engineArgs
+        if let dir = plan.workDir { p.currentDirectoryURL = URL(fileURLWithPath: dir) }
+        p.arguments = plan.engineArgs
+        // D9: the API key rides the child env (inherited + the plan's engineEnv),
+        // NEVER on argv (the S2a anchor). Everything else is inherited verbatim.
+        var env = ProcessInfo.processInfo.environment
+        for (k, v) in plan.engineEnv { env[k] = v }
+        p.environment = env
         guard let out = FileHandle(forWritingAtPath: logPath) else {
             recordLaunchFailure("cannot write engine log: \(logPath)", logPath: logPath)
             return
@@ -177,11 +172,10 @@ final class ServerProc {
         p.standardError = out
         p.terminationHandler = { [weak self] proc in
             DispatchQueue.main.async {
-                self?.outHandle?.closeFile()
-                self?.outHandle = nil
-                self?.terminated(proc)
+                self?.terminated(proc, logPath: logPath)
             }
         }
+        launchReady = false
         do { try p.run() } catch {
             out.closeFile()
             recordLaunchFailure(error.localizedDescription, logPath: logPath)
@@ -193,18 +187,29 @@ final class ServerProc {
         outHandle = out
         process = p
         launchedByApp = true
-        everUp = true
         userStopped = false
         pendingRestart = false
         restartsExhausted = false
         lastLaunchError = nil
-        launchFailRetries = 0
+        startingPlanSignature = plan.signature
         launchDate = Date()
+    }
+
+    private var startingPlanSignature: String?
+
+    func markReady(observedAt: Date) {
+        guard !launchReady, let process, process.isRunning, observedAt >= launchDate else { return }
+        launchReady = true
+        everUp = true
+        launchFailRetries = 0
+        lastSuccessfulPlanSignature = startingPlanSignature
     }
 
     // One line to NSLog (Console.app) and an append to the engine log stream, so
     // `tail -f /tmp/splashui.log` shows launch failures alongside engine output.
     private func recordLaunchFailure(_ message: String, logPath: String) {
+        userStopped = true
+        pendingRestart = false
         lastLaunchError = LaunchError(message: message, attempt: Date())
         launchFailRetries += 1
         let line = "SplashUI launch failed (attempt \(launchFailRetries)): \(message)\n"
@@ -228,13 +233,28 @@ final class ServerProc {
         }
         outHandle?.closeFile()
         outHandle = nil
-        for pid in serverPids(port: slash.port) { kill(pid, SIGTERM) }
+        for pid in serverPids(port: port) { kill(pid, SIGTERM) }
         process = nil
     }
 
-    private func terminated(_ proc: Process) {
-        if proc === process { process = nil }
+    private func terminated(_ proc: Process, logPath: String) {
+        guard proc === process else { return }
+        process = nil
+        outHandle?.closeFile()
+        outHandle = nil
         guard !userStopped else { return }
+        if !launchReady {
+            var output = ""
+            if let log = FileHandle(forReadingAtPath: logPath) {
+                let end = log.seekToEndOfFile()
+                log.seek(toFileOffset: end > 65536 ? end - 65536 : 0)
+                output = String(decoding: log.readDataToEndOfFile(), as: UTF8.self)
+                log.closeFile()
+            }
+            pendingRestart = false
+            recordLaunchFailure(engineStartupFailure(exitStatus: proc.terminationStatus, output: output), logPath: logPath)
+            return
+        }
         // backoff: max 3 automatic restarts in 10 minutes
         let cutoff = Date().addingTimeInterval(-600)
         restartDates = restartDates.filter { $0 > cutoff }
@@ -244,7 +264,7 @@ final class ServerProc {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             guard let self = self else { return }
             self.pendingRestart = false
-            guard self.pid == nil else { return }
+            guard !self.userStopped, self.lastLaunchError == nil, self.pid == nil else { return }
             self.launch()
         }
     }
@@ -413,14 +433,21 @@ final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate {
     var statusItem: NSStatusItem!
     var panel: KeyablePanel!
     var webView: WKWebView!
     let server = ServerProc()
     let tail = LogTail()
     private var timer: Timer?
+    // The panel's page finished loading: JS evals (tick payloads, config.get /
+    // save / validate replies) land on a live page, not a loading one — an eval
+    // before load is a silent no-op (the form would render empty forever).
+    private var webReady = false
+    private var pendingTick: String?
+    private var pendingView = "status"
     private var globalMonitor: Any?
+    private var presentedLaunchError: String?
 
     private var lastDecodeOut: Double?
     private var lastDecodeOutAt: Date?
@@ -436,10 +463,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     private var lastServerSeen = Date.distantPast
     private var downSince: Date?
 
+    // config.json store — the single source of truth for engine/model/profile
+    // configuration (D9). Loaded before the first engine launch (D1); the ONLY
+    // code path that writes the file (R8 single-writer).
+    private var configStore: ConfigStore!
+    // Last canonical j.cfg JSON: the change gate (cfg ticks only when it changed).
+    private var lastCfgJSON: String?
+    // S5: global settings channel (06).
+    /// R9 mitigation: a directory picker (browse) may steal focus from the
+    /// panel; while it is open the hidePanel observers (window resignKey,
+    /// global mouse) must not dismiss the panel behind the sheet.
+    private var pickerOpen = false
+    /// A browse pick (context + path), stamped by the NSOpenPanel close and
+    /// consumed exactly ONE tick into the payload's `picked` dict.
+    private var pendingPicked: (context: String, path: String)?
+    /// The background folder scanner.
+    private let folderScanQueue = DispatchQueue(label: "com.splashui.folderscan", qos: .utility)
+    private var folderScanCache: [String: [String: Any]] = [:]
+    private var folderScanKey: String?
+    private var folderScanInFlight = false
+    // MARK: - Smoke hooks (env-gated, dev only)
+    // The borderless NSPanel is invisible to AX (no AXWindows, no CDP) and
+    // auto-dismisses on focus loss, so an external smoke agent cannot drive it.
+    // SPLASHUI_SMOKE=1 (plus SPLASHUI_SMOKE_CHANNEL / SPLASHUI_SMOKE_JS /
+    // SPLASHUI_SMOKE_OUT) makes a launch deterministic. Off by default: without
+    // these env vars every path here is unreachable and behavior is unchanged.
+    let smokeMode = ProcessInfo.processInfo.environment["SPLASHUI_SMOKE"] == "1"
+    let smokeChannel = ProcessInfo.processInfo.environment["SPLASHUI_SMOKE_CHANNEL"]
+    let smokeJS = ProcessInfo.processInfo.environment["SPLASHUI_SMOKE_JS"]
+    let smokeOut = ProcessInfo.processInfo.environment["SPLASHUI_SMOKE_OUT"] ?? "/tmp/splashui_smoke_out.json"
+
     private let orange = NSColor(red: 0.98, green: 0.54, blue: 0.24, alpha: 1)
     private let teal = NSColor(red: 0.25, green: 0.76, blue: 0.79, alpha: 1)
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        // The config loads first (small file, one synchronous read) — before any
+        // engine launch reads the configuration it replaces (D1). If the file was
+        // absent, the load SEEDS it (D10): that write happens synchronously here,
+        // ahead of the launch/adopt below and of any config command (R10).
+        configStore = ConfigStore(home: NSHomeDirectory())
+        configStore.doc.globals.modelFolders = existingModelFolders(configStore.doc.globals.modelFolders,
+            home: NSHomeDirectory(), isDir: { isDir($0) })
+        // D12: pick the startup profile (most-recent last_used_at -> the persisted
+        // active id -> first), stamp it (D13), and persist the choice — still before
+        // the first launch below. On a fresh seed this re-picks its own "Default"
+        // (a no-op write: the seed IS the persistence).
+        configStore.activateStartup()
+        // S4/D9: the first launch plan comes from config.json (planLaunch) — the
+        // env contract is retired. It must be set BEFORE the launch/adopt below:
+        // the pid/port probes read it (the adopt ground truth is the configured
+        // port).
+        server.plan = computePlan()
         setupStatusItem()
         setupPanel()
         if server.pid == nil {
@@ -469,6 +543,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         statusItem.button?.image = trayImage(color: .systemGray, fill: 0)
         statusItem.button?.action = #selector(togglePanel)
         statusItem.button?.target = self
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
     }
 
     private func setupPanel() {
@@ -485,28 +560,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         cfg.userContentController.add(self, name: "cmd")
         cfg.userContentController.add(self, name: "size")
         webView = WKWebView(frame: panel.contentView!.bounds, configuration: cfg)
+        webView.navigationDelegate = self
         webView.autoresizingMask = [.width, .height]
         panel.contentView = webView
         if let url = Bundle.main.url(forResource: "panel", withExtension: "html") {
             webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
         }
-        NotificationCenter.default.addObserver(self, selector: #selector(hidePanel),
-                                               name: NSWindow.didResignKeyNotification, object: panel)
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            self?.hidePanel()
+        NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: panel, queue: .main) { [weak self] _ in
+            // Smoke mode reuses the `pickerOpen` guard pattern: both auto-dismiss
+            // paths (this resignKey + the R9 global-mouse monitor below) must not
+            // close the panel while the smoke agent is driving it.
+            guard let self = self, !self.pickerOpen, !self.smokeMode else { return }
+            self.hidePanel()
         }
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            guard let self = self, !self.pickerOpen, !self.smokeMode else { return }
+            self.hidePanel()
+        }
+        // S5/D10: a fresh install (the first-run seed ran) auto-shows the
+        // panel so the settings modal is the first thing a new user sees.
+        if configStore.firstRun { showPanel() }
     }
 
     @objc private func togglePanel() {
+        if NSApp.currentEvent?.type == .rightMouseUp, let button = statusItem.button {
+            let menu = NSMenu()
+            menu.addItem(withTitle: "Open Status", action: #selector(openStatus), keyEquivalent: "")
+            menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: "")
+            menu.addItem(.separator())
+            menu.addItem(withTitle: "Quit SplashUI", action: #selector(quitApp), keyEquivalent: "q")
+            for item in menu.items { item.target = self }
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY), in: button)
+            return
+        }
         if panel.isVisible { hidePanel() }
         else { showPanel() }
     }
 
-    private func showPanel() {
+    @objc private func openStatus() { showPanel() }
+    @objc private func openSettings() { showPanel(view: "settings") }
+
+    private func showPanel(view: String = "status") {
+        pendingView = view
+        if webReady { webView.evaluateJavaScript("window.showView('\(view)')", completionHandler: nil) }
         if let button = statusItem.button, let win = button.window {
             let f = win.frame
-            let maxX = (NSScreen.main?.frame.maxX ?? 2000) - 528
-            panel.setFrame(NSRect(x: min(f.maxX - 528, maxX), y: f.minY - panel.frame.height - 8, width: 520, height: panel.frame.height),
+            // The panel opens at the view's own width (820 for settings, 520 for status),
+            // right edge anchored 8pt from the tray icon, clamped to the screen.
+            let w: CGFloat = view == "settings" ? 820 : 520
+            let maxX = (NSScreen.main?.frame.maxX ?? 2000) - w - 8
+            panel.setFrame(NSRect(x: min(f.maxX - w - 8, maxX), y: f.minY - panel.frame.height - 8, width: w, height: panel.frame.height),
                            display: false)
         }
         NSApp.activate(ignoringOtherApps: true)
@@ -514,40 +617,365 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     }
 
     @objc private func hidePanel() {
-        guard panel.isVisible else { return }
+        guard panel.isVisible, panel.attachedSheet == nil, !errorModalOpen else { return }
         panel.orderOut(nil)
+    }
+
+    private var errorModalOpen = false
+
+    private func presentLaunchFailure(_ message: String) {
+        guard webReady, message != presentedLaunchError else { return }
+        presentedLaunchError = message
+        errorModalOpen = true
+        showPanel(view: "settings")
+        let data = try! JSONSerialization.data(withJSONObject: [message])
+        let args = String(decoding: data, as: UTF8.self)
+        webView.evaluateJavaScript("window.showLaunchFailure(...\(args))", completionHandler: nil)
     }
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         if message.name == "size" {
-            if let h = message.body as? Int { applyPanelHeight(h) }
+            if let body = message.body as? [String: Any] {
+                applyPanelSize(height: body["h"] as? Int, width: (body["w"] as? Int) ?? 520)
+            } else if let h = message.body as? Int {
+                applyPanelSize(height: h, width: 520)
+            }
             return
         }
-        guard let cmd = message.body as? String else { return }
+        // Object-body commands: the JS sends {cmd: "…", …args} (T8 clean cutover —
+        // string bodies are no longer accepted).
+        guard let body = message.body as? [String: Any] else { return }
+        let cmd = body["cmd"] as? String ?? ""
         switch cmd {
-        case "start": server.clearLaunchError(); server.launch()
+        case "error.copy":
+            if let text = presentedLaunchError {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            }
+        case "provider.copy":
+            // Model Provider buttons: the snippet is built from the saved config,
+            // so the key never passes through the panel's JS.
+            guard let raw = body["target"] as? String, let target = ProviderTarget(rawValue: raw),
+                  let id = body["profileId"] as? String,
+                  let p = configStore.doc.profiles.first(where: { $0.id == id }),
+                  let served = servedModelName(for: p) else { return }
+            let g = configStore.doc.globals
+            let text = providerSnippet(target: target, profileName: p.name, servedName: served,
+                                       host: g.host, port: g.port, apiKey: g.apiKey)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        case "webui.open":
+            let g = configStore.doc.globals
+            guard g.webUI, let url = URL(string: "http://\(loopbackHost(g.host)):\(g.port)/") else { return }
+            NSWorkspace.shared.open(url)
+        case "error.dismiss": errorModalOpen = false
+        case "start": presentedLaunchError = nil; server.clearLaunchError(); server.launch()
         case "stop":
             server.stop()
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.quitApp() }
         case "restart":
+            presentedLaunchError = nil
             // stop() clears the failure record + retry count, so a fresh attempt
             // starts at attempt 1 with no stale error in the UI.
             server.stop()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.server.launch() }
+        case "config.get": respondConfigGet()
+        case "config.save": respondConfigSave(body)
+        case "config.activate":
+            guard let id = body["profileId"] as? String,
+                  let obj = body["doc"] as? [String: Any],
+                  let data = try? JSONSerialization.data(withJSONObject: obj) else { return }
+            if let candidate = parseConfig(data).doc {
+                let errors = modelFolderAdditionErrors(candidate.globals.modelFolders,
+                    existing: configStore.doc.globals.modelFolders, isDir: { isDir($0) })
+                if !errors.isEmpty {
+                    sendConfigResult(ConfigSaveResult(ok: false, errors: errors, warnings: []), to: "window.__cfgSave")
+                    return
+                }
+            }
+            sendConfigResult(configStore.activateCandidate(data, profileId: id), to: "window.__cfgSave")
+        case "config.validate": respondConfigValidate(body)
+        case "config.reveal_key":
+            // The eye toggle (S7): the raw key, on explicit user action only.
+            // The mask is the passive default; this is the approved exception
+            // to D6's "never rendered" (AGENTS.md tension flagged in S7 report).
+            let key = configStore.doc.globals.apiKey
+            let json = try? JSONSerialization.data(withJSONObject: ["key": key])
+            let str = json.flatMap { String(data: $0, encoding: .utf8) } ?? "null"
+            evalOnReady("window.__cfgRevealKey(\(str))", oneShot: true)
+        case "browse": browse(context: body["context"] as? String ?? "")
+        case "config.scan":
+            if let id = body["id"] as? String { forceFolderScan(id) }
+        case "config.firstRunDone":
+            configStore.doc.firstRunShown = true
+            _ = configStore.saveCurrent()
         default: break
         }
     }
 
-    // JS reports natural content height; panel grows/shrinks to fit (top edge pinned)
-    private func applyPanelHeight(_ h: Int) {
-        let screenH = NSScreen.main?.frame.height ?? 1200
-        let target = min(max(320, CGFloat(h + 16)), screenH - 120)
-        let f = panel.frame
-        guard abs(f.height - target) > 4 else { return }
-        panel.setFrame(NSRect(x: f.minX, y: f.origin.y - (target - f.height), width: f.width, height: target), display: true)
+    // MARK: Config bridge (config.get / config.save / config.validate)
+
+    // Pre-didFinish evals queue here (one-shot) and flush on page load.
+    private var pendingConfigEval: String?
+
+    /// JS evals on the webview silently no-op while the page is still loading, so
+    /// every one-stage eval is gated on webReady (didFinish): pre-ready evals are
+    /// queued (one-shot) and flushed the instant the page lands.
+    private func evalOnReady(_ script: String, oneShot: Bool) {
+        if webReady {
+            webView.evaluateJavaScript(script, completionHandler: nil)
+        } else if oneShot || pendingConfigEval == nil {
+            pendingConfigEval = script
+        }
     }
 
-    private func quitApp() {
+    /// The whole doc, raw (the edit form needs the unmasked api_key to round-trip
+    /// it — the tick payload only ever carries the mask, D6).
+    private func respondConfigGet() {
+        configStore.doc.globals.modelFolders = existingModelFolders(configStore.doc.globals.modelFolders,
+            home: NSHomeDirectory(), isDir: { isDir($0) })
+        let data = configData(configStore.doc)
+        guard let str = String(data: data, encoding: .utf8) else { return }
+        // cfInit marks __cfgReady. The retry is scheduled FIRST so it survives
+        // an eval that lands before the page script defines __cfgGet (a direct
+        // call there would throw and abort the statement). cfInit no-ops once
+        // the draft is set, so the double-call is safe.
+        let script = "(function(){ if (!window.__cfgRetryT) { window.__cfgRetryT = 1; setTimeout(function(){ if (!window.__cfgReady) { try { window.webkit.messageHandlers.cmd.postMessage({cmd: \"config.get\"}) } catch(e) {} } }, 500); } if (window.__cfgGet) { window.__cfgGet(\(str)); } })()"
+        evalOnReady(script, oneShot: true)
+    }
+
+    /// Parse the candidate strictly, validate, write (the single-writer path).
+    private func respondConfigSave(_ body: [String: Any]) {
+        guard let docObj = body["doc"] as? [String: Any],
+              let data = try? JSONSerialization.data(withJSONObject: docObj) else { return }
+        if let candidate = parseConfig(data).doc {
+            let errors = modelFolderAdditionErrors(candidate.globals.modelFolders,
+                existing: configStore.doc.globals.modelFolders, isDir: { isDir($0) })
+            if !errors.isEmpty {
+                sendConfigResult(ConfigSaveResult(ok: false, errors: errors, warnings: []), to: "window.__cfgSave")
+                return
+            }
+        }
+        var r = configStore.saveCandidate(data)
+        if let candidate = parseConfig(data).doc { r.warnings += profileStates(candidate).compactMap { $0["eligibility_reason"] as? String } }
+        sendConfigResult(r, to: "window.__cfgSave")
+    }
+
+    /// The same rules, no write (syntax/strict check only — unsupported combos
+    /// never block; that is S3's eligibility, D4).
+    private func respondConfigValidate(_ body: [String: Any]) {
+        guard let docObj = body["doc"] as? [String: Any],
+              let data = try? JSONSerialization.data(withJSONObject: docObj) else { return }
+        var r = configStore.validateCandidate(data)
+        if let candidate = parseConfig(data).doc {
+            r.errors += modelFolderAdditionErrors(candidate.globals.modelFolders,
+                existing: configStore.doc.globals.modelFolders, isDir: { isDir($0) })
+            r.ok = r.ok && r.errors.isEmpty
+        }
+        let states = parseConfig(data).doc.map { profileStates($0) } ?? []
+        let candidateVersion = parseConfig(data).doc.map { candidate in
+            planLaunch(configData(candidate), home: NSHomeDirectory(), isDir: { isDir($0) },
+                       isExecutable: { access($0, X_OK) == 0 }, brewKeg: { findBrewKeg() },
+                       kitVersion: { kitVersion($0) }).version
+        } ?? server.plan.version
+        let res: [String: Any] = ["ok": r.ok, "errors": r.errors, "warnings": r.warnings, "profiles": states,
+                                  "option_defs": profileOptionDefinitions(version: candidateVersion),
+                                  "validation_id": body["validation_id"] ?? NSNull()]
+        if let json = try? JSONSerialization.data(withJSONObject: res), let str = String(data: json, encoding: .utf8) {
+            evalOnReady("window.__cfgValidate(\(str))", oneShot: true)
+        }
+    }
+
+    private func sendConfigResult(_ r: ConfigSaveResult, to fn: String) {
+        let res: [String: Any] = ["ok": r.ok, "errors": r.errors, "warnings": r.warnings]
+        guard let data = try? JSONSerialization.data(withJSONObject: res),
+              let str = String(data: data, encoding: .utf8) else { return }
+        evalOnReady("\(fn)(\(str))", oneShot: true)
+    }
+
+    /// Same S3 verdict for every profile, including inactive/unsaved candidates.
+    private func profileStates(_ doc: ConfigDoc) -> [[String: Any]] {
+        return doc.profiles.map { p in
+            var model = p.model
+            var state_size: Int64? = nil
+            let scanned = folderScanCache[model.source]?["models"] as? [[String: Any]]
+            if let found = scanned?.first(where: { $0["id"] as? String == model.id }) {
+                if let d = found["dir"] as? String { model.dir = d }
+                state_size = found["size_bytes"] as? Int64
+            }
+            var state = modelTickState(model: model, version: server.plan.version,
+                                       draftModel: p.options["draft_model"]?.string,
+                                       isDir: { isDir($0) },
+                                       fileContents: { try? String(contentsOfFile: $0, encoding: .utf8) })
+            state["id"] = p.id
+            state["size_bytes"] = state_size ?? NSNull()
+            return state
+        }
+    }
+
+    // MARK: WKNavigationDelegate
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        webReady = true
+        webView.evaluateJavaScript("window.showView('\(pendingView)')", completionHandler: nil)
+        if let s = pendingConfigEval {
+            pendingConfigEval = nil
+            webView.evaluateJavaScript(s, completionHandler: nil)
+        }
+        if let s = pendingTick {
+            pendingTick = nil
+            webView.evaluateJavaScript(s, completionHandler: nil)
+        }
+        // Smoke hook: webReady is the go — show + drive the panel here, where the
+        // page can actually receive JS (pre-ready evals are silent no-ops).
+        if smokeMode { smokeWebReady() }
+    }
+
+    // MARK: - Smoke hooks (env-gated, dev only)
+
+    /// Runs once, when the panel's webview is ready. With SPLASHUI_SMOKE=1 this
+    /// auto-shows the panel (so the smoke agent finds it), switches to
+    /// SPLASHUI_SMOKE_CHANNEL if set (06 selects Settings, other channels select
+    /// Status), then executes SPLASHUI_SMOKE_JS and writes the returned value
+    /// (stringified) to SPLASHUI_SMOKE_OUT.
+    private func smokeWebReady() {
+        showPanel()
+        if let c = smokeChannel, !c.isEmpty {
+            let script = "window.showView('\(c == "06" ? "settings" : "status")'); var s=document.querySelector('section[data-channel=\"\(c)\"]'); if (s) s.scrollIntoView();"
+            webView.evaluateJavaScript(script, completionHandler: nil)
+        }
+        guard let path = smokeJS, let code = try? String(contentsOfFile: path, encoding: .utf8) else { return }
+        // callAsyncJavaScript's first argument is a FUNCTION BODY (not an
+        // expression): the hook file is a single expression (e.g. bare
+        // JSON.stringify(...) or new Promise(...)), often with a trailing ';'.
+        // Wrap as `return (<expr>);` — the file's trailing ';' is trimmed first so
+        // it can't land inside the parens. evaluateJavaScript would reject a
+        // returned Promise (WKErrorDomain 5); callAsyncJavaScript AWAITS it, so
+        // both sync and async hook scripts resolve to their value.
+        let expr = code.replacingOccurrences(of: "[\\s;]+$", with: "", options: .regularExpression)
+        let body = "return (\(expr));"
+        webView.callAsyncJavaScript(body, arguments: [:], in: nil, in: .page) { [weak self] result in
+            switch result {
+            case .success(let r):
+                if let s = r as? String {
+                    try? s.data(using: .utf8)?.write(to: URL(fileURLWithPath: self?.smokeOut ?? "/tmp/splashui_smoke_out.json"))
+                } else if let data = try? JSONSerialization.data(withJSONObject: r, options: [.fragmentsAllowed]) {
+                    try? data.write(to: URL(fileURLWithPath: self?.smokeOut ?? "/tmp/splashui_smoke_out.json"))
+                }
+            case .failure(let e):
+                let error = ["error": "JS evaluation failed: \(e.localizedDescription)"]
+                if let data = try? JSONSerialization.data(withJSONObject: error) {
+                    try? data.write(to: URL(fileURLWithPath: self?.smokeOut ?? "/tmp/splashui_smoke_out.json"))
+                }
+            }
+        }
+    }
+
+    // MARK: S5 — directory picker (browse) + background folder scanner
+
+    /// R9 mitigation: a directory picker may steal focus from the panel. While
+    /// it is open, `NSApp.activate` keeps the panel key and the hidePanel
+    /// observers (resignKey + global mouse) are guarded by `pickerOpen`, so the
+    /// panel never dismisses mid-pick. The pick is stamped into `pendingPicked`
+    /// and rides the NEXT tick as the `picked` dict (consumed one tick).
+    private func browse(context: String) {
+        guard !pickerOpen else { return }
+        let openPanel = NSOpenPanel()
+        openPanel.canChooseDirectories = true
+        openPanel.canChooseFiles = false
+        openPanel.allowsMultipleSelection = false
+        openPanel.prompt = context == "model_folder" ? "Choose model folder" : "Choose engine kit"
+        pickerOpen = true
+        defer { pickerOpen = false }
+        NSApp.activate(ignoringOtherApps: true)
+        if openPanel.runModal() == .OK, let url = openPanel.url {
+            pendingPicked = (context: context, path: url.path)
+        }
+    }
+
+    /// Force-rescan one folder id (the per-row SCAN button): drop its cache
+    /// entry, then re-scan the whole set (bounded + shallow, so cheap).
+    private func forceFolderScan(_ id: String) {
+        folderScanCache[id] = nil
+        runFolderScan()
+    }
+
+    /// The scan cache key = the sorted "id path" pairs: a re-scan happens when
+    /// the folder SET changes (add / delete / path edit), never per tick.
+    private func folderSetKey(_ folders: [ModelFolder]) -> String {
+        (server.plan.version ?? "") + "\n" + folders.map { "\($0.id) \($0.path)" }.sorted().joined(separator: "\n")
+    }
+
+    /// Kick the background folder scan (main-thread callers only). The cache
+    /// itself is touched on the MAIN thread exclusively; the file-system work
+    /// (bounded, shallow listings) runs on the utility queue, then the result
+    /// is committed back on main. `scanning` rides the tick while in flight.
+    private func runFolderScan() {
+        guard !folderScanInFlight else { return }
+        folderScanInFlight = true
+        let folders = configStore.doc.globals.modelFolders
+        let fm = FileManager.default
+        let version = server.plan.version
+        let scanKey = folderSetKey(folders)
+        if folderSetKey(folders) != folderScanKey { folderScanCache.removeAll() }
+        let todo = folders.filter { folderScanCache[$0.id] == nil }
+        folderScanQueue.async { [weak self] in
+            let results = todo.map { f -> (String, [String: Any]) in
+                (f.id, folderTickState(
+                    folder: f,
+                    isDir: { fm.fileExists(atPath: $0, isDirectory: nil) },
+                    fileContents: { d -> String? in
+                        guard d == f.path || d.hasPrefix(f.path + "/") else { return nil }
+                        return (try? String(contentsOfFile: d, encoding: .utf8))
+                    },
+                    listDir: { d -> [String]? in
+                        guard d == f.path || d.hasPrefix(f.path + "/") else { return nil }
+                        return (try? fm.contentsOfDirectory(atPath: d))
+                    },
+                    version: version,
+                    dirSize: { d -> Int64? in
+                        guard d == f.path || d.hasPrefix(f.path + "/") else { return nil }
+                        return dirSize(d)
+                    }))
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                for (id, st) in results { self.folderScanCache[id] = st }
+                self.folderScanKey = scanKey
+                self.folderScanInFlight = false
+            }
+        }
+    }
+
+    // JS reports the view's geometry target; the panel animates to it with the
+    // top edge pinned. The settings view widens the window to 820 and the status
+    // view returns to 520; a width-only message keeps the current height (only
+    // status content ever sets the height).
+    private func applyPanelSize(height: Int?, width: Int) {
+        let screenH = NSScreen.main?.frame.height ?? 1200
+        let f = panel.frame
+        let targetH: CGFloat
+        if let height {
+            targetH = panelTargetSize(view: width == 820 ? "settings" : "status",
+                                      contentHeight: height, screenHeight: screenH).height
+        } else {
+            targetH = f.height
+        }
+        let targetW = CGFloat(width)
+        guard abs(f.width - targetW) > 1 || abs(f.height - targetH) > 4 else { return }
+        // The window is right-anchored under the tray; widening must not push
+        // the right edge off screen (showPanel's clamp, applied here too).
+        let screenMaxX = NSScreen.main?.frame.maxX ?? 2000
+        let x = min(f.minX, screenMaxX - 8 - targetW)
+        let frame = NSRect(x: x, y: f.origin.y - (targetH - f.height), width: targetW, height: targetH)
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.25
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().setFrame(frame, display: true)
+        }
+    }
+
+    @objc private func quitApp() {
         NSApplication.shared.terminate(nil)
     }
 
@@ -586,13 +1014,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         ])
     }
 
+    // ---- S4/D9: the launch plan + registry drift (the config-owned pipeline)
+
+    /// The launch plan (C3): planLaunch over the current config doc with the real
+    /// FS closures (the config is the single source of truth — no env, D9).
+    private func computePlan() -> LaunchConfig {
+        do { try prepareFlatHubCache(configStore.doc, home: NSHomeDirectory()) }
+        catch { return LaunchConfig(error: "Could not prepare the offline model cache: \(error.localizedDescription)") }
+        let data = configData(configStore.doc)
+        return planLaunch(data, home: NSHomeDirectory(),
+                          isDir: { isDir($0) },
+                          isExecutable: { access($0, X_OK) == 0 },
+                          brewKeg: { findBrewKeg() },
+                          kitVersion: { kitVersion($0) },
+                          fileContents: { fileContents($0) },
+                          listDir: { listDir($0) })
+    }
+
+    /// The registry drift report (S2b): the kit's serve_options.py table vs the
+    /// version contract. Re-read only when the kit's workDir+version changes
+    /// (the 20 KB file read stays out of the 1 s tick's hot path).
+    private var registryCacheKey: String?
+    private var registryCache: RegistryReport?
+    private func registryReport(for plan: LaunchConfig) -> RegistryReport? {
+        guard let workDir = plan.workDir else { return nil }
+        let key = workDir + "|" + (plan.version ?? "")
+        if key == registryCacheKey { return registryCache }
+        let path = workDir + "/server/serve_options.py"
+        guard let text = fileContents(path) else { registryCacheKey = key; registryCache = nil; return nil }
+        let (contract, _) = contractFor(plan.version, registry: launchRegistry)
+        let report = registryDiff(parseServeOptions(text), contract: contract, version: plan.version)
+        registryCacheKey = key
+        registryCache = report
+        return report
+    }
+
+    /// The tick's `registry_report` value (mirrors ui_logic's private
+    /// `registryTickValue`): NSNull when there is no report or the kit is inSync
+    /// (a known-good kit stays quiet — no churn on the change gate); else the
+    /// condensed dict, empty classifications omitted.
+    private func registryTickValueOverlay(_ report: RegistryReport?) -> Any {
+        guard let r = report, !r.inSync else { return NSNull() }
+        var d: [String: Any] = ["version": r.version ?? NSNull()]
+        if !r.missingInContract.isEmpty { d["missing_in_contract"] = r.missingInContract as Any }
+        if !r.missingInKit.isEmpty { d["missing_in_kit"] = r.missingInKit as Any }
+        if !r.envSecretMismatches.isEmpty { d["env_secret_mismatches"] = r.envSecretMismatches as Any }
+        if !r.unrecognized.isEmpty { d["unrecognized"] = r.unrecognized as Any }
+        return d
+    }
+
     // MARK: Polling
 
     private func get(_ path: String, _ done: @escaping (Data?) -> Void) {
-        guard let url = URL(string: server.slash.base + path) else { done(nil); return }
+        // D9: the host + port + key come from the launch plan (config.json), not env.
+        let port = server.port
+        let host = server.plan.host ?? Cfg.host
+        let key = configStore.doc.globals.apiKey
+        guard let url = URL(string: "http://\(host):\(port)\(path)") else { done(nil); return }
         var req = URLRequest(url: url)
         req.timeoutInterval = 2.5
-        req.setValue(server.slash.apiKey, forHTTPHeaderField: "x-api-key")
+        req.setValue(key, forHTTPHeaderField: "x-api-key")
         URLSession.shared.dataTask(with: req) { data, resp, _ in
             let ok = (resp as? HTTPURLResponse)?.statusCode == 200
             DispatchQueue.main.async { done(ok ? data : nil) }
@@ -632,8 +1113,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     }
 
     private func tick() {
-        // Keep the resolved port/key fresh (env changes + user fixing the install).
-        server.slash = resolve()
+        // S4/D9: the launch plan is re-planned from config.json every tick — a
+        // user fixing the install (or saving the panel) while the app is running
+        // takes effect on the next launch attempt + this tick's restart state.
+        server.plan = computePlan()
+        let statusRequestedAt = Date()
         get("/status") { [weak self] data in
             let j = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
             DispatchQueue.main.async {
@@ -641,6 +1125,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 if let j = j {
                     self.statusJSON = j
                     self.lastServerSeen = Date()
+                    if j["ready"] as? Bool == true, self.server.lastLaunchError == nil {
+                        self.server.markReady(observedAt: statusRequestedAt)
+                        self.presentedLaunchError = nil
+                    }
                     if let completed = self.fld("requests", "completed"), let cancelled = self.fld("requests", "cancelled") {
                         self.tail.poll(completed: telemetryInt(completed), cancelled: telemetryInt(cancelled))
                     }
@@ -886,29 +1374,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         else if decoding || !tail.active.isEmpty { state = "decode" }
         else if queued { state = "queue" }
 
-        // ---- the UI never outlives the *service*: quit 10 s after a server that was
-        // observed up goes away (crash, or an adopted external server dying). A launch
-        // that never came up (everUp == false) must NOT quit — the menu bar stays
-        // available with the actionable error on display; Stop is always the exit.
+        // Startup failure (including after a previous session) must keep Settings
+        // available. Only a previously serving service without a launch error may auto-quit.
+        if let error = server.lastLaunchError { presentLaunchFailure(error.message) }
         if procGone {
             if downSince == nil { downSince = Date() }
             else if let ds = downSince,
                     autoQuitDecision(procGone: procGone, everUp: server.everUp,
-                                     downFor: Date().timeIntervalSince(ds), userStopped: server.userStopped) {
+                                     downFor: Date().timeIntervalSince(ds), userStopped: server.userStopped,
+                                     launchFailed: server.lastLaunchError != nil) {
                 NSApplication.shared.terminate(nil)
             }
         } else {
             downSince = nil
         }
 
-        // ---- auto-retry a failed launch: every 30 s, up to 10 total attempts. The
-        // user may have installed/fixed the kit meanwhile; launch() re-resolves
-        // paths fresh and clears the error on success, re-records on failure.
-        if server.lastLaunchError != nil && !server.userStopped &&
-            launchRetryDue(error: server.lastLaunchError?.attempt,
-                           retries: server.launchFailRetries, now: Date()) {
-            server.launch()
-        }
         // ---- tray
         switch state {
         case "down": updateTray(detail: "DOWN", color: .systemRed, fill: 0)
@@ -943,11 +1423,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             "t": now.timeIntervalSince1970,
             "state": state,
             "ready": ready,
-            "model": js(server.slash.modelId),
+            "model": js(server.plan.modelId),
             "ctx": js(fld("maximum_context_tokens")),
         ]
         j["engine"] = [
-            "version": js(server.slash.version),
+            "version": js(server.plan.version),
             "metal_healthy": js(metrics["splash_metal_healthy"]),
             "pressure": js(statusJSON?["memory_pressure"]),
             "loop_tick_ms": js(fld("loop", "max_tick_ms")),
@@ -1052,12 +1532,126 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             "launched_by_app": server.launchedByApp && server.pid != nil,
             "up_seconds": server.upSeconds(),
             "launch_error": js(server.lastLaunchError?.message),
-            "kit_dir": js(server.slash.workDir),
+            "kit_dir": js(server.plan.workDir),
         ]
 
+        // ---- cfg (change gate: it ticks only when it changed; unchanged -> the
+        // key is omitted and the JS keeps its last copy). In S1a it reflects the
+        // config store; the fields later stories own ride along as stable nulls.
+        let cfgInFlight = prefillCount + decodeCount + frontendCount
+        // S4/D9: the plan fills the launch-relevant cfg fields the pre-S4 nulls
+        // held (engine resolved/version/valid/error, the mapping fields, the
+        // restart state, the registry drift). The values are plan-stable, so the
+        // change gate stays quiet while the install is unchanged.
+        var cfgPayload = configTickPayload(
+            doc: configStore.doc,
+            loadError: configStore.loadError,
+            versionTooNew: configStore.versionTooNew,
+            activeInvalid: configStore.activeInvalid,
+            firstRun: configStore.firstRun,
+            inFlight: cfgInFlight,
+            result: configStore.consumeSaveResult())
+        let plan = server.plan
+        var eng = (cfgPayload["engine"] as? [String: Any]) ?? [:]
+        eng["resolved"] = plan.workDir != nil
+        eng["version"] = plan.version ?? NSNull()
+        // S5: the engine path + every rung the discovery ladder tried (the
+        // kit-miss path names them all; the success path the rungs to the winner).
+        eng["path"] = plan.workDir ?? NSNull()
+        eng["tried"] = plan.tried
+        eng["valid"] = plan.error == nil
+        eng["error"] = plan.error ?? NSNull()
+        // S7: the ENGINE panel's new display facts (plan-stable: the change
+        // gate stays quiet while the install is unchanged).
+        let archOS = kitArchOS(plan.workDir)
+        eng["arch"] = archOS.arch ?? NSNull()
+        eng["os"] = archOS.os ?? NSNull()
+        let v = engineVerdict(resolved: plan.workDir != nil, version: plan.version,
+                              error: plan.error, mappingFallback: plan.mappingFallback)
+        eng["verdict"] = v.verdict
+        eng["verdict_reason"] = v.reason ?? NSNull()
+        cfgPayload["engine"] = eng
+        cfgPayload["option_defs"] = profileOptionDefinitions(version: plan.version)
+        cfgPayload["mapping_fallback"] = plan.mappingFallback
+        cfgPayload["mapping_used"] = plan.version ?? NSNull()
+        // D13: compare against the successful launch/adoption session baseline.
+        // nil before either; a rename shares the signature.
+        let restart = server.lastSuccessfulPlanSignature.map { plan.signature != $0 }
+        cfgPayload["restart_required"] = restart ?? NSNull()
+        cfgPayload["restart_reason"] = restart == true
+            ? (plan.error ?? "the configuration changed — restart the engine to apply")
+            : NSNull()
+        cfgPayload["registry_report"] = registryTickValueOverlay(registryReport(for: plan))
+        // S5: model-folder state (background scan). Re-scan only when the
+        // folder SET changes (key = sorted ids+paths) or a force scan cleared
+        // an entry; `scanning` rides the tick while one is in flight.
+        let doc = configStore.doc
+        let fkey = folderSetKey(doc.globals.modelFolders)
+        if fkey != folderScanKey {
+            runFolderScan()
+        }
+        var folders: [[String: Any]] = []
+        for f in doc.globals.modelFolders where isDir(f.path) {
+            var st = folderScanCache[f.id] ?? ["id": f.id, "path": f.path, "source": f.source,
+                                               "models": [Any](), "present": NSNull() as Any, "error": NSNull()]
+            st["scanning"] = folderScanInFlight || st["present"] is NSNull
+            folders.append(st)
+        }
+        cfgPayload["folders"] = folders
+        let states = profileStates(doc)
+        cfgPayload["profiles"] = (cfgPayload["profiles"] as? [[String: Any]] ?? []).map { profile in
+            var merged = profile
+            if let state = states.first(where: { $0["id"] as? String == profile["id"] as? String }) {
+                for key in ["eligibility", "eligibility_reason", "drafter", "kind", "size_bytes"] {
+                    merged[key] = state[key]
+                }
+            }
+            // S7: the GENERAL tab's LAUNCH PREVIEW. The running/launching
+            // profile shows the plan itself (one code path); the others run
+            // the same pipeline over their own options (pure, no process).
+            let pid = profile["id"] as? String
+            if let p = doc.profiles.first(where: { $0.id == pid }) {
+                merged["offline_effective"] = offlineEffective(p, folders: doc.globals.modelFolders)
+                if p.id == plan.profileId, plan.error == nil, plan.executable != nil {
+                    merged["preview"] = ["args": plan.engineArgs as [Any], "error": NSNull() as Any,
+                                          "restart": plan.restartRequired,
+                                          "version": plan.version ?? NSNull()] as [String: Any]
+                } else if p.id == plan.profileId {
+                    merged["preview"] = ["args": [Any](), "error": plan.error ?? NSNull() as Any,
+                                          "restart": false, "version": plan.version ?? NSNull()] as [String: Any]
+                } else {
+                    merged["preview"] = profilePreview(
+                        p, kit: plan.workDir, version: plan.version,
+                        folders: doc.globals.modelFolders,
+                        isDir: { isDir($0) },
+                        fileContents: { try? String(contentsOfFile: $0, encoding: .utf8) },
+                        listDir: { try? FileManager.default.contentsOfDirectory(atPath: $0) },
+                        globals: doc.globals,
+                        baselineSignature: server.lastSuccessfulPlanSignature)
+                }
+            }
+            return merged
+        }
+        // S5: a browse pick rides exactly ONE tick as `picked` (the base
+        // payload's `picked` null is overridden here; consumed one tick).
+        if let p = pendingPicked {
+            cfgPayload["picked"] = ["context": p.context, "path": p.path]
+            pendingPicked = nil
+        }
+        let cfgJSON = jsonString(JSONValue(any: cfgPayload), indent: 0)
+        if cfgJSON != lastCfgJSON {
+            lastCfgJSON = cfgJSON
+            j["cfg"] = cfgPayload
+        }
         if let data = try? JSONSerialization.data(withJSONObject: j),
            let str = String(data: data, encoding: .utf8) {
-            webView.evaluateJavaScript("window.update(\(str))")
+            // A tick that fires before the page has loaded would no-op; keep the
+            // latest one and flush it in didFinish (the next tick self-heals).
+            if webReady {
+                webView.evaluateJavaScript("window.update(\(str))")
+            } else {
+                pendingTick = str
+            }
         }
     }
 }

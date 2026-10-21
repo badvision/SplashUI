@@ -34,7 +34,11 @@ the UI + lifecycle scripts.
 ./start.sh     # starts the engine server, then the menu-bar UI (adopts it)
 ```
 
-Click the menu-bar icon to show/hide the panel. `./stop.sh` tears everything down.
+Click the menu-bar icon to show/hide live status. Right-click it for **Open Status**,
+**Settings…**, or **Quit SplashUI**. The status screen's upper-right hamburger also
+opens the separate Settings screen; its **STATUS** cap returns to telemetry.
+Settings scrolls internally, with the shared restart control always reachable.
+`./stop.sh` tears everything down.
 
 ## Using the API
 
@@ -46,23 +50,68 @@ curl http://127.0.0.1:8123/v1/chat/completions \
 
 Point any OpenAI-compatible client at `http://127.0.0.1:8123/v1` with the key above.
 
-## Configuration (environment)
+## Configuration
 
-`start.sh` passes these to the UI; all have defaults. The same variables apply when launching `build/SplashUI.app` directly from Finder (e.g. via the shell or a wrapper). The UI finds the engine by **discovery**, in order: `SPLASH_KIT_DIR` → `SPLASHUI_HOME/kit/splash-$SPLASH_VERSION-arm64-macos26` → a Homebrew install (`brew install incoai/tap/splash`) as the last-resort fallback; `SPLASHUI_HOME` defaults to `~/SplashUI` (the `./install.sh` default). A **model dir** is found the same way — `SPLASH_MODEL_ROOT` → `SPLASHUI_HOME/models/<id>` → `~/.lmstudio/models/<id>`. A 1.3.0-style engine loads that dir positionally (reusing an installed model, never re-downloading); the 1.3.1+ engine (the Homebrew keg) loads by Hugging Face id and *cannot read* the 1.3.0 package format, so **when a local model dir is present the Homebrew fallback is skipped** — picking it would ignore the model and re-download it — and if no 1.3.0-style engine is found the app reports exactly that. When nothing resolves, the menu bar stays up and shows the missing paths (with every location it tried) instead of quitting; a failed launch retries every 30 s (10 attempts), so an install fixed while the app is running takes effect on the next attempt.
+The menu-bar app (`build/SplashUI.app`) reads all engine/model/profile configuration from
+**`config.json`** — its in-app Settings surface (panel section 06) owns the values. The file
+lives at `~/Library/Application Support/SplashUI/config.json` (created with documented defaults
+on first run) and is the single source of truth. The app reads no environment variables — the
+pre-panel `SPLASH_*` env vars are deprecated and no longer have any effect on the app.
 
-| Variable               | Default                                        | Meaning                          |
-|------------------------|------------------------------------------------|----------------------------------|
-| `SPLASH_PORT`          | `8123`                                         | engine listen port               |
-| `SPLASH_KEY`           | `splash-standalone-1`                          | API key (loopback-only service)  |
-| `SPLASH_MODEL_ROOT`    | *(none — UI assumes no location)*<sup>†</sup>  | model dir                      |
-| `SPLASH_MAX_CACHE_DISK`| `100g`                                         | SSD prefix-cache cap             |
-| `SPLASH_IDLE_RELEASE`  | `240m`                                         | unload an idle model after this  |
-| `SPLASH_ANE`           | `on`                                           | GPU + Neural-Engine prefill split (`off` = GPU-only) |
-| `SPLASH_VERSION`       | `1.3.0`                                        | engine release pin               |
-| `SPLASHUI_HOME`        | `~/SplashUI`<sup>†</sup>                       | install root (kit + models)    |
-| `SPLASH_KIT_DIR`       | *(none)* — derived from `SPLASHUI_HOME` when set | point at an existing Splash engine install |
+Profiles expose the resolved runtime's startup options in GENERAL / MODEL / MEMORY / API
+tabs. GENERAL holds profile identity, compute settings and launch preview; MEMORY also
+contains cache settings. Unsupported flags stay hidden without deleting saved values.
+Every change auto-saves after debounced validation; unsupported combinations remain
+saveable with warnings. Settings expands to 820px while status stays 520px, using one
+shared header and one-row footer. Existing common model folders are discovered automatically;
+nonexistent folders are omitted, and manual additions must point to real directories.
+ACTIVATE PROFILE atomically commits the whole draft and stamps that profile's last-used
+time. It does **not** restart the engine: a restart-required prompt shows the current
+in-flight request count, and **CONFIRM RESTART** explicitly applies the changed plan.
+The shared **RESTART** footer button flashes while changes await restart and opens this prompt. Reverting to the running plan
+clears it without restarting. Port and the masked API key remain global-only.
 
-<sup>†</sup> The UI's default install root is `~/SplashUI`, matching `./install.sh` and `start.sh`; it errors actionably when nothing is found.
+If the engine fails to start, SplashUI stays open and shows an error modal with
+the engine's output and exit status. Choose **Open Settings**, correct the configuration,
+and press **Start** to try again. A spawned process is not considered ready until the
+engine reports readiness; a failed restart also keeps settings available.
+Startup failures remain stopped until an explicit Start/Restart; dismissing the
+error never retries. **Copy to Clipboard** copies the complete error through the
+native pasteboard bridge. AUTO first checks the selected repo id against the local
+Hub cache, regardless of its original library (including `local/name` models from
+LM Studio). A complete current snapshot uses the newest Homebrew engine; the profile's
+`offline` option governs downloads. Unset, a model from a local folder runs offline and
+a Hugging Face id may download through the engine; set `offline` on or off to override.
+Offline with absent or incompatible cached files produces an explicit-download error,
+never a silent download; only local-folder models need a local-folder-capable engine.
+For indexed checkpoints with nested vision shards, SplashUI maintains a separate
+`~/Library/Application Support/SplashUI/hf-flat` cache: only its index is rewritten;
+all weights and metadata link to the originals. Vision tensors stay present. The
+child uses `HF_HUB_CACHE` only when the original snapshot has unsupported nested
+shard names. Neither the real Hub cache nor the Homebrew engine is patched.
+Engines with the installed GGUF target adapter (1.3.2+) also accept cached GGUF
+targets offline, including their mmproj vision projector; these snapshots do not
+need MLX config/tokenizer files. Downloads happen only when the profile's offline option is off.
+
+`./install.sh` still reads a couple of its own vars for the one-shot install (it predates the
+panel and is unaffected). `start.sh` no longer exports any of them — it launches its own engine
+directly from a fixed argv (see "How it works"); the menu-bar app ignores env and reads
+`config.json`.
+
+The environment variables formerly documented here are retired. Each one maps to a
+`config.json` setting (edit these in the panel's Settings section, or in the file directly):
+
+| Retired env var        | config.json replacement                                                                 |
+|------------------------|-----------------------------------------------------------------------------------------|
+| `SPLASH_KIT_DIR`       | `globals.engine.manual_path` (with `globals.engine.mode: "manual"`)                     |
+| `SPLASHUI_HOME`        | retired — AUTO discovers installed Homebrew versions, not an assumed SplashUI kit      |
+| `SPLASH_VERSION`       | not user-facing — version read from the installed kit's `release.json`                  |
+| `SPLASH_PORT`          | `globals.port`                                                                          |
+| `SPLASH_KEY`           | `globals.api_key`                                                                       |
+| `SPLASH_MODEL_ROOT`    | `globals.model_folders` plus the active profile's `model` choice (`profiles[].model`)   |
+| `SPLASH_MAX_CACHE_DISK`| profile option `max_cache_disk`                                                         |
+| `SPLASH_IDLE_RELEASE`  | profile option `idle_release`                                                           |
+| `SPLASH_ANE`           | profile option `ane` (default on)                                                       |
 
 ## How it works
 
@@ -83,8 +132,10 @@ Point any OpenAI-compatible client at `http://127.0.0.1:8123/v1` with the key ab
     under the hood). It loads the model **by id** — a one-time download it manages itself.
     It refuses the 1.3.0 Splash-package id (`incoai/Qwen3.8-27B-Splash`) outright — "Splash
     no longer loads" that prebuilt format — so a 1.3.0 model dir is not usable by it either.
-    Consequently, when a local model dir is present the app does not fall back to the Homebrew
-    keg (it would re-download the model); it asks for a 1.3.0-style engine instead.
+  AUTO selects the highest valid installed Homebrew Splash version (numeric ordering,
+  Apple-silicon and Intel prefixes); the old SplashUI-local kit is not an automatic default.
+  MANUAL uses exactly the chosen path. Model/runtime incompatibilities remain visible
+  eligibility errors rather than silently selecting another engine. VALID has no build-version note.
 - The app polls `/status` (1 s) and `/metrics` (1 s) and renders the panel in a
   WKWebView. The decode readout is the *committed* output rate: counter delta divided by
   the real elapsed time between samples. DFlash-2 draft tokens that fail verification do
