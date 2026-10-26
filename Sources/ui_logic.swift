@@ -775,12 +775,45 @@ public let contract140 = VersionContract(
         FamilyRule(configKey: "model_type", value: "qwen4_exp", family: "Qwen3.8-Flash-Next"),
     ])
 
+/// The 1.4.1 contract: 1.4.0's option table verbatim (the real 1.4.1 keg's
+/// server/serve_options.py is byte-identical to the 1.4.0 keg's) + two new
+/// - `Qwen3.5-122B-A10B` (its fine-tune Ornith-1.5-122B is the family too,
+///   the draft released for it the family's): the target's config.json says
+///   model_type "qwen3_5_moe" (verified against Qwen/Qwen3.5-122B-A10B on the
+///   Hub; the flat "qwen3_5" value stays Qwen3.8-27B — the two families are
+///   distinct by MoE, as the engine's layouts are).
+/// - `Flint`: the target's config.json says model_type "flint" (verified
+///   against RecursiveSI/flint on the Hub). The 1.4.1 families.py marks it
+///   vision=False — its models serve text only whatever their repository
+///   holds, so the engine's --language-only behavior needs no app-side
+///   rule: the family itself is text-only.
+/// The engine detects the family from the model config at load (upstream's
+/// model-check); the rules only pre-resolve the draft for the offline-cache
+/// check.
+public let contract141 = VersionContract(
+    version: "1.4.1", flavor: .launcher,
+    options: sharedOptions140 + launcherModelOptions,
+    familyRegistry: [
+        "Qwen3.8-27B": "incoai/Qwen3.8-27B-DFlash2",
+        "Qwen3.6-35B-A3B": "incoai/Qwen3.6-35B-A3B-DFlash2",
+        "Qwen3.5-122B-A10B": "incoai/Ornith-1.5-122B-DFlash2",
+        "Qwen3.8-Flash-Next": "incoai/Qwen3.8-Flash-Next-DFlash2",
+        "Flint": "incoai/Flint-DFlash2",
+    ],
+    familyRules: [
+        FamilyRule(configKey: "model_type", value: "qwen3_5", family: "Qwen3.8-27B"),
+        FamilyRule(configKey: "model_type", value: "qwen3_5_moe", family: "Qwen3.5-122B-A10B"),
+        FamilyRule(configKey: "model_type", value: "qwen4_exp", family: "Qwen3.8-Flash-Next"),
+        FamilyRule(configKey: "model_type", value: "flint", family: "Flint"),
+    ])
+
 /// The default registry: every authored version.
 public let launchRegistry = LaunchRegistry(contracts: [
     "1.3.0": contract130,
     "1.3.1": contract131,
     "1.3.2": contract132,
     "1.4.0": contract140,
+    "1.4.1": contract141,
 ])
 
 /// D16: the contract for a kit's release.json version. An exact hit when the
