@@ -35,6 +35,18 @@ dependencies (swiftc + WebKit + Foundation only).
   never an automatic default; MANUAL uses exactly the selected kit. A normal VALID
   cap has no confusing built-against-version annotation. Restart preserves the current plan.
 - **Engine version detected from the kit's `release.json`, never user-set** (D16).
+- **Engine upgrades are a diff-driven contract, never a version bump** (D17). When a
+  new Splash releases: fetch the real keg **without touching the installed one**
+  (`brew fetch splash` → extract the bottle to a temp dir), then diff the *engine
+  truth files* against the previous version's: `server/serve_options.py` (the option
+  table — a byte-identical file means the contract's option list carries over
+  verbatim) and `install/families.py` (the family registry + per-family
+  `model_type` rules). Verify any new family's `model_type` against the model's real
+  Hub `config.json` before authoring the rule. Then add the new `VersionContract` +
+  registry entry (D3 hand-authored, `serve_options.py` is validation assist only),
+  re-anchor the fallback/latest assertions, and review the new CLI for options the
+  app should adopt — adopt the beneficial ones, document the rest. A 1.4.1-style
+  release (options byte-identical, only families changed) is legal and expected.
 - **Settings screen widens the window** (D19): the panel animates its width per view —
   status 520pt, settings 820pt (the three-column layout needs the room; the extra width
   goes to the detail column). Height is driven by status content only; the settings screen
@@ -110,6 +122,12 @@ visual checks burned three agent budgets before the deterministic harness existe
 - **Restore machine state after every live run**: config bytes byte-identical (sha256),
   engine pid/port untouched, no stray app processes. The smoke script does the
   backup/restore — never bypass it.
+- **Engine gotcha when hand-launching for a live smoke**: the launcher re-execs the
+  engine as `python3 -u -P -m server.server …` — the `-P` (safe path) means `cwd`
+  is NOT on `sys.path`, so running `python -m server.server` directly from the
+  libexec dir fails with `No module named 'server'`. Always launch through
+  `install/launcher.py serve` (it inserts the kit root into `sys.path`); never
+  replicate the re-exec'd argv by hand.
 - Swift trap worth remembering: `NSNumber` bridges to `Bool` for *any* number — JSON
   decoding must test `is NSNumber` and discriminate `CFBoolean` via `CFGetTypeID`
   before `as? Bool`, or every number parses as true/false.
