@@ -1237,19 +1237,22 @@ do {
     let d = contractFor("1.4.0", registry: launchRegistry)
     check(d.fallback == false && d.contract.version == "1.4.0" && d.contract.flavor == .launcher,
           "contractFor: 1.4.0 -> the launcher contract, fallback false")
+    let e = contractFor("1.4.1", registry: launchRegistry)
+    check(e.fallback == false && e.contract.version == "1.4.1" && e.contract.flavor == .launcher,
+          "contractFor: 1.4.1 -> the launcher contract, fallback false")
 }
 
-// 28. contractFor: unseen versions -> the LATEST authored (1.4.0) + fallback =
+// 28. contractFor: unseen versions -> the LATEST authored (1.4.1) + fallback =
 // true (D3: launch proceeds; S7 shows the "FALLBACK MAPPING" cap).
 do {
-    let newer = contractFor("1.4.1", registry: launchRegistry)
-    check(newer.fallback == true && newer.contract.version == "1.4.0",
-          "contractFor: unseen 1.4.1 -> the latest authored (1.4.0) + fallback")
+    let newer = contractFor("1.4.2", registry: launchRegistry)
+    check(newer.fallback == true && newer.contract.version == "1.4.1",
+          "contractFor: unseen 1.4.2 -> the latest authored (1.4.1) + fallback")
     let older = contractFor("1.2.9", registry: launchRegistry)
-    check(older.fallback == true && older.contract.version == "1.4.0",
-          "contractFor: older 1.2.x -> the latest authored (1.4.0) + fallback")
+    check(older.fallback == true && older.contract.version == "1.4.1",
+          "contractFor: older 1.2.x -> the latest authored (1.4.1) + fallback")
     let unreadable = contractFor(nil, registry: launchRegistry)
-    check(unreadable.fallback == true && unreadable.contract.version == "1.4.0",
+    check(unreadable.fallback == true && unreadable.contract.version == "1.4.1",
           "contractFor: unreadable release.json (nil) -> the latest authored + fallback")
 }
 
@@ -1360,6 +1363,34 @@ do {
         && c.option("max_cache_disk_writes")?.requires == ["max_cache_disk"]
         && c.option("cache_dir")?.requires == ["persistent_cache"],
           "contract 1.4.0: the 1.3.2 requires cross-checks survive unchanged")
+}
+
+// 31c. The 1.4.1 contract (ground truth: the real 1.4.1 keg's serve_options.py +
+// install/families.py, diffed against the 1.4.0 keg): the option table is
+// BYTE-IDENTICAL to 1.4.0's (no new flags, no changed defaults) — the 1.4.1
+// delta is the family registry only: + Qwen3.5-122B-A10B (Ornith-1.5-122B is
+// the family too) and + Flint (text-only; the 1.4.1 families.py's vision=False).
+do {
+    let c = contract141
+    check(c.flavor == .launcher, "contract 1.4.1: the launcher flavor")
+    check(c.options == contract140.options,
+          "contract 1.4.1: the option table is identical to 1.4.0's (the 1.4.1 keg's serve_options.py is byte-identical)")
+    check(Set(c.options.map { $0.key }) == Set(contract132.options.map { $0.key }) |
+          Set(["ple_memory", "expert_memory", "sparse_kv_memory", "verify_rows"]),
+          "contract 1.4.1: 1.3.2's keys + the 4 1.4.x flags, nothing new")
+    check(c.familyRegistry == [
+        "Qwen3.8-27B": "incoai/Qwen3.8-27B-DFlash2",
+        "Qwen3.6-35B-A3B": "incoai/Qwen3.6-35B-A3B-DFlash2",
+        "Qwen3.5-122B-A10B": "incoai/Ornith-1.5-122B-DFlash2",
+        "Qwen3.8-Flash-Next": "incoai/Qwen3.8-Flash-Next-DFlash2",
+        "Flint": "incoai/Flint-DFlash2",
+    ], "contract 1.4.1: the keg's families.py (the 5 families, the 1.4.1 additions verbatim)")
+    check(c.familyRules == [
+        FamilyRule(configKey: "model_type", value: "qwen3_5", family: "Qwen3.8-27B"),
+        FamilyRule(configKey: "model_type", value: "qwen3_5_moe", family: "Qwen3.5-122B-A10B"),
+        FamilyRule(configKey: "model_type", value: "qwen4_exp", family: "Qwen3.8-Flash-Next"),
+        FamilyRule(configKey: "model_type", value: "flint", family: "Flint"),
+    ], "contract 1.4.1: the 4 config->family rules (verified against the Hub config.jsons)")
 }
 
 // 32. THE D9(b) HEADLINE ANCHOR (amended per open item 5): with the seeded
@@ -1581,17 +1612,17 @@ do {
 }
 
 // 41. Fallback in the builder: a 1.3.9 kit (no authored contract) runs the latest
-// authored mapping (1.4.0) with fallback = true — the launch proceeds (D3); S7
+// authored mapping (1.4.1) with fallback = true — the launch proceeds (D3); S7
 // surfaces the cap.
 do {
     let (contract, fallback) = contractFor("1.3.9", registry: launchRegistry)
-    check(fallback == true && contract.version == "1.4.0", "fallback: a 1.3.9 kit maps to the 1.4.0 contract")
+    check(fallback == true && contract.version == "1.4.1", "fallback: a 1.3.9 kit maps to the 1.4.1 contract")
     let res = buildArgv(contract, profileValues: ["state_format": .string("bf16")],
                         model: ProfileModel(source: "hfid", id: "m/r"),
                         globals: GlobalCfg(port: 8123, apiKey: "k"))
     check(res.args == ["-u", "install/launcher.py", "serve", "--model", "m/r",
                        "--host", "127.0.0.1", "--port", "8123", "--state-format", "bf16"],
-          "fallback: the 1.4.0 mapping drives the argv (launch proceeds)")
+          "fallback: the 1.4.1 mapping drives the argv (launch proceeds)")
     check(res.env == ["SPLASH_API_KEY": "k"], "fallback: env built from the globals as usual")
 }
 
@@ -1622,7 +1653,7 @@ do {
 do {
     let model = ProfileModel(source: "lmstudio", id: "m/r", dir: "/m")   // dir + id: both flavors build
     let globals = GlobalCfg(port: 8123, apiKey: "k")
-    for contract in [contract130, contract131, contract132, contract140] {
+    for contract in [contract130, contract131, contract132, contract140, contract141] {
         check(contract.option("cache_dir")?.requires == ["persistent_cache"],
               "G2: \(contract.version) --cache-dir requires --persistent-cache (the engine cross-check)")
         let v = buildArgv(contract, profileValues: ["cache_dir": .string("/tmp/pc")],
@@ -1644,7 +1675,7 @@ do {
 // registry was missing "max" in all three contracts.
 do {
     let seven = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
-    for contract in [contract130, contract131, contract132, contract140] {
+    for contract in [contract130, contract131, contract132, contract140, contract141] {
         check(contract.option("reasoning_effort")?.choices == seven,
               "G3: \(contract.version) --default-reasoning-effort has the 7 real choices (incl. max)")
     }
@@ -2254,6 +2285,18 @@ do {
           "family: model_type qwen4_exp derives the Qwen3.8-Flash-Next family (1.4.0)")
     check(deriveFamily(config: fnCfg, contract: contract132) == nil,
           "family: the 1.3.2 registry has no qwen4_exp rule -> undecidable")
+    let moeCfg = #"{"model_type": "qwen3_5_moe", "text_config": {"model_type": "qwen3_5_moe_text"}}"#
+    check(deriveFamily(config: moeCfg, contract: contract141) == "Qwen3.5-122B-A10B",
+          "family: model_type qwen3_5_moe derives the Qwen3.5-122B-A10B family (1.4.1)")
+    check(deriveFamily(config: moeCfg, contract: contract140) == nil,
+          "family: the 1.4.0 registry has no qwen3_5_moe rule -> undecidable")
+    check(deriveFamily(config: cfg, contract: contract141) == "Qwen3.8-27B",
+          "family: the flat qwen3_5 value stays Qwen3.8-27B in 1.4.1 (not the MoE family)")
+    let flintCfg = #"{"model_type": "flint"}"#
+    check(deriveFamily(config: flintCfg, contract: contract141) == "Flint",
+          "family: model_type flint derives the Flint family (1.4.1)")
+    check(deriveFamily(config: flintCfg, contract: contract140) == nil,
+          "family: the 1.4.0 registry has no flint rule -> undecidable")
     check(deriveFamily(config: #"{"model_type": "gemma_4"}"#, contract: contract131) == nil,
           "family: an unrecognized config -> undecidable (nil)")
     check(deriveFamily(config: nil, contract: contract131) == nil,
@@ -3777,6 +3820,10 @@ do {
           "s2b diff: 1.3.0 table vs the 1.3.2 contract -> exactly the 4 flags missingInKit")
     let d140_140 = registryDiff(parseServeOptions(fixtureServeOptions140), contract: contract140, version: "1.4.0")
     check(d140_140.inSync, "s2b diff: the 1.4.0 table matches the 1.4.0 contract (inSync)")
+    // The 1.4.1 keg's serve_options.py is byte-identical to the 1.4.0 keg's, so the
+    // 1.4.0 fixture IS the 1.4.1 table: it must also be inSync with contract141.
+    let d141_141 = registryDiff(parseServeOptions(fixtureServeOptions140), contract: contract141, version: "1.4.1")
+    check(d141_141.inSync, "s2b diff: the 1.4.1 table (== the 1.4.0 table) matches the 1.4.1 contract (inSync)")
     let fourNew140 = ["--expert-memory", "--ple-memory", "--sparse-kv-memory", "--verify-rows"]
     let d140_132 = registryDiff(parseServeOptions(fixtureServeOptions140), contract: contract132, version: "1.4.0")
     check(!d140_132.inSync && d140_132.missingInContract == fourNew140
