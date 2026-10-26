@@ -89,7 +89,7 @@
       profileRows().length === S.cfg.profiles.length, profileRows().length);
     check('active profile marked with the selection dot', S.cfg.active_profile !== null &&
       profileRows().some(row => row.querySelector('.profdot.on') !== null), $('profileList').textContent);
-    check('five profile tabs present', document.querySelectorAll('#settingsView [data-ptab]').length === 5,
+    check('four profile tabs present', document.querySelectorAll('#settingsView [data-ptab]').length === 4,
       document.querySelectorAll('#settingsView [data-ptab]').length);
 
     // S7 whole-document contract check — one pass over the app's full config doc:
@@ -153,7 +153,7 @@
       // the engine is never touched.
       const engine = S.cfg.engine, actualVersion = engine.version, actualVerdict = engine.verdict,
         actualReason = engine.verdict_reason, actualMappingUsed = S.cfg.mapping_used, actualReport = S.cfg.registry_report;
-      const fakeWarning = () => { S.cfg.mapping_used = '1.3.2'; S.cfg.registry_report = { missing_in_kit: ['--no-such-flag'] };
+      const fakeWarning = () => { S.cfg.mapping_used = '1.4.0'; S.cfg.registry_report = { missing_in_kit: ['--no-such-flag'] };
         engine.version = '9.9.9'; engine.verdict = 'fallback'; engine.verdict_reason = null; };
       const restoreWarning = () => { S.cfg.mapping_used = actualMappingUsed; S.cfg.registry_report = actualReport;
         engine.version = actualVersion; engine.verdict = actualVerdict; engine.verdict_reason = actualReason; };
@@ -161,7 +161,7 @@
       await until(() => $('engValid').classList.contains('fallback'), 'fallback cap renders');
       const cap = $('engValid');
       check('S7 verdict cap renders the fallback state with the registry fix tip',
-        cap.textContent.includes('FALLBACK MAPPING') && /Run a matching engine v1\.3\.2|update the mapping registry/.test(cap.dataset.tip || ''),
+        cap.textContent.includes('FALLBACK MAPPING') && /Run a matching engine v1\.4\.0|update the mapping registry/.test(cap.dataset.tip || ''),
         { text: cap.textContent, tip: cap.dataset.tip });
       restoreWarning(); window.update({ ...S });
       await until(() => !$('engValid').classList.contains('fallback'), 'verdict cap restored');
@@ -171,7 +171,7 @@
       const realUpdate = window.update;
       window.update = payload => { realUpdate(payload);
         if (payload && payload.cfg) {
-          payload.cfg.mapping_used = '1.3.2'; payload.cfg.registry_report = { missing_in_kit: ['--no-such-flag'] };
+          payload.cfg.mapping_used = '1.4.0'; payload.cfg.registry_report = { missing_in_kit: ['--no-such-flag'] };
           if (payload.cfg.engine) { payload.cfg.engine.version = '9.9.9'; payload.cfg.engine.verdict = 'fallback'; payload.cfg.engine.verdict_reason = null; }
           realUpdate(payload);
         } };
