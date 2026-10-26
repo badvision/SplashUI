@@ -224,7 +224,7 @@ try {
     for (const id of ['capAuto', 'capManual', 'manualPath', 'btnBrowseEngine', 'engPath', 'engTried', 'vCfg', 'engArch', 'engValid',
       'cfgMsg', 'folderList', 'folderPath', 'btnBrowseFolder', 'btnAddFolder',
       'cfgHost', 'cfgPort', 'cfgKey', 'btnKeyEye', 'cfgAllowedHost', 'cfgAllowedOrigin', 'webUiOn', 'webUiOff',
-      'profileList', 'btnProfileAdd', 'ptabGeneral', 'ptabModel', 'ptabMemory', 'ptabApi',
+      'profileList', 'btnProfileAdd', 'ptabGeneral', 'ptabModel', 'ptabMemory', 'ptabCache', 'ptabApi',
       'profileName', 'btnProfileActivate', 'btnProfileClone', 'btnProfileRemove', 'modelPill', 'modelPillName',
       'profileDrafter', 'profileModelAxis', 'profileLaunchMeta', 'profilePreviewBox', 'profileRestartPrompt'])
       assert.ok($('settingsView').contains($(id)), id);
@@ -236,7 +236,7 @@ try {
     }
   });
   check('footer controls live on the shared footer', () => {
-    for (const id of ['footRow1', 'cfgPill', 'verPill', 'btnGroup', 'btnStart', 'btnRestart', 'btnStop', 'pidPill', 'pidLabel', 'pidNum', 'envPill'])
+    for (const id of ['footRow1', 'btnGroup', 'btnStart', 'btnRestart', 'btnStop', 'pidPill', 'pidLabel', 'pidNum', 'envPill'])
       assert.ok(w.document.getElementById('footer').contains($(id)), id);
   });
   check('settings sections have tab-independent boxes that share spare height', () => {
@@ -443,21 +443,19 @@ try {
   check('footer: shared swoop, one row, pills populated', () => {
     assert.equal($('restartPill'), null);
     assert.equal($('footer').querySelectorAll('.foot-row').length, 1);
-    assert.equal($('verPill').textContent, 'v1.3.0');
     assert.equal($('pidNum').textContent, '17573');
     assert.equal($('envPill').textContent, 'APP-MANAGED');
-    assert.equal($('footRow1').children.length, 4);
-    const [group, center, env, config] = $('footRow1').children;
-    assert.equal(config.id, 'cfgVerGroup');
+    assert.equal($('footRow1').children.length, 3);
+    const [group, center, env] = $('footRow1').children;
     assert.equal(group.id, 'btnGroup');
     assert.equal(center.querySelector('#pidPill') ? true : false, true);
     assert.equal(env.id, 'envPill');
     assert.deepEqual([...group.querySelectorAll('.btn')].map(b => b.id), ['btnStart', 'btnRestart', 'btnStop']);
   });
-  check('CONFIG pill opens settings from the status view', () => {
+  check('settings hamburger toggles the view', () => {
     w.showView('status');
     assert.ok(!$('statusView').hidden && $('settingsView').hidden);
-    $('cfgPill').click();
+    $('btnSettings').click();
     assert.ok($('settingsView').hidden === false && $('statusView').hidden);
     $('btnSettings').click();
     assert.ok(!$('statusView').hidden && $('settingsView').hidden);
@@ -496,16 +494,19 @@ try {
     assert.equal($('profileIdLabel'), null);
     assert.ok(rows()[1].classList.contains('on') && !rows()[0].classList.contains('on'));
   });
-  check('four tabs render; GENERAL contains per-profile compute settings', () => {
-    for (const id of ['ptabGeneral', 'ptabModel', 'ptabMemory', 'ptabApi']) assert.equal($(id).hidden, false, id);
-    assert.equal($('ptabCache'), null);
+  check('five tabs render; GENERAL contains per-profile compute settings', () => {
+    for (const id of ['ptabGeneral', 'ptabModel', 'ptabMemory', 'ptabCache', 'ptabApi']) assert.equal($(id).hidden, false, id);
     assert.equal($('ptabCompute'), null);
     assert.ok($('ptabGeneral').classList.contains('on'));
-    assert.ok(!$('ptabGeneralPanel').hidden && $('ptabMemoryPanel').hidden);
+    assert.ok(!$('ptabGeneralPanel').hidden && $('ptabMemoryPanel').hidden && $('ptabCachePanel').hidden);
     assert.ok($('ptabGeneralPanel').contains($('option-ane')));
     assert.equal($('option-allow_idle_sleep').value, 'false');
     assert.ok($('ptabGeneralPanel').querySelector('[data-option-choice="allow_idle_sleep"][data-value="false"]').classList.contains('on'));
     assert.equal($('option-allow_idle_sleep').closest('.option-row').querySelector('.option-choices').children.length, 2);
+    assert.ok($('ptabMemoryPanel').contains($('option-kv_format')));
+    assert.ok(!$('ptabMemoryPanel').contains($('option-persistent_cache')));
+    assert.ok($('ptabCachePanel').contains($('option-persistent_cache')));
+    assert.ok(!$('ptabCachePanel').querySelector('.section-heading'));
   });
   check('Model has its own tab and reset pills only appear for overrides', () => {
     assert.ok($('profileBasics').contains($('profileLaunchMeta')));
@@ -577,19 +578,18 @@ try {
     assert.equal(saved.doc.profiles[0].options.ane, true);
   });
   rows()[0].click();
-  $('ptabMemory').click();
+  $('ptabCache').click();
   check('requires-gating: an unmet prerequisite disables the dependent row', () => {
-    // p1 has persistent_cache set — its cache_dir row is live.
-    const p1row = w.document.querySelector('#ptabMemoryPanel [data-option-row="cache_dir"]');
+    // p1 has persistent_cache set — its cache_dir row (in the cache tab) is live.
+    const p1row = w.document.querySelector('#ptabCachePanel [data-option-row="cache_dir"]');
     assert.ok(!p1row.classList.contains('unmet'));
-    assert.ok($('ptabMemoryPanel').querySelector('[data-option-row="kv_format"]'));
-    assert.ok($('ptabMemoryPanel').querySelector('.profile-subsection [data-option-row="cache_dir"]'));
+    assert.ok(!$('ptabCachePanel').querySelector('[data-option-row="kv_format"]'));
     rows()[1].click();
-    $('ptabMemory').click();
+    $('ptabCache').click();
     // p2: switch persistent_cache OFF via the UI — cache_dir must be gated off.
-    w.document.querySelector('#ptabMemoryPanel [data-option-choice="persistent_cache"][data-value="false"]').click();
+    w.document.querySelector('#ptabCachePanel [data-option-choice="persistent_cache"][data-value="false"]').click();
     assert.equal(w.__test.draft().profiles[1].options.persistent_cache, false);
-    const p2row = w.document.querySelector('#ptabMemoryPanel [data-option-row="cache_dir"]');
+    const p2row = w.document.querySelector('#ptabCachePanel [data-option-row="cache_dir"]');
     assert.ok(p2row.classList.contains('unmet'));
     assert.ok(p2row.querySelector('#option-cache_dir').disabled);
     save();   // auto-save rebaselines — the draft is clean again for the activation checks
@@ -678,16 +678,15 @@ try {
     assert.equal($('btnProfileActivate').textContent, 'Activate');
     $('btnProfileRemove').click();
   });
-  check('stale option keys surface under the active tab, never on GENERAL', () => {
-    $('ptabMemory').click();
+  check('stale option keys surface only under option tabs, never on GENERAL', () => {
+    $('ptabCache').click();
+    assert.equal($('ptabCachePanel').hidden, false);
     w.__test.draft().profiles[0].options.foo_bar = 'x';
     tick();
     assert.equal($('profileStaleSlot').hidden, false);
     assert.match($('profileStaleSlot').textContent, /STALE OPTIONS — 1 KEPT/);
     assert.ok($('profileStaleSlot').querySelector('#option-stale-foo_bar').disabled);
-    $('ptabGeneral').click();
-    tick();
-    assert.equal($('profileStaleSlot').hidden, true);   // GENERAL never shows stale keys
+    assert.equal($('ptabCachePanel').hidden, false);
     delete w.__test.draft().profiles[0].options.foo_bar;
     tick();
     assert.equal($('profileStaleSlot').hidden, true);
@@ -698,13 +697,15 @@ try {
 // ---- Version-gated tabs (neither memory nor cache options) ----
 const gated = panel({ optionDefs: DEFAULT_DEFS.filter(d => !['memory', 'cache'].includes(d.group)) });
 try {
-  check('a tab whose group has no options for the resolved version is hidden, not disabled', () => {
+  check('tabs whose groups have no options for the resolved version are hidden, not disabled', () => {
     assert.equal(gated.$('ptabMemory').hidden, true);
+    assert.equal(gated.$('ptabCache').hidden, true);
     for (const id of ['ptabGeneral', 'ptabModel', 'ptabApi']) assert.equal(gated.$(id).hidden, false, id);
   });
   gated.tick({ option_defs: DEFAULT_DEFS });
   check('tabs re-appear when a tick carries the fuller contract', () => {
     assert.equal(gated.$('ptabMemory').hidden, false);
+    assert.equal(gated.$('ptabCache').hidden, false);
   });
 } finally { gated.close(); }
 

@@ -209,7 +209,6 @@ section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 
 .s7 .s7-editor .option-row input { padding: 3px 6px; font-size: 11px; }
 .s7 .s7-editor .option-row .mini { padding: 3px 8px 2px; font-size: 11px; min-height: 20px; }
 .s7 .mini[data-option-reset] { border-radius: 14px; color: var(--bg); background: var(--gray-dim); }
-.profile-subsection { margin-top: 6px; padding-top: 6px; border-top: 3px solid var(--green-deep); border-image: linear-gradient(to right, var(--green-deep) 58%, transparent 58% 60%, var(--green-deep) 60% 82%, transparent 82% 84%, var(--green-deep) 84%) 1; }
 .profile-identity { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
 .profile-identity .frow { flex: 1; margin: 0; min-width: 0; }
 .profile-identity .frow label { min-width: 38px; }
@@ -294,13 +293,8 @@ section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 
 .foot-row { display: flex; align-items: center; gap: 5px; }
 .foot-row.right { justify-content: flex-end; }
 .foot-row.center { justify-content: center; flex: 1; }
-.fpill { background: #888; color: #000; border-radius: 14px; padding: 5px 6px 3px; font-family: var(--display); font-size: 11px; letter-spacing: .03em; line-height: 1; display: inline-flex; align-items: center; white-space: nowrap; }
-.fpill.blue, .fpill.dark { background: #888; color: #000; }
-#cfgPill { border-radius: 14px 0 0 14px; }
-#verPill { border-radius: 0 14px 14px 0; }
 #pidPill { display: inline-flex; }
 #pidPill .h, #envPill { background: #888; color: #000; font-family: var(--display); letter-spacing: .03em; min-height: 24px; padding: 5px 6px 3px; font-size: 11px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; text-transform: uppercase; white-space: nowrap; }
-#pidPill .h.mono, #pidNum { font-family: var(--mono); font-weight: 400; letter-spacing: 0; text-transform: none; }
 #pidLabel { border-radius: 14px 0 0 14px; }
 #pidNum { border-radius: 0 14px 14px 0; margin-left: 3px; }
 #envPill { border-radius: 14px; }
@@ -313,10 +307,9 @@ section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 
 #btnGroup .btn:last-child { border-radius: 0 14px 14px 0; }
 .btn:hover { filter: brightness(1.13); }
 .btn:active { filter: brightness(.88); }
-.btn:focus-visible, .fpill:focus-visible { outline: 2px solid var(--white); outline-offset: 3px; }
+.btn:focus-visible { outline: 2px solid var(--white); outline-offset: 3px; }
 #footRow1 { gap: 8px; }
 #pidGroup { flex: 1; display: flex; justify-content: center; }
-#cfgVerGroup { margin-left: auto; }
 @keyframes restart-attention { 0%, 49% { background: #ffcc66; color: var(--bg); } 50%, 100% { background: var(--bg); color: #ffcc66; } }
 #btnRestart.restart-pending { animation: restart-attention 1.2s steps(1, end) infinite; }
 @media (prefers-reduced-motion: reduce) { #btnRestart.restart-pending { animation: none; outline: 2px solid #ffcc66; } }
@@ -517,6 +510,7 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
       <button class="ptab on" data-ptab="general" id="ptabGeneral">General</button>
       <button class="ptab" data-ptab="model" id="ptabModel">Model</button>
       <button class="ptab" data-ptab="memory" id="ptabMemory">Memory</button>
+      <button class="ptab" data-ptab="cache" id="ptabCache">Cache</button>
       <button class="ptab" data-ptab="api" id="ptabApi">Api</button>
     </div>
     <div class="s7-col s7-editor" id="profileEditor">
@@ -553,6 +547,7 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
           <div id="profileModelAxis" class="option-list"></div>
       </div>
       <div id="ptabMemoryPanel" data-ptab-panel="memory" hidden></div>
+      <div id="ptabCachePanel" data-ptab-panel="cache" hidden></div>
       <div id="ptabApiPanel" data-ptab-panel="api" hidden></div>
       <div id="profileStaleSlot" hidden></div>
     </div>
@@ -602,12 +597,8 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
       <button class="btn y" id="btnRestart">Restart</button>
       <button class="btn r" id="btnStop">Stop</button>
     </span>
-    <span id="pidGroup"><span id="pidPill"><span class="h" id="pidLabel">PID</span><span class="h mono" id="pidNum">—</span></span></span>
+    <span id="pidGroup"><span id="pidPill"><span class="h" id="pidLabel">PID</span><span class="h" id="pidNum">—</span></span></span>
     <span class="h" id="envPill">—</span>
-    <span id="cfgVerGroup" style="display:inline-flex;gap:4px">
-      <button class="fpill dark" id="cfgPill" data-tip="Open the settings screen">Config</button>
-      <span class="fpill blue" id="verPill" data-tip="The engine kit version (release.json) the running session was started with.">—</span>
-    </span>
   </div>
 </div>
 
@@ -798,7 +789,6 @@ function render(){
   $("btnRestart").setAttribute("data-tip", rr ? "Settings saved. Changes take effect after the engine restarts." : "Restart the current engine session");
   $("btnRestart").title = $("btnRestart").getAttribute("data-tip");
   if (S.cfg) {
-    setT("verPill", S.cfg.engine && S.cfg.engine.version ? "v" + S.cfg.engine.version : "—");
     cfKeyRemask();
   }
   cfRender();
@@ -864,7 +854,6 @@ $("btnRestart").onclick = () => {
   if (S.cfg && S.cfg.restart_required === true) { window.showView("settings"); CF.profileId = CF.draft.activeProfile || CF.profileId; $("ptabGeneral").click(); cfRenderProfiles(); if ($("profileRestartPrompt") && !$("profileRestartPrompt").hidden) $("profileRestartPrompt").scrollIntoView(); if (CF.keyRevealed) cfKeyRemask(true); }
   else cmd("restart");
 };
-$("cfgPill").onclick = () => window.showView("settings");
 
 // ---- S7: global settings (channel 06) + profiles (channel 07) + chooser ----
 const CF = { doc: null, draft: null, baseline: "", validateTimer: null, firstRunShown: false,
@@ -876,7 +865,7 @@ const CF = { doc: null, draft: null, baseline: "", validateTimer: null, firstRun
   chooserOpen: false, chooserSel: null, chooserSrc: "all", chooserSearch: "" };
 
 // Dynamic option tabs; GENERAL and MODEL have structural content.
-const PTABS = ["memory", "api"];
+const PTABS = ["memory", "cache", "api"];
 
 // Option definitions come from the tick's contract (or the last validate response).
 function cfOptionDefs() { return CF.optionDefs || (S && S.cfg && S.cfg.option_defs) || []; }
@@ -1190,7 +1179,7 @@ function cfRenderProfiles() {
   // Version-gated tabs: a tab whose group has no options for the resolved engine
   // version is HIDDEN, not disabled (D3).
   const defs = cfOptionDefs();
-  const groups = new Set(defs.map(o => o.group === "cache" ? "memory" : o.group));
+  const groups = new Set(defs.map(o => o.group));
   PTABS.forEach(t => {
     const el = $("ptab" + t[0].toUpperCase() + t.slice(1));
     if (el) el.hidden = !groups.has(t);
@@ -1261,7 +1250,7 @@ function cfRenderProfiles() {
   cfRenderOptions(p);
   // Stale keys (kept for downgrade safety) show once, in the active tab slot.
   const staleKeys = Object.keys(p.options || {}).filter(k => !defs.some(o => o.key === k)).sort();
-  $("profileStaleSlot").hidden = !staleKeys.length || CF.ptab === "general";
+  $("profileStaleSlot").hidden = !staleKeys.length || !PTABS.includes(CF.ptab);
   if (staleKeys.length) {
     const ver = (S.cfg && S.cfg.engine && S.cfg.engine.version) || "?";
     $("profileStaleSlot").innerHTML = '<div class="stale-group" data-tip="Not in the active engine mapping (v' + esc(ver) + ') — the saved values are preserved and will apply when a matching engine is active."><div class="stale-bar" aria-expanded="false"><span>STALE OPTIONS — ' + staleKeys.length + ' KEPT</span><span class="warn-cap">STALE</span></div><div class="stale-body">' + staleKeys.map(k => {
@@ -1319,17 +1308,12 @@ function cfRenderOptions(p) {
   for (const t of PTABS) {
     const panel = $("ptab" + t[0].toUpperCase() + t.slice(1) + "Panel");
     if (!panel) continue;
-    const items = defs.filter(o => o.group === t || (t === "memory" && o.group === "cache"));
+    const items = defs.filter(o => o.group === t);
     if (!items.length) { panel.innerHTML = '<div class="profile-meta">No options in this group for engine v' + esc((S.cfg && S.cfg.engine && S.cfg.engine.version) || "?") + '.</div>'; continue; }
     const key = t + JSON.stringify(items) + JSON.stringify(Object.keys(p.options || {}).sort());
     if (CF["optKey_" + t] !== key) {
       CF["optKey_" + t] = key;
-      if (t === "memory") {
-        const memory = items.filter(o => o.group === "memory"), cache = items.filter(o => o.group === "cache");
-        panel.innerHTML = '<div class="section-heading"><h2>Memory</h2></div><div class="option-list">' + memory.map(o => cfOptionRowHtml(o, p)).join("") + '</div>' + (cache.length ? '<div class="profile-subsection"><div class="section-heading"><h2>Cache</h2></div><div class="option-list">' + cache.map(o => cfOptionRowHtml(o, p)).join("") + '</div></div>' : "");
-      } else {
-        panel.innerHTML = items.map(o => cfOptionRowHtml(o, p)).join("");
-      }
+      panel.innerHTML = items.map(o => cfOptionRowHtml(o, p)).join("");
     }
     items.forEach(o => {
       const input = $("option-" + o.key);
@@ -1356,7 +1340,7 @@ $("profileEditor").addEventListener("click", (ev) => {
 
 $("profileList").onclick = ev => {
   const b = ev.target.closest && ev.target.closest('[data-profile-id]');
-  if (b) { CF.profileId = b.dataset.profileId; CF.verdicts = []; CF.ptab = "general"; document.querySelectorAll("[data-ptab]").forEach(x => x.classList.toggle("on", x.dataset.ptab === "general")); document.querySelectorAll("[data-ptab-panel]").forEach(pp => { pp.hidden = pp.dataset.ptabPanel !== "general"; }); cfRenderProfiles(); }
+  if (b) { CF.profileId = b.dataset.profileId; CF.verdicts = []; cfRenderProfiles(); }
 };
 $("btnProfileAdd").onclick = () => cfNewProfile(null);
 function cfNewProfile(cloneFrom) {

@@ -89,7 +89,7 @@
       profileRows().length === S.cfg.profiles.length, profileRows().length);
     check('active profile marked with the selection dot', S.cfg.active_profile !== null &&
       profileRows().some(row => row.querySelector('.profdot.on') !== null), $('profileList').textContent);
-    check('four profile tabs present', document.querySelectorAll('#settingsView [data-ptab]').length === 4,
+    check('five profile tabs present', document.querySelectorAll('#settingsView [data-ptab]').length === 5,
       document.querySelectorAll('#settingsView [data-ptab]').length);
 
     // S7 whole-document contract check — one pass over the app's full config doc:
