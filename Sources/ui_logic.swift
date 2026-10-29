@@ -699,6 +699,14 @@ let launcherModelOptions: [OptionDef] = [
     OptionDef(flag: "--offline", key: "offline", kind: .bool, group: "model", defValue: "false"),
 ]
 
+// The 1.5.0 launcher owns these model-axis flags; neither appears in
+// server/serve_options.py. model_dir is derived from the selected local model,
+// not an independently editable profile value.
+private let launcherModelOptions150 = launcherModelOptions + [
+    OptionDef(flag: "--model-dir", key: "model_dir", kind: .value, group: "model", builtFromModel: true),
+    OptionDef(flag: "--mmproj", key: "mmproj", kind: .value, group: "model"),
+]
+
 /// The 1.3.0 contract: the module flavor. 26 flags = the 23 shared + the model
 /// trio. No family registry (1.3.0 predates the DFlash2 registry: a package
 /// bakes its draft, an assembly needs draft/config.json).
@@ -807,6 +815,16 @@ public let contract141 = VersionContract(
         FamilyRule(configKey: "model_type", value: "flint", family: "Flint"),
     ])
 
+/// 1.5.0: serve_options.py and families.py are byte-identical to 1.4.1.
+/// The launcher adds --model-dir (local GGUF/MLX preparation without Hub)
+/// and --mmproj (an optional GGUF vision projector). In local-dir mode the
+/// draft must be a local directory if explicitly set; --revision is invalid.
+public let contract150 = VersionContract(
+    version: "1.5.0", flavor: .launcher,
+    options: sharedOptions140 + launcherModelOptions150,
+    familyRegistry: contract141.familyRegistry,
+    familyRules: contract141.familyRules)
+
 /// The default registry: every authored version.
 public let launchRegistry = LaunchRegistry(contracts: [
     "1.3.0": contract130,
@@ -814,6 +832,7 @@ public let launchRegistry = LaunchRegistry(contracts: [
     "1.3.2": contract132,
     "1.4.0": contract140,
     "1.4.1": contract141,
+    "1.5.0": contract150,
 ])
 
 /// D16: the contract for a kit's release.json version. An exact hit when the
@@ -1278,15 +1297,16 @@ private func requiresViolation(_ opt: OptionDef, contract: VersionContract, _ va
 ///   --port <port>` unconditionally, and the D9(b) anchor requires it;
 /// - a `requires`-unmet option is DROPPED with an ArgvIssue.warning (D4: warn,
 ///   never block);
-/// - builtFromModel flags (model/tokenizer/binary) are emitted from the launch
-///   model in the structural prefix, never from the values map.
+/// - builtFromModel flags (model/tokenizer/binary/model-dir) are emitted from
+///   the launch model in the structural prefix, never from the values map.
 ///
 /// The argv excludes the python executable itself: the caller runs
 /// `<kit>/python/bin/python <args>` from the kit dir (today's engineArgs shape).
 public func buildArgv(_ contract: VersionContract,
                       profileValues: [String: JSONValue],
                       model: ProfileModel,
-                      globals: GlobalCfg) -> (args: [String], env: [String: String], issues: [ArgvIssue]) {
+                      globals: GlobalCfg,
+                      localModelDir: String? = nil) -> (args: [String], env: [String: String], issues: [ArgvIssue]) {
     // D6: the service-level network options (host, port, api-key, allowed-host,
     // allowed-origin, web-ui) are globals, never per-profile options — there is
     // no per-profile occurrence in the schema (normalizeConfig strips any a
@@ -1314,6 +1334,9 @@ public func buildArgv(_ contract: VersionContract,
             ])
         }
         args = ["-u", "install/launcher.py", "serve", "--model", id]
+        if let localModelDir, contract.option("model_dir") != nil {
+            args += ["--model-dir", localModelDir]
+        }
     case .module:
         guard let dir = model.dir else {
             return (args: [], env: env, issues: [
@@ -1427,6 +1450,87 @@ public struct Eligibility: Equatable {
     }
 }
 
+/// Local preparation in 1.5.0 still refuses nested shard filenames in a
+/// safetensors index (install/upstream.py:_weight_files). Such a model keeps
+/// the existing compatible Hub/flat-cache route instead of --model-dir.
+private func canPrepareLocalDir(_ dir: String?, isDir: (String) -> Bool,
+                                fileContents: (String) -> String?) -> Bool {
+    guard let dir, isDir(dir) else { return false }
+    if let text = fileContents(dir + "/model.safetensors.index.json"),
+       let data = text.data(using: .utf8),
+       let index = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+       let weights = index["weight_map"] as? [String: String],
+       weights.values.contains(where: { $0.contains("/") }) { return false }
+    return true
+}
+
+private let launcherModelIDPattern = try! NSRegularExpression(pattern:
+    #"^[A-Za-z0-9_](?:[A-Za-z0-9._-]*[A-Za-z0-9_])?/[A-Za-z0-9_](?:[A-Za-z0-9._-]{0,94}[A-Za-z0-9_])?(?::[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$"#)
+
+/// Local one-level folder names need an API model ID even though no Hub repo is
+/// consulted. The launcher still parses --model as OWNER/REPO.
+private func localServeId(_ id: String) -> String {
+    let repo = id.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? id
+    if !repo.contains("--") && !repo.contains("..") && !repo.hasSuffix(".git") &&
+       launcherModelIDPattern.firstMatch(in: id, range: NSRange(id.startIndex..<id.endIndex, in: id)) != nil {
+        return id
+    }
+    let label = String(id.split(separator: "/", omittingEmptySubsequences: false).last ?? Substring(id))
+    var name = ""
+    for c in label.unicodeScalars {
+        let n = c.value
+        if (65...90).contains(n) || (97...122).contains(n) || (48...57).contains(n) || n == 95 {
+            name.unicodeScalars.append(c)
+        } else if !name.isEmpty && !name.hasSuffix("-") { name.append("-") }
+        if name.count == 95 { break }
+    }
+    while name.hasSuffix("-") { name.removeLast() }
+    return "local/" + (name.isEmpty ? "model" : name)
+}
+
+/// A local GGUF prepare does not auto-select the projector as by-ID serving
+/// does. Preserve vision when one named projector is unambiguous.
+private func localProjectors(_ dir: String?, listDir: (String) -> [String]?) -> [String] {
+    guard let dir, let names = listDir(dir),
+          !names.contains(where: { !$0.contains("/") && $0.hasSuffix(".safetensors") }) else { return [] }
+    return names.filter {
+        !$0.contains("/") && $0.lowercased().contains("mmproj") && $0.lowercased().hasSuffix(".gguf")
+    }
+}
+
+private func localLaunchOptions(_ values: [String: JSONValue], dir: String?,
+                                usingLocalDir: Bool, projectors: [String]) -> [String: JSONValue] {
+    guard usingLocalDir, let dir, projectors.count == 1,
+          values["language_only"]?.bool != true,
+          values["mmproj"]?.string?.isEmpty != false else { return values }
+    var options = values
+    options["mmproj"] = .string(dir + "/" + projectors[0])
+    return options
+}
+
+private func localDirOptionError(_ options: [String: JSONValue], usingLocalDir: Bool,
+                                 isDir: (String) -> Bool, projectorCount: Int = 0) -> String? {
+    if usingLocalDir {
+        if let revision = options["revision"]?.string, !revision.isEmpty {
+            return "--revision cannot be used with --model-dir; clear the revision for this local model"
+        }
+        if let draft = options["draft_model"]?.string, !draft.isEmpty && !isDir(draft) {
+            return "--draft-model must be a local DFlash2 draft directory with --model-dir; select a directory or clear the override"
+        }
+        if options["language_only"]?.bool == true,
+           let mmproj = options["mmproj"]?.string, !mmproj.isEmpty {
+            return "--mmproj cannot be used with --language-only; disable one of them"
+        }
+        if projectorCount > 1 && options["language_only"]?.bool != true &&
+           options["mmproj"]?.string?.isEmpty != false {
+            return "Several local mmproj projectors exist; choose one in MODEL settings or enable --language-only"
+        }
+    } else if let mmproj = options["mmproj"]?.string, !mmproj.isEmpty {
+        return "--mmproj requires a local GGUF model served with --model-dir"
+    }
+    return nil
+}
+
 /// The plan-time table (C3), row by model kind, column by engine flavor.
 public func eligibility(kind: ModelKind,
                         contract: VersionContract,
@@ -1434,7 +1538,8 @@ public func eligibility(kind: ModelKind,
                         modelDir: String?,
                         draftModel: String?,
                         family: String?,
-                        files: ModelDirFiles) -> Eligibility {
+                        files: ModelDirFiles,
+                        usingLocalDir: Bool = false) -> Eligibility {
     let v = contract.version
     switch kind {
     case .package:
@@ -1481,6 +1586,11 @@ public func eligibility(kind: ModelKind,
                 "the 1.3.0 engine needs a config.json in the model dir to load it positionally — "
                 + "\(modelId!) has none")
         }
+        if usingLocalDir && modelDir != nil {
+            if !(draftModel ?? "").isEmpty { return Eligibility(verdict: .runnable) }
+            return family == nil ? Eligibility(verdict: .unknown, reason: "engine inspects the local model and draft at preparation")
+                : Eligibility(verdict: .runnable)
+        }
         // The launcher (1.3.1+): serves by HF id, one-time download.
         if modelId == nil || !modelId!.contains("/") {
             let shown = (modelId?.isEmpty == false) ? modelId! : "the model"
@@ -1508,6 +1618,9 @@ public func eligibility(kind: ModelKind,
                 "the 1.3.0 engine loads a Splash package (manifest.json) or an assembly (model.json) — "
                 + "this model is neither — point the profile at a model it can load, or use a 1.3.1+ engine")
         }
+        if usingLocalDir && modelDir != nil {
+            return Eligibility(verdict: .unknown, reason: "engine inspects the local model directory at preparation")
+        }
         return Eligibility(verdict: .unrunnable, reason:
             "the v\(v) engine serves models by Hugging Face id — this local directory has no repo id to serve by")
     }
@@ -1525,7 +1638,8 @@ public func modelTickState(model: ProfileModel, version: String?, draftModel: St
     let verdict = model.source == "none"
         ? Eligibility(verdict: .unrunnable, reason: "select a model from a registered model folder")
         : eligibility(kind: kind, contract: contract, modelId: model.id, modelDir: model.dir,
-                      draftModel: draftModel, family: family, files: files)
+                      draftModel: draftModel, family: family, files: files,
+                      usingLocalDir: version.map { versionGE($0, "1.5.0") } == true && contract.option("model_dir") != nil && canPrepareLocalDir(model.dir, isDir: isDir, fileContents: fileContents) && kind != .package && kind != .assembly)
     let drafter: String
     if model.source == "none" { drafter = "UNSET — select a model" }
     else if kind == .package { drafter = files.draft ? "PACKAGE — baked in draft/" : "MISSING — draft/ required" }
@@ -1754,11 +1868,46 @@ public func planLaunch(_ data: Data,
     let source = g.modelFolders.first(where: { $0.id == profile.model.source && $0.source != "auto" })?.source ?? profile.model.source
     let parts = (profile.model.id ?? "").split(separator: "/", omittingEmptySubsequences: false)
     let localModel = hubSnapshot == nil && (!["hfid", "hfhub", "hf"].contains(source) || parts.count != 2 || parts.contains(where: { $0.isEmpty }))
+    // Resolve the model before choosing a kit: a 1.5.0 launcher can prepare
+    // plain local GGUF/MLX directories, but not legacy Splash packages.
+    let model = profile.model
+    var selectedDir = model.dir
+    var dir = selectedDir ?? hubSnapshot
+    var kind: ModelKind? = hubSnapshot == nil ? nil : .hfid
+    if let id = model.id {
+        for folder in g.modelFolders where hubSnapshot == nil {
+            let entries = enumerateModels(folder: folder, isDir: isDir,
+                                          fileContents: fileContents, listDir: listDir)
+            if let e = entries.first(where: { $0.id == id }) {
+                kind = e.kind
+                if let d = e.dir { selectedDir = d; dir = d }
+                break
+            }
+        }
+        if kind == nil {
+            kind = dir == nil ? .hfid
+                : classifyModelDir(dir: dir, id: id, isDir: isDir, fileContents: fileContents)
+        }
+    }
+    let selectedKind = hubSnapshot == nil ? kind : classifyModelDir(dir: selectedDir, id: model.id,
+        isDir: isDir, fileContents: fileContents)
+    let projectors = localProjectors(selectedDir, listDir: listDir)
+    let ambiguousProjector = projectors.count > 1 && profile.options["language_only"]?.bool != true &&
+        profile.options["mmproj"]?.string?.isEmpty != false && hubSnapshot != nil
+    let selectedDirPreparable = canPrepareLocalDir(selectedDir, isDir: isDir, fileContents: fileContents) &&
+        selectedKind != .package && selectedKind != .assembly && !ambiguousProjector
+    if !selectedDirPreparable, let hubSnapshot { dir = hubSnapshot }
     // Offline is a launch option. Unset means offline only for a model specified from a
     // local folder; a Hugging Face id downloads (one-time) unless the profile sets offline.
     let offlineLaunch = offlineEffective(profile, folders: g.modelFolders)
     var engine = g.engine
-    if localModel && (engine.mode == "auto" || contractFor(engine.manualPath.flatMap(kitVersion), registry: launchRegistry).contract.flavor == .launcher) {
+    var kr = resolveKit(engine: engine, home: home, isDir: isDir,
+                        isExecutable: isExecutable, brewKeg: brewKeg, kitVersion: kitVersion)
+    let initialContract = contractFor(kr.version, registry: launchRegistry).contract
+    let canPrepareLocal = kr.kit != nil && initialContract.flavor == .launcher &&
+        kr.version.map { versionGE($0, "1.5.0") } == true &&
+        initialContract.option("model_dir") != nil && selectedDirPreparable
+    if localModel && !canPrepareLocal && engine.mode == "auto" {
         var candidates: [String] = []
         for prefix in ["/opt/homebrew", "/usr/local"] {
             let root = prefix + "/Cellar/splash"
@@ -1776,8 +1925,10 @@ public func planLaunch(_ data: Data,
         }.sorted { (kitVersion($0) ?? "").compare(kitVersion($1) ?? "", options: .numeric) == .orderedDescending }
         if let path = compatible.first { engine.mode = "manual"; engine.manualPath = path }
     }
-    let kr = resolveKit(engine: engine, home: home, isDir: isDir,
+    if engine.mode != g.engine.mode || engine.manualPath != g.engine.manualPath {
+        kr = resolveKit(engine: engine, home: home, isDir: isDir,
                         isExecutable: isExecutable, brewKeg: brewKeg, kitVersion: kitVersion)
+    }
     guard let kit = kr.kit else {
         return LaunchConfig(version: kr.version, tried: kr.tried, error: kr.error,
                             profileId: profile.id, profileName: profile.name)
@@ -1786,44 +1937,34 @@ public func planLaunch(_ data: Data,
     let (contract, fallback) = contractFor(kr.version, registry: launchRegistry)
     let supportsGGUF = contract.flavor == .launcher &&
         fileContents(kit + "/install/upstream.py")?.contains("def _gguf_target(") == true
-    // 5. the model: the profile's pick, resolved against the folders by
-    //    enumeration (the fresh discovery beats a stale stored dir).
-    let model = profile.model
     guard model.source != "none", let mid = model.id, !mid.isEmpty else {
         return LaunchConfig(version: kr.version, tried: kr.tried,
                             error: "no model selected — pick one in Settings (06)",
                             profileId: profile.id, profileName: profile.name)
     }
-    if contract.flavor == .launcher && localModel {
-        return LaunchConfig(modelId: mid, modelDir: model.dir, version: kr.version, tried: kr.tried,
-            error: "No installed local-folder-capable engine can load \(mid). Install a module-form engine with its Python runtime, or select its kit in Engine settings.",
-            profileId: profile.id, profileName: profile.name)
+    let usingLocalDir = contract.flavor == .launcher &&
+        kr.version.map { versionGE($0, "1.5.0") } == true &&
+        contract.option("model_dir") != nil && selectedDirPreparable
+    if contract.flavor == .launcher && localModel && !usingLocalDir && kind != .package && kind != .assembly {
+        let reason = engine.mode == "manual"
+            ? "Selected engine v\(kr.version ?? contract.version) cannot load \(mid) from this local directory. Choose a 1.5.0+ launcher for GGUF/MLX, or select a module-form kit for legacy packages."
+            : "No installed local-folder-capable engine can load \(mid). Select a local GGUF/MLX directory with a 1.5.0+ engine, or install a module-form engine for legacy packages."
+        return LaunchConfig(modelId: mid, modelDir: dir, version: kr.version, tried: kr.tried,
+                            error: reason, profileId: profile.id, profileName: profile.name)
     }
-    var dir = hubSnapshot ?? model.dir
-    var kind: ModelKind? = hubSnapshot == nil ? nil : .hfid
-    for folder in g.modelFolders where hubSnapshot == nil {
-        let entries = enumerateModels(folder: folder, isDir: isDir,
-                                      fileContents: fileContents, listDir: listDir)
-        if let e = entries.first(where: { $0.id == mid }) {
-            kind = e.kind
-            if let d = e.dir { dir = d }
-            break
-        }
-    }
-    // A model the enumeration cannot find (a folder moved since the last save)
-    // is classified from its stored dir; an id with no dir at all is an hfid.
-    if kind == nil {
-        kind = dir == nil ? .hfid
-            : classifyModelDir(dir: dir, id: mid, isDir: isDir, fileContents: fileContents)
+    if let issue = localDirOptionError(profile.options, usingLocalDir: usingLocalDir, isDir: isDir,
+                                       projectorCount: projectors.count) {
+        return LaunchConfig(modelId: mid, modelDir: dir, version: kr.version, tried: kr.tried,
+                            error: issue, profileId: profile.id, profileName: profile.name)
     }
     if contract.flavor == .launcher {
         let ggufFiles = dir.flatMap(listDir)?.filter { !$0.contains("/") && $0.hasSuffix(".gguf") && !$0.lowercased().contains("mmproj") } ?? []
-        if !ggufFiles.isEmpty && !supportsGGUF {
+        if !ggufFiles.isEmpty && !supportsGGUF && !usingLocalDir {
             return LaunchConfig(modelId: mid, modelDir: dir, version: kr.version, tried: kr.tried,
                 error: "Engine \(kr.version ?? contract.version) does not support GGUF targets. Choose an installed engine whose upstream adapter supports GGUF (1.3.2 or later).",
                 profileId: profile.id, profileName: profile.name)
         }
-        if offlineLaunch {
+        if offlineLaunch && !usingLocalDir && kind != .package && kind != .assembly {
             guard let dir, isDir(dir), fileContents(dir + "/config.json") != nil || (supportsGGUF && ggufFiles.count == 1) else {
                 return LaunchConfig(modelId: mid, version: kr.version, tried: kr.tried,
                     error: "Installed model files for \(mid) are missing a compatible MLX or GGUF snapshot. Offline is on, so nothing downloads them: download this model explicitly or turn off the profile's offline option.",
@@ -1840,7 +1981,8 @@ public func planLaunch(_ data: Data,
     // 6. the eligibility gate (D4): blocked/unrunnable -> a clean error with the
     //    fix; unknown is NOT a gate (the engine decides at load).
     let elig = eligibility(kind: kind!, contract: contract, modelId: mid, modelDir: dir,
-                           draftModel: draftModel, family: family, files: files)
+                           draftModel: draftModel, family: family, files: files,
+                           usingLocalDir: usingLocalDir)
     if elig.verdict == .blocked || elig.verdict == .unrunnable {
         return LaunchConfig(modelId: mid, modelDir: dir, version: kr.version, tried: kr.tried,
                             mappingFallback: fallback, error: elig.reason,
@@ -1850,11 +1992,14 @@ public func planLaunch(_ data: Data,
     //    on-disk dir is the resolved one (the module form's positional argument).
     var launchModel = model
     launchModel.dir = dir
-    var options = profile.options
+    if usingLocalDir { launchModel.id = localServeId(mid) }
+    var options = localLaunchOptions(profile.options, dir: selectedDir,
+                                     usingLocalDir: usingLocalDir, projectors: projectors)
     if contract.flavor == .launcher { options["offline"] = .bool(offlineLaunch) }
-    var built = buildArgv(contract, profileValues: options, model: launchModel, globals: g)
+    var built = buildArgv(contract, profileValues: options, model: launchModel, globals: g,
+                          localModelDir: usingLocalDir ? dir : nil)
     if contract.flavor == .launcher, offlineLaunch { built.env["HF_HUB_OFFLINE"] = "1" }
-    if contract.flavor == .launcher, let hubSnapshot, hubSnapshot.hasPrefix(flatRoot + "/") {
+    if contract.flavor == .launcher, !usingLocalDir, let hubSnapshot, hubSnapshot.hasPrefix(flatRoot + "/") {
         built.env["HF_HUB_CACHE"] = flatRoot
     }
     if contract.flavor == .module, let dir, !isDir(dir + "/tokenizer"),
@@ -1888,7 +2033,7 @@ public func planLaunch(_ data: Data,
     if let key = built.env["SPLASH_API_KEY"] { sigParts.append(key) }
     return LaunchConfig(workDir: kit, executable: executable, base: kit,
                         engineArgs: built.args, engineEnv: built.env,
-                        port: g.port, host: g.host, modelId: mid, modelDir: dir,
+                        port: g.port, host: g.host, modelId: launchModel.id, modelDir: dir,
                         version: kr.version, tried: kr.tried, mappingFallback: fallback,
                         profileId: profile.id, profileName: profile.name,
                         signature: sigParts.joined(separator: "\u{1F}"),
@@ -1971,7 +2116,8 @@ public func profilePreview(_ profile: Profile,
                            fileContents: (String) -> String?,
                            listDir: (String) -> [String]?,
                            globals: GlobalCfg,
-                           baselineSignature: String?) -> [String: Any] {
+                           baselineSignature: String?,
+                           home: String? = nil) -> [String: Any] {
     func done(args: [String], error: String?, restart: Bool) -> [String: Any] {
         ["args": args as [Any], "error": error ?? NSNull(),
          "restart": restart, "version": version ?? NSNull()]
@@ -1986,20 +2132,39 @@ public func profilePreview(_ profile: Profile,
     }
     // The same resolution as planLaunch: the fresh enumeration beats a stale
     // stored dir; a vanished model classifies from its stored dir (or hfid).
-    var dir = model.dir
-    var kind: ModelKind?
-    for folder in folders {
+    let roots = home.map { [$0 + "/.cache/huggingface/hub"] + folders.filter { ["hfhub", "hf"].contains($0.id) || ["hfhub", "hf"].contains($0.source) }.map(\.path) + [$0 + "/Library/Application Support/SplashUI/hf-flat"] } ?? []
+    let hubSnapshot = roots.isEmpty ? nil : cachedHubSnapshot(modelId: mid, roots: roots, isDir: isDir,
+        fileContents: fileContents, listDir: listDir, allowNestedShards: false, allowGGUF: true)
+    var selectedDir = model.dir
+    var dir = selectedDir ?? hubSnapshot
+    var kind: ModelKind? = hubSnapshot == nil ? nil : .hfid
+    for folder in folders where hubSnapshot == nil {
         let entries = enumerateModels(folder: folder, isDir: isDir,
                                       fileContents: fileContents, listDir: listDir)
         if let e = entries.first(where: { $0.id == mid }) {
             kind = e.kind
-            if let d = e.dir { dir = d }
+            if let d = e.dir { selectedDir = d; dir = d }
             break
         }
     }
     if kind == nil {
         kind = dir == nil ? .hfid
             : classifyModelDir(dir: dir, id: mid, isDir: isDir, fileContents: fileContents)
+    }
+    let selectedKind = hubSnapshot == nil ? kind : classifyModelDir(dir: selectedDir, id: mid,
+        isDir: isDir, fileContents: fileContents)
+    let projectors = localProjectors(selectedDir, listDir: listDir)
+    let ambiguousProjector = projectors.count > 1 && profile.options["language_only"]?.bool != true &&
+        profile.options["mmproj"]?.string?.isEmpty != false && hubSnapshot != nil
+    let selectedDirPreparable = canPrepareLocalDir(selectedDir, isDir: isDir, fileContents: fileContents) &&
+        selectedKind != .package && selectedKind != .assembly && !ambiguousProjector
+    if !selectedDirPreparable, let hubSnapshot { dir = hubSnapshot }
+    let usingLocalDir = contract.flavor == .launcher &&
+        version.map { versionGE($0, "1.5.0") } == true &&
+        contract.option("model_dir") != nil && selectedDirPreparable
+    if let issue = localDirOptionError(profile.options, usingLocalDir: usingLocalDir, isDir: isDir,
+                                       projectorCount: projectors.count) {
+        return done(args: [], error: issue, restart: false)
     }
     let files = modelDirFiles(dir, isDir: isDir, fileContents: fileContents)
     let draftModel = profile.options["draft_model"]?.string
@@ -2008,13 +2173,19 @@ public func profilePreview(_ profile: Profile,
         return deriveFamily(config: fileContents(dir + "/config.json"), contract: contract)
     }()
     let elig = eligibility(kind: kind!, contract: contract, modelId: mid, modelDir: dir,
-                           draftModel: draftModel, family: family, files: files)
+                           draftModel: draftModel, family: family, files: files,
+                           usingLocalDir: usingLocalDir)
     if elig.verdict == .blocked || elig.verdict == .unrunnable {
         return done(args: [], error: elig.reason, restart: false)
     }
     var launchModel = model
     launchModel.dir = dir
-    let built = buildArgv(contract, profileValues: profile.options, model: launchModel, globals: globals)
+    if usingLocalDir { launchModel.id = localServeId(mid) }
+    var options = localLaunchOptions(profile.options, dir: selectedDir,
+                                     usingLocalDir: usingLocalDir, projectors: projectors)
+    if contract.flavor == .launcher { options["offline"] = .bool(offlineEffective(profile, folders: folders)) }
+    let built = buildArgv(contract, profileValues: options, model: launchModel, globals: globals,
+                          localModelDir: usingLocalDir ? dir : nil)
     if built.args.isEmpty {
         let msg = built.issues.first(where: { $0.severity == .error })?.message
             ?? "cannot build the launch argv"
@@ -3014,6 +3185,7 @@ public func maskSecret(_ s: String) -> String {
 public func profileOptionDefinitions(version: String?) -> [[String: Any]] {
     contractFor(version, registry: launchRegistry).contract.options.compactMap { o in
         guard !o.builtFromModel, !o.secret, o.key != "port" else { return nil }
+        if o.key == "mmproj" && version.map({ versionGE($0, "1.5.0") }) != true { return nil }
         // D6: the service-level network options are GLOBAL (the 06 NETWORK
         // panel), never per-profile — they do not appear in a profile at all.
         if o.group == "network" { return nil }
@@ -3021,7 +3193,7 @@ public func profileOptionDefinitions(version: String?) -> [[String: Any]] {
         if group == "requests" { group = "api" }   // the API tab combines both
         if ["ane", "allow_idle_sleep"].contains(o.key) { group = "compute" }
         if o.key == "decode_share" { group = "memory" }
-        if ["draft_model", "revision", "language_only", "offline"].contains(o.key) { group = "model-axis" }
+        if ["draft_model", "revision", "language_only", "offline", "mmproj"].contains(o.key) { group = "model-axis" }
         return ["key": o.key, "flag": o.flag, "kind": o.kind.rawValue, "group": group,
                 "default": o.defValue ?? NSNull(), "choices": o.choices ?? [], "requires": o.requires]
     }

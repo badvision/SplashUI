@@ -523,6 +523,19 @@ try {
     assert.ok(w.document.querySelector('[data-option-choice="ane"][data-value="true"]').classList.contains('on'));
     w.document.querySelector('[data-option-choice="ane"][data-value="false"]').click();
   });
+  check('1.5.0 projector flag appears in Model and persists its local path', () => {
+    const q = panel();
+    try {
+      const { w, $, tick, flushTimers } = q;
+      tick({ option_defs: [...DEFAULT_DEFS, { key: 'mmproj', flag: '--mmproj', kind: 'value', group: 'model-axis', default: null, requires: [] }] });
+      w.showView('settings');
+      assert.ok($('ptabModelPanel').contains($('option-mmproj')));
+      $('option-mmproj').value = '/models/vision/mmproj.gguf';
+      $('option-mmproj').dispatchEvent(new w.Event('change'));
+      flushTimers();
+      assert.equal(q.doc().profiles[0].options.mmproj, '/models/vision/mmproj.gguf');
+    } finally { q.close(); }
+  });
   check('reasoning effort choices wrap and unset controls have no reset pill', () => {
     const row = w.document.querySelector('[data-option-row="reasoning_effort"]');
     assert.equal(row.querySelectorAll('[data-option-choice]').length, 7);

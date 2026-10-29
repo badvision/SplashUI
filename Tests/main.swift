@@ -1240,19 +1240,22 @@ do {
     let e = contractFor("1.4.1", registry: launchRegistry)
     check(e.fallback == false && e.contract.version == "1.4.1" && e.contract.flavor == .launcher,
           "contractFor: 1.4.1 -> the launcher contract, fallback false")
+    let f = contractFor("1.5.0", registry: launchRegistry)
+    check(!f.fallback && f.contract.version == "1.5.0" && f.contract.flavor == .launcher,
+          "contractFor: 1.5.0 is an exact launcher contract")
 }
 
-// 28. contractFor: unseen versions -> the LATEST authored (1.4.1) + fallback =
+// 28. contractFor: unseen versions -> the LATEST authored (1.5.0) + fallback =
 // true (D3: launch proceeds; S7 shows the "FALLBACK MAPPING" cap).
 do {
-    let newer = contractFor("1.4.2", registry: launchRegistry)
-    check(newer.fallback == true && newer.contract.version == "1.4.1",
-          "contractFor: unseen 1.4.2 -> the latest authored (1.4.1) + fallback")
+    let newer = contractFor("1.5.1", registry: launchRegistry)
+    check(newer.fallback == true && newer.contract.version == "1.5.0",
+          "contractFor: unseen 1.5.1 -> latest authored 1.5.0 + fallback")
     let older = contractFor("1.2.9", registry: launchRegistry)
-    check(older.fallback == true && older.contract.version == "1.4.1",
-          "contractFor: older 1.2.x -> the latest authored (1.4.1) + fallback")
+    check(older.fallback == true && older.contract.version == "1.5.0",
+          "contractFor: older 1.2.x -> latest authored 1.5.0 + fallback")
     let unreadable = contractFor(nil, registry: launchRegistry)
-    check(unreadable.fallback == true && unreadable.contract.version == "1.4.1",
+    check(unreadable.fallback == true && unreadable.contract.version == "1.5.0",
           "contractFor: unreadable release.json (nil) -> the latest authored + fallback")
 }
 
@@ -1391,6 +1394,22 @@ do {
         FamilyRule(configKey: "model_type", value: "qwen4_exp", family: "Qwen3.8-Flash-Next"),
         FamilyRule(configKey: "model_type", value: "flint", family: "Flint"),
     ], "contract 1.4.1: the 4 config->family rules (verified against the Hub config.jsons)")
+}
+// 31d. The shared table and families.py did not change from 1.4.1; the
+// launcher adds model-axis flags outside serve_options.py.
+do {
+    check(contract150.familyRegistry == contract141.familyRegistry &&
+          contract150.familyRules == contract141.familyRules,
+          "1.5.0 retains every 1.4.1 family and config rule")
+    check(contract150.options.filter { $0.group != "model" } == contract141.options.filter { $0.group != "model" },
+          "1.5.0 shared CLI options retain the 1.4.1 contract")
+    check(contract150.option("model_dir")?.builtFromModel == true &&
+          contract150.option("mmproj")?.flag == "--mmproj" &&
+          contract141.option("model_dir") == nil,
+          "1.5.0 owns model-dir and mmproj; older launchers do not")
+    check(profileOptionDefinitions(version: "1.5.0").contains { $0["key"] as? String == "mmproj" } &&
+          !profileOptionDefinitions(version: "1.4.2").contains { $0["key"] as? String == "mmproj" },
+          "only 1.5.0+ kits expose the projector profile option")
 }
 
 // 32. THE D9(b) HEADLINE ANCHOR (amended per open item 5): with the seeded
@@ -1612,17 +1631,17 @@ do {
 }
 
 // 41. Fallback in the builder: a 1.3.9 kit (no authored contract) runs the latest
-// authored mapping (1.4.1) with fallback = true — the launch proceeds (D3); S7
+// authored mapping (1.5.0) with fallback = true — the launch proceeds (D3); S7
 // surfaces the cap.
 do {
     let (contract, fallback) = contractFor("1.3.9", registry: launchRegistry)
-    check(fallback == true && contract.version == "1.4.1", "fallback: a 1.3.9 kit maps to the 1.4.1 contract")
+    check(fallback == true && contract.version == "1.5.0", "fallback: a 1.3.9 kit maps to the 1.5.0 contract")
     let res = buildArgv(contract, profileValues: ["state_format": .string("bf16")],
                         model: ProfileModel(source: "hfid", id: "m/r"),
                         globals: GlobalCfg(port: 8123, apiKey: "k"))
     check(res.args == ["-u", "install/launcher.py", "serve", "--model", "m/r",
                        "--host", "127.0.0.1", "--port", "8123", "--state-format", "bf16"],
-          "fallback: the 1.4.1 mapping drives the argv (launch proceeds)")
+          "fallback: the 1.5.0 mapping drives the argv (launch proceeds)")
     check(res.env == ["SPLASH_API_KEY": "k"], "fallback: env built from the globals as usual")
 }
 
@@ -2321,7 +2340,6 @@ func planKit(fs: inout FakeFS, path: String, version: String) {
 func planCfgJSON(engineMode: String, manualPath: String?, port: Int, key: String,
                  name: String, modelId: String?, modelDir: String?,
                  options: [String: Any], modelSource: String? = nil) -> Data {
-    var opts = options
     var engine: [String: Any] = ["mode": engineMode]
     if let manualPath { engine["manual_path"] = manualPath }
     var model: [String: Any] = ["source": modelId == nil ? "none" : (modelSource ?? (modelDir == nil ? "hfid" : "lmstudio"))]
@@ -2336,7 +2354,7 @@ func planCfgJSON(engineMode: String, manualPath: String?, port: Int, key: String
     let profiles: [[String: Any]] = [[
         "id": "p1", "name": name,
         "model": model,
-        "options": opts,
+        "options": options,
     ]]
     let top: [String: Any] = [
         "globals": globals,
@@ -2373,7 +2391,7 @@ do {
             fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
     }
     let refused = guardedPlan("lmstudio", "/local/owner/model")
-    check(refused.error?.contains("No installed local-folder-capable engine") == true && refused.executable == nil && refused.engineArgs.isEmpty,
+    check(refused.error?.contains("Selected engine v1.3.1 cannot load") == true && refused.executable == nil && refused.engineArgs.isEmpty,
           "local model + launcher: refused before a process can spawn")
     let cached = guardedPlan("hfid", "/local/owner/model")
     check(cached.error == nil && !cached.engineArgs.contains("--offline") && cached.engineEnv["HF_HUB_OFFLINE"] == nil,
@@ -2407,6 +2425,82 @@ do {
     check(hub.version == "1.3.1" && !hub.engineArgs.contains("--offline") && hub.engineEnv["HF_HUB_OFFLINE"] == nil, "AUTO cached HF model: highest Homebrew engine, online unless offline is set")
     fs.dirs.remove(old)
     check(autoPlan("lmstudio").error?.contains("No installed local-folder-capable engine") == true, "AUTO local model without a local-capable engine: specific error, no download")
+}
+// 1.5.0 prepares local GGUF/MLX directories on the selected Homebrew kit;
+// old launchers still need the module kit. The API name of a one-level model
+// must become OWNER/REPO because the real launcher parser rejects bare names.
+do {
+    var fs = FakeFS()
+    planKit(fs: &fs, path: "/brew/1.5.0/libexec", version: "1.5.0")
+    let old = "/home/SplashUI/kit/legacy"
+    planKit(fs: &fs, path: old, version: "1.3.0")
+    fs.dir("/home/SplashUI/kit", ["legacy/"])
+    fs.dir("/models/owner/LocalGGUF", ["model.gguf", "mmproj-vision.gguf"])
+    fs.dir("/models/PlainMLX", ["config.json", "model.safetensors", "mmproj-unrelated.gguf"])
+    fs.file("/models/PlainMLX/config.json", #"{"model_type":"qwen3_5"}"#)
+    fs.dir("/draft", ["config.json", "model.safetensors"])
+    fs.dir("/models/Legacy", ["manifest.json", "draft/", "tokenizer/"])
+    fs.file("/models/Legacy/manifest.json", "{}")
+    func plan(_ id: String, _ path: String, version: String = "1.5.0", opts: [String: Any] = [:],
+              manual: Bool = false) -> LaunchConfig {
+        let data = planCfgJSON(engineMode: manual ? "manual" : "auto",
+            manualPath: manual ? "/brew/\(version)/libexec" : nil, port: 8123,
+            key: "test", name: "Local", modelId: id, modelDir: path, options: opts)
+        return planLaunch(data, home: "/home", isDir: { fs.isDir($0) },
+            isExecutable: { fs.isExecutable($0) }, brewKeg: { "/brew/\(version)" },
+            kitVersion: { readKitVersion(fs: fs, kit: $0) },
+            fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
+    }
+    let gguf = plan("owner/LocalGGUF", "/models/owner/LocalGGUF")
+    check(gguf.error == nil && gguf.version == "1.5.0" && gguf.engineArgs.contains("--model-dir") &&
+          gguf.engineArgs.contains("/models/owner/LocalGGUF") && gguf.engineArgs.contains("--offline"),
+          "1.5.0 AUTO serves local GGUF from the selected Homebrew launcher without module switch")
+    check(gguf.engineArgs.contains("--mmproj") && gguf.engineArgs.contains("/models/owner/LocalGGUF/mmproj-vision.gguf"),
+          "1.5.0 local GGUF retains its one unambiguous vision projector")
+    fs.dir("/models/owner/Multiple", ["model.gguf", "mmproj-bf16.gguf", "mmproj-f16.gguf"])
+    check(plan("owner/Multiple", "/models/owner/Multiple").error?.contains("Several local mmproj") == true,
+          "ambiguous local projectors require an explicit choice rather than silently dropping vision")
+    let bare = plan("PlainMLX", "/models/PlainMLX", opts: ["draft_model": "/draft", "offline": false])
+    check(bare.error == nil && bare.modelId == "local/PlainMLX" &&
+          bare.engineArgs.contains("local/PlainMLX") && bare.engineArgs.contains("/models/PlainMLX") &&
+          !bare.engineArgs.contains("--offline") && !bare.engineArgs.contains("--mmproj") && bare.engineArgs.contains("/draft"),
+          "one-level local MLX gets a valid API id and keeps explicit online setting and local draft")
+    check(plan("owner/bad name", "/models/PlainMLX").modelId == "local/bad-name",
+          "invalid local folder ID becomes a launcher-safe served model name")
+    check(plan("PlainMLX", "/models/PlainMLX", opts: ["draft_model": "owner/draft"]).error?.contains("local DFlash2 draft directory") == true,
+          "model-dir rejects a Hub draft override before the launcher's parser")
+    check(plan("PlainMLX", "/models/PlainMLX", opts: ["revision": "main"]).error?.contains("--revision cannot") == true,
+          "model-dir rejects revision before the launcher's parser")
+    let vision = plan("owner/LocalGGUF", "/models/owner/LocalGGUF", opts: ["mmproj": "/models/projector.gguf"])
+    check(vision.error == nil && vision.engineArgs.contains("--mmproj") && vision.engineArgs.contains("/models/projector.gguf"),
+          "1.5.0 sends an explicit local GGUF vision projector")
+    check(plan("owner/LocalGGUF", "/models/owner/LocalGGUF", opts: ["mmproj": "/models/projector.gguf", "language_only": true]).error?.contains("--mmproj cannot") == true,
+          "local vision projector and language-only reject before launch")
+    check(plan("owner/Unlisted", "/missing", opts: ["mmproj": "/models/projector.gguf"]).error?.contains("--mmproj requires") == true,
+          "projector cannot run without a local-dir launch")
+    let legacy = plan("owner/Legacy", "/models/Legacy")
+    check(legacy.version == "1.3.0" && legacy.engineArgs.prefix(3) == ["-u", "-m", "server.server"],
+          "1.5.0 keeps module fallback only for legacy Splash packages")
+    check(plan("owner/LocalGGUF", "/models/owner/LocalGGUF", manual: true).version == "1.5.0",
+          "MANUAL 1.5.0 uses the chosen kit for local models")
+    let manualLegacy = plan("owner/Legacy", "/models/Legacy", manual: true)
+    check(manualLegacy.version == "1.5.0" && manualLegacy.error?.contains("1.3.0 packages") == true,
+          "MANUAL 1.5.0 refuses a legacy package rather than silently changing kits")
+    planKit(fs: &fs, path: "/brew/1.4.1/libexec", version: "1.4.1")
+    let older = plan("owner/LocalGGUF", "/models/owner/LocalGGUF", version: "1.4.1")
+    check(older.version == "1.3.0" && !older.engineArgs.contains("--model-dir"),
+          "older launcher still uses module fallback, never an unsupported flag")
+    let manualOlder = plan("owner/LocalGGUF", "/models/owner/LocalGGUF", version: "1.4.1", manual: true)
+    check(manualOlder.version == "1.4.1" && manualOlder.error?.contains("Selected engine v1.4.1") == true,
+          "MANUAL 1.4.1 remains selected and reports unsupported local directories")
+    planKit(fs: &fs, path: "/brew/1.4.2/libexec", version: "1.4.2")
+    let unrecognizedOlder = plan("owner/LocalGGUF", "/models/owner/LocalGGUF", version: "1.4.2")
+    check(unrecognizedOlder.version == "1.3.0" && !unrecognizedOlder.engineArgs.contains("--model-dir"),
+          "unmapped 1.4.2 does not inherit 1.5-only local-dir support from its fallback contract")
+    let manualUnrecognized = plan("owner/LocalGGUF", "/models/owner/LocalGGUF", version: "1.4.2", manual: true)
+    check(manualUnrecognized.version == "1.4.2" && manualUnrecognized.error != nil &&
+          !manualUnrecognized.engineArgs.contains("--model-dir"),
+          "MANUAL 1.4.2 refuses local preparation without an unsupported flag")
 }
 do {
     let fm = FileManager.default
@@ -2444,15 +2538,19 @@ do {
           "flat index: every filename is flat and all vision_tower tensor keys retain the vision shard")
     var fs = FakeFS()
     planKit(fs: &fs, path: "/brew/1.3.2/libexec", version: "1.3.2")
+    planKit(fs: &fs, path: "/brew/1.5.0/libexec", version: "1.5.0")
+    var brewVersion = "1.3.2"
     planKit(fs: &fs, path: home + "/SplashUI/kit/old", version: "1.3.0")
-    func plan(offline: Bool? = nil) -> LaunchConfig {
-        var opts: [String: Any] = ["draft_model": "owner/draft"]
+    func plan(offline: Bool? = nil, modelDir: String = "/lmstudio/local/model",
+              draftModel: String? = "owner/draft") -> LaunchConfig {
+        var opts: [String: Any] = [:]
+        if let draftModel { opts["draft_model"] = draftModel }
         if let offline { opts["offline"] = offline }
         let data = planCfgJSON(engineMode: "auto", manualPath: nil, port: 8123, key: "test", name: "OptiQ Compact",
-            modelId: id, modelDir: "/lmstudio/local/model", options: opts, modelSource: "lmstudio")
+            modelId: id, modelDir: modelDir, options: opts, modelSource: "lmstudio")
         return planLaunch(data, home: home,
             isDir: { path in var dir: ObjCBool = false; return fs.isDir(path) || (fm.fileExists(atPath: path, isDirectory: &dir) && dir.boolValue) },
-            isExecutable: { fs.isExecutable($0) }, brewKeg: { "/brew/1.3.2" }, kitVersion: { readKitVersion(fs: fs, kit: $0) },
+            isExecutable: { fs.isExecutable($0) }, brewKeg: { "/brew/\(brewVersion)" }, kitVersion: { readKitVersion(fs: fs, kit: $0) },
             fileContents: { (try? String(contentsOfFile: $0, encoding: .utf8)) ?? fs.fileContents($0) },
             listDir: { (try? fm.contentsOfDirectory(atPath: $0)) ?? fs.listDir($0) })
     }
@@ -2475,10 +2573,20 @@ do {
           "AUTO OptiQ nested vision: Homebrew 1.3.2 offline using isolated flat cache")
     check(plan(offline: false).error == nil && !plan(offline: false).engineArgs.contains("--offline") && plan(offline: false).engineEnv["HF_HUB_OFFLINE"] == nil,
           "AUTO OptiQ local-folder model with offline set false: the explicit false is honored")
+    brewVersion = "1.5.0"
+    let nested = plan(modelDir: snapshot, draftModel: nil)
+    check(nested.error == nil && nested.version == "1.5.0" && nested.modelDir == flatSnapshot &&
+          !nested.engineArgs.contains("--model-dir") && nested.engineEnv["HF_HUB_CACHE"] == flatRoot,
+          "1.5.0 nested OptiQ retains flat-cache ID route because local prep rejects nested shard names")
     try! rewritten.data.write(to: URL(fileURLWithPath: snapshot + "/model.safetensors.index.json"))
     try! fm.createSymbolicLink(atPath: snapshot + "/vision-optiq.safetensors", withDestinationPath: snapshot + "/optiq/optiq_vision.safetensors")
     check(plan().modelDir == snapshot && plan().engineEnv["HF_HUB_CACHE"] == nil,
           "compatible original snapshot takes precedence over app-owned flat cache")
+    let direct = plan(modelDir: snapshot, draftModel: nil)
+    check(direct.error == nil && direct.engineArgs.contains("--model-dir") &&
+          direct.engineArgs.contains(snapshot) && direct.engineEnv["HF_HUB_CACHE"] == nil,
+          "1.5.0 serves a compatible cached snapshot directly without the older flat-cache route")
+    brewVersion = "1.3.2"
     try! originalIndex.write(to: URL(fileURLWithPath: snapshot + "/model.safetensors.index.json"))
     try! fm.removeItem(atPath: snapshot + "/" + shards[3])
     try! fm.removeItem(atPath: flatSnapshot + "/" + shards[3])
@@ -3824,6 +3932,8 @@ do {
     // 1.4.0 fixture IS the 1.4.1 table: it must also be inSync with contract141.
     let d141_141 = registryDiff(parseServeOptions(fixtureServeOptions140), contract: contract141, version: "1.4.1")
     check(d141_141.inSync, "s2b diff: the 1.4.1 table (== the 1.4.0 table) matches the 1.4.1 contract (inSync)")
+    let d150 = registryDiff(parseServeOptions(fixtureServeOptions140), contract: contract150, version: "1.5.0")
+    check(d150.inSync, "1.5.0 shared serve options match the byte-identical 1.4.1 table")
     let fourNew140 = ["--expert-memory", "--ple-memory", "--sparse-kv-memory", "--verify-rows"]
     let d140_132 = registryDiff(parseServeOptions(fixtureServeOptions140), contract: contract132, version: "1.4.0")
     check(!d140_132.inSync && d140_132.missingInContract == fourNew140

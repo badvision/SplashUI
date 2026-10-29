@@ -1627,7 +1627,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                         fileContents: { try? String(contentsOfFile: $0, encoding: .utf8) },
                         listDir: { try? FileManager.default.contentsOfDirectory(atPath: $0) },
                         globals: doc.globals,
-                        baselineSignature: server.lastSuccessfulPlanSignature)
+                        baselineSignature: server.lastSuccessfulPlanSignature,
+                        home: NSHomeDirectory())
                 }
             }
             return merged

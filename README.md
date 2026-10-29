@@ -78,20 +78,28 @@ engine reports readiness; a failed restart also keeps settings available.
 Startup failures remain stopped until an explicit Start/Restart; dismissing the
 error never retries. **Copy to Clipboard** copies the complete error through the
 native pasteboard bridge. AUTO first checks the selected repo id against the local
-Hub cache, regardless of its original library (including `local/name` models from
-LM Studio). A complete current snapshot uses the newest Homebrew engine; the profile's
-`offline` option governs downloads. Unset, a model from a local folder runs offline and
-a Hugging Face id may download through the engine; set `offline` on or off to override.
-Offline with absent or incompatible cached files produces an explicit-download error,
-never a silent download; only local-folder models need a local-folder-capable engine.
-For indexed checkpoints with nested vision shards, SplashUI maintains a separate
-`~/Library/Application Support/SplashUI/hf-flat` cache: only its index is rewritten;
-all weights and metadata link to the originals. Vision tensors stay present. The
-child uses `HF_HUB_CACHE` only when the original snapshot has unsupported nested
-shard names. Neither the real Hub cache nor the Homebrew engine is patched.
-Engines with the installed GGUF target adapter (1.3.2+) also accept cached GGUF
-targets offline, including their mmproj vision projector; these snapshots do not
-need MLX config/tokenizer files. Downloads happen only when the profile's offline option is off.
+Hub cache, regardless of its original library. On 1.5.0+, an available GGUF/MLX
+model directory is prepared directly with `--model-dir`; AUTO stays on the newest
+Homebrew launcher instead of switching to the old module kit. One-level folder
+names are served as `local/<name>` because the launcher requires an OWNER/REPO
+API ID even when it reads a local path. Legacy Splash packages still need the
+module-form engine. A selected Hub ID without a directory retains the by-ID path.
+The profile's `offline` option controls the launcher's offline flag: unset means
+on for a local-folder source and off for a Hub source. Local preparation never
+contacts the Hub for its target **or its draft**: the family's DFlash2 draft
+must already be cached, or `draft_model` must point to a local draft directory.
+In local-dir mode `revision` is invalid. The optional `mmproj` MODEL setting
+names a separate GGUF vision projector and cannot be combined with
+`language_only`; one projector beside a local GGUF is selected automatically.
+With several projectors, choose one explicitly (or serve text only). Missing
+files surface the engine's recoverable startup error. For indexed checkpoints
+with nested vision shards, 1.5.0's local preparer still rejects shard
+filenames containing `/`. SplashUI retains the compatible by-ID route for
+nested shards and cached GGUF models with ambiguous projectors. Only the
+nested-shard case needs an app-owned flat cache: its index is rewritten and
+weights, metadata, and the cached draft are linked without modifying the
+original Hub cache or Homebrew keg. Older launchers retain their existing
+cached GGUF and offline routes.
 
 `./install.sh` still reads a couple of its own vars for the one-shot install (it predates the
 panel and is unaffected). `start.sh` no longer exports any of them — it launches its own engine
@@ -127,15 +135,19 @@ The environment variables formerly documented here are retired. Each one maps to
     and passes the **on-disk model dir positionally**, so an already-installed model is
     reused — never re-downloaded. A model dir is required; without one the UI names the
     locations it tried.
-  - **1.3.1+** (the Homebrew keg): runs the kit's own `install/launcher.py serve --model
-    mlx-community/Qwen3.8-27B-4bit` (the same thing the brew formula's `splash` shim does
-    under the hood). It loads the model **by id** — a one-time download it manages itself.
-    It refuses the 1.3.0 Splash-package id (`incoai/Qwen3.8-27B-Splash`) outright — "Splash
-    no longer loads" that prebuilt format — so a 1.3.0 model dir is not usable by it either.
-  AUTO selects the highest valid installed Homebrew Splash version (numeric ordering,
-  Apple-silicon and Intel prefixes); the old SplashUI-local kit is not an automatic default.
-  MANUAL uses exactly the chosen path. Model/runtime incompatibilities remain visible
-  eligibility errors rather than silently selecting another engine. VALID has no build-version note.
+  - **1.3.1–1.4.x** (Homebrew launcher): runs `install/launcher.py serve --model
+    <owner/repo>` and downloads or uses the cached model by id. It cannot
+    prepare a model from an arbitrary local directory.
+  - **1.5.0+**: uses the same by-ID launch for ID-only selections and the
+    launcher’s `--model-dir <path>` for selected local GGUF/MLX directories.
+    `--model` names the model exposed by the API; local directories do not need
+    a matching Hub repository. A separate `--mmproj <file>` is available in
+    the profile’s MODEL settings for GGUF vision. 1.3.0 Splash packages are
+    still incompatible with the launcher.
+  AUTO selects the highest valid installed Homebrew Splash version (numeric
+  ordering across Apple-silicon and Intel prefixes). Only models the launcher
+  cannot prepare, such as a legacy Splash package, use the module-kit fallback.
+  MANUAL uses exactly the chosen kit and refuses incompatible model formats.
 - The app polls `/status` (1 s) and `/metrics` (1 s) and renders the panel in a
   WKWebView. The decode readout is the *committed* output rate: counter delta divided by
   the real elapsed time between samples. DFlash-2 draft tokens that fail verification do
@@ -158,14 +170,15 @@ The environment variables formerly documented here are retired. Each one maps to
 
 ## Upgrading the engine
 
-Change `SPLASH_VERSION` and re-run `install.sh`. The UI reads the installed kit's
-`release.json` version and switches to that release's launch contract automatically:
-1.3.0-style runs `python -m server.server <MODEL_DIR> --model <OWNER/REPO> --tokenizer <MODEL_DIR>/tokenizer` (the model dir is
-passed positionally and reused — no download); 1.3.1+ (the Homebrew keg) runs the kit's
-`install/launcher.py serve --model <id>`. 1.3.0 splits
-dense-model prefill across GPU and Neural Engine by default (`SPLASH_ANE` controls it)
-and speaks native protocol 8, so the server must restart on upgrade. Verify the CLI of
-any newer release before pointing `start.sh` at it.
+Upgrade the Homebrew engine with `brew upgrade splash`; AUTO then selects its
+new keg. The app reads the keg’s `release.json` and uses an exact hand-authored
+launch contract. For 1.5.0, `server/serve_options.py` and `install/families.py`
+are byte-identical to 1.4.1; the new launcher flags are `--model-dir` and
+`--mmproj`. The former is derived from model selection, not a free-form engine
+path option. `--mmproj` is a profile MODEL option; the local-dir restrictions on
+`draft_model` and `revision` are enforced before starting. `start.sh` is a
+separate legacy 1.3.0 full-reset script; it does not select the Homebrew keg.
+Engine settings apply only after an explicitly confirmed restart.
 
 ## License
 
