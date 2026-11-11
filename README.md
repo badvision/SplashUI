@@ -138,12 +138,27 @@ The environment variables formerly documented here are retired. Each one maps to
   - **1.3.1–1.4.x** (Homebrew launcher): runs `install/launcher.py serve --model
     <owner/repo>` and downloads or uses the cached model by id. It cannot
     prepare a model from an arbitrary local directory.
-  - **1.5.0+**: uses the same by-ID launch for ID-only selections and the
+  - **1.5.0**: uses the same by-ID launch for ID-only selections and the
     launcher’s `--model-dir <path>` for selected local GGUF/MLX directories.
     `--model` names the model exposed by the API; local directories do not need
     a matching Hub repository. A separate `--mmproj <file>` is available in
     the profile’s MODEL settings for GGUF vision. 1.3.0 Splash packages are
     still incompatible with the launcher.
+  - **1.6.1**: adds one launcher flag, `--activations` (auto | bf16, default
+    auto), exposed as a per-profile option next to the other request settings;
+    the default is omitted from the argv. It also carries the kit's
+    `install/families.py` `option_report`, hand-authored into the contract as
+    per-family facts: the planner drops any unusable flag the selected model's
+    family cannot use (e.g. Flint: `--state-format`, `--language-only`, ...)
+    even when the profile sets it, and validates `--max-context` against the
+    family's `max_context_tokens` ceiling (262144 for Flint, 1010000 for the
+    Qwen families) instead of the flat 1010000 YaRN bound. The settings UI
+    hides the gated option controls for the selected profile (hidden, not
+    disabled, the version-gating pattern). Older contracts and unresolved
+    families keep the flat ceiling and no gating. The 1.6.1 `serve_options.py`
+    `EngineArgument`/`engine_argv` pass-through and its `SamplingDefaults`
+    request defaults are server-side only: the app builds no argv for them and
+    gives them no settings surface.
   AUTO selects the highest valid installed Homebrew Splash version (numeric
   ordering across Apple-silicon and Intel prefixes). Only models the launcher
   cannot prepare, such as a legacy Splash package, use the module-kit fallback.
@@ -176,8 +191,17 @@ launch contract. For 1.5.0, `server/serve_options.py` and `install/families.py`
 are byte-identical to 1.4.1; the new launcher flags are `--model-dir` and
 `--mmproj`. The former is derived from model selection, not a free-form engine
 path option. `--mmproj` is a profile MODEL option; the local-dir restrictions on
-`draft_model` and `revision` are enforced before starting. `start.sh` is a
-separate legacy 1.3.0 full-reset script; it does not select the Homebrew keg.
+`draft_model` and `revision` are enforced before starting. For 1.6.1, the
+launcher gains exactly one flag, `--activations` (auto | bf16, default auto;
+per-profile, omitted from the argv while unset), and `install/families.py` run
+as a script prints the `option_report` — per family, the unusable launcher
+flags plus the native `context_tokens` and the YaRN `max_context_tokens` —
+which the 1.6.1 contract carries hand-authored (validation data, never argv
+input): unusable flags are dropped from the plan and hidden in settings, and
+`--max-context` is checked against the family's ceiling. The new
+`EngineArgument`/`engine_argv` machinery and `SamplingDefaults` are
+server-side pass-through to the C++ engine, with no app surface. `start.sh` is
+a separate legacy 1.3.0 full-reset script; it does not select the Homebrew keg.
 Engine settings apply only after an explicitly confirmed restart.
 
 ## License

@@ -721,6 +721,46 @@ try {
     assert.equal(gated.$('ptabCache').hidden, false);
   });
 } finally { gated.close(); }
+// ---- 1.6.1: --activations control + per-model unusable-flag gating ----
+const ACTIVATIONS = { key: 'activations', flag: '--activations', kind: 'value', group: 'api', default: 'auto', choices: ['auto', 'bf16'], requires: [] };
+const act161 = panel({ optionDefs: [...DEFAULT_DEFS, ACTIVATIONS] });
+try {
+  const { w, $, tick, flushTimers } = act161;
+  w.showView('settings');
+  check('--activations renders in the API tab with the auto default selected and no reset pill', () => {
+    $('ptabApi').click();
+    assert.ok($('ptabApiPanel').contains($('option-activations')));
+    assert.equal($('option-activations').type, 'hidden');
+    assert.equal(w.document.querySelector('[data-option-choice="activations"][data-value="auto"]').classList.contains('on'), true);
+    assert.equal(w.document.querySelector('[data-option-choice="activations"][data-value="bf16"]').classList.contains('on'), false);
+    assert.ok(w.document.querySelector('[data-option-reset="activations"]').hidden, 'unset -> no reset pill');
+  });
+  check('--activations: an explicit choice round-trips into the saved config and earns a reset pill', () => {
+    w.document.querySelector('[data-option-choice="activations"][data-value="bf16"]').click();
+    flushTimers();
+    assert.equal(act161.doc().profiles[0].options.activations, 'bf16');
+    assert.equal(w.document.querySelector('[data-option-reset="activations"]').hidden, false);
+  });
+  check('per-model gating: flags in the selected profile unusable_flags hide their controls', () => {
+    const gatedProfiles = act161.w.__test.S().cfg.profiles.map(p => p.id === 'p1'
+      ? { ...p, unusable_flags: ['--kv-format', '--decode-share'] } : p);
+    tick({ profiles: gatedProfiles });
+    $('ptabMemory').click();
+    assert.equal($('option-kv_format'), null, '--kv-format row is absent (hidden, not disabled)');
+    assert.equal(w.document.querySelector('[data-option-row="decode_share"]'), null, '--decode-share row is absent');
+    assert.equal($('ptabMemoryPanel').querySelector('.option-row'), null, 'no option rows remain in the fully-gated group');
+  });
+} finally { act161.close(); }
+const act150 = panel();
+try {
+  act150.w.showView('settings');
+  check('1.5.0 option set (no activations def): the control is absent', () => {
+    act150.$('ptabApi').click();
+    assert.equal(act150.$('option-activations'), null);
+    assert.equal(act150.w.document.querySelector('[data-option-choice="activations"]'), null);
+  });
+} finally { act150.close(); }
+
 
 // ---- S7: the model chooser ----
 const chooser = panel();

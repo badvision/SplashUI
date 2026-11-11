@@ -869,6 +869,14 @@ const PTABS = ["memory", "cache", "api"];
 
 // Option definitions come from the tick's contract (or the last validate response).
 function cfOptionDefs() { return CF.optionDefs || (S && S.cfg && S.cfg.option_defs) || []; }
+// 1.6.1 per-model gating: the selected profile's family unusable flags (the
+// tick's modelTickState, hand-authored from the kit's families.py report) are
+// HIDDEN, not disabled — the version-gating pattern (D3). Older contracts or an
+// unknown family yield an empty set (nothing gated).
+function cfGatedFlags() {
+  const p = (S && S.cfg && S.cfg.profiles || []).find(v => v.id === CF.profileId);
+  return new Set(Array.isArray(p && p.unusable_flags) ? p.unusable_flags : []);
+}
 
 function cfDraft(doc) {
   const g = doc.globals || {};
@@ -1179,7 +1187,8 @@ function cfRenderProfiles() {
   // Version-gated tabs: a tab whose group has no options for the resolved engine
   // version is HIDDEN, not disabled (D3).
   const defs = cfOptionDefs();
-  const groups = new Set(defs.map(o => o.group));
+  const gate = cfGatedFlags();   // 1.6.1 per-model unusable flags (hidden, not disabled)
+  const groups = new Set(defs.filter(o => !gate.has(o.flag)).map(o => o.group));
   PTABS.forEach(t => {
     const el = $("ptab" + t[0].toUpperCase() + t.slice(1));
     if (el) el.hidden = !groups.has(t);
@@ -1245,7 +1254,7 @@ function cfRenderProfiles() {
     $("profilePreviewRestart").hidden = pv.restart !== true;
   }
   // The model-axis options (draft override etc.) render under the model pill.
-  const axis = defs.filter(o => o.group === "model-axis");
+  const axis = defs.filter(o => o.group === "model-axis" && !gate.has(o.flag));
   cfPaintOptionRows("profileModelAxis", axis, p, defs);
   cfRenderOptions(p);
   // Stale keys (kept for downgrade safety) show once, in the active tab slot.
@@ -1303,12 +1312,13 @@ function cfPaintOptionRows(id, items, p, defs) {
 function cfRenderOptions(p) {
   if (!p) return;
   const defs = cfOptionDefs(), esc = cfEscape;
-  const compute = defs.filter(o => o.group === "compute");
+  const gate = cfGatedFlags();
+  const compute = defs.filter(o => o.group === "compute" && !gate.has(o.flag));
   cfPaintOptionRows("profileComputeOptions", compute, p, defs);
   for (const t of PTABS) {
     const panel = $("ptab" + t[0].toUpperCase() + t.slice(1) + "Panel");
     if (!panel) continue;
-    const items = defs.filter(o => o.group === t);
+    const items = defs.filter(o => o.group === t && !gate.has(o.flag));
     if (!items.length) { panel.innerHTML = '<div class="profile-meta">No options in this group for engine v' + esc((S.cfg && S.cfg.engine && S.cfg.engine.version) || "?") + '.</div>'; continue; }
     const key = t + JSON.stringify(items) + JSON.stringify(Object.keys(p.options || {}).sort());
     if (CF["optKey_" + t] !== key) {

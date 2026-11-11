@@ -1602,7 +1602,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         cfgPayload["profiles"] = (cfgPayload["profiles"] as? [[String: Any]] ?? []).map { profile in
             var merged = profile
             if let state = states.first(where: { $0["id"] as? String == profile["id"] as? String }) {
-                for key in ["eligibility", "eligibility_reason", "drafter", "kind", "size_bytes"] {
+                for key in ["eligibility", "eligibility_reason", "drafter", "kind", "size_bytes", "unusable_flags"] {
                     merged[key] = state[key]
                 }
             }

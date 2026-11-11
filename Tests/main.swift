@@ -1243,19 +1243,22 @@ do {
     let f = contractFor("1.5.0", registry: launchRegistry)
     check(!f.fallback && f.contract.version == "1.5.0" && f.contract.flavor == .launcher,
           "contractFor: 1.5.0 is an exact launcher contract")
+    let g = contractFor("1.6.1", registry: launchRegistry)
+    check(!g.fallback && g.contract.version == "1.6.1" && g.contract.flavor == .launcher,
+          "contractFor: 1.6.1 is an exact launcher contract")
 }
 
-// 28. contractFor: unseen versions -> the LATEST authored (1.5.0) + fallback =
+// 28. contractFor: unseen versions -> the LATEST authored (1.6.1) + fallback =
 // true (D3: launch proceeds; S7 shows the "FALLBACK MAPPING" cap).
 do {
-    let newer = contractFor("1.5.1", registry: launchRegistry)
-    check(newer.fallback == true && newer.contract.version == "1.5.0",
-          "contractFor: unseen 1.5.1 -> latest authored 1.5.0 + fallback")
+    let newer = contractFor("1.6.2", registry: launchRegistry)
+    check(newer.fallback == true && newer.contract.version == "1.6.1",
+          "contractFor: unseen 1.6.2 -> latest authored 1.6.1 + fallback")
     let older = contractFor("1.2.9", registry: launchRegistry)
-    check(older.fallback == true && older.contract.version == "1.5.0",
-          "contractFor: older 1.2.x -> latest authored 1.5.0 + fallback")
+    check(older.fallback == true && older.contract.version == "1.6.1",
+          "contractFor: older 1.2.x -> latest authored 1.6.1 + fallback")
     let unreadable = contractFor(nil, registry: launchRegistry)
-    check(unreadable.fallback == true && unreadable.contract.version == "1.5.0",
+    check(unreadable.fallback == true && unreadable.contract.version == "1.6.1",
           "contractFor: unreadable release.json (nil) -> the latest authored + fallback")
 }
 
@@ -1411,6 +1414,98 @@ do {
           !profileOptionDefinitions(version: "1.4.2").contains { $0["key"] as? String == "mmproj" },
           "only 1.5.0+ kits expose the projector profile option")
 }
+// 31e. The 1.6.1 contract: the shared table adds exactly one launcher flag,
+// --activations (group requests, choices auto|bf16, default auto); the
+// family registry/rules are unchanged; the per-family facts are the real
+// 1.6.1 keg's install/families.py option_report, byte-for-byte.
+do {
+    let c = contract161
+    check(Set(c.options.map { $0.key }).subtracting(Set(contract150.options.map { $0.key })) == ["activations"],
+          "1.6.1 adds exactly one shared launcher option (--activations) over 1.5.0")
+    let act = c.option("activations")
+    check(act != nil && act!.flag == "--activations" && act!.group == "requests"
+          && act!.kind == .value && act!.defValue == "auto" && act!.choices == ["auto", "bf16"],
+          "1.6.1 --activations: requests group, value option, choices auto|bf16, default auto")
+    check(c.familyRegistry == contract150.familyRegistry && c.familyRules == contract150.familyRules,
+          "1.6.1 retains every 1.5.0 family and config rule")
+    check(contract150.familyOptionFacts == nil, "1.5.0 carries no per-family facts (no gating)")
+    let facts = c.familyOptionFacts
+    check(facts != nil && facts!.count == 5, "1.6.1 carries facts for all five families")
+    // Byte-for-byte against the real 1.6.1 keg's option_report.
+    check(facts?["Qwen3.8-27B"] == FamilyOptionFacts(
+        unusable: ["--ple-memory", "--expert-memory", "--sparse-kv-memory", "--verify-rows"],
+        contextTokens: 262144, maxContextTokens: 1010000), "1.6.1 Qwen3.8-27B facts match the keg's report")
+    check(facts?["Qwen3.6-35B-A3B"] == FamilyOptionFacts(
+        unusable: ["--ple-memory", "--sparse-kv-memory", "--disable-ane"],
+        contextTokens: 262144, maxContextTokens: 1010000), "1.6.1 Qwen3.6-35B-A3B facts match the keg's report")
+    check(facts?["Qwen3.5-122B-A10B"] == FamilyOptionFacts(
+        unusable: ["--ple-memory", "--sparse-kv-memory", "--disable-ane"],
+        contextTokens: 262144, maxContextTokens: 1010000), "1.6.1 Qwen3.5-122B-A10B facts match the keg's report")
+    check(facts?["Qwen3.8-Flash-Next"] == FamilyOptionFacts(
+        unusable: ["--disable-ane"], contextTokens: 262144, maxContextTokens: 1010000),
+          "1.6.1 Qwen3.8-Flash-Next facts match the keg's report")
+    check(facts?["Flint"] == FamilyOptionFacts(
+        unusable: ["--ple-memory", "--sparse-kv-memory", "--state-format", "--default-reasoning-effort",
+                   "--thinking-token-budget", "--thinking-end-text", "--max-image-pixels",
+                   "--disable-ane", "--language-only"],
+        contextTokens: 262144, maxContextTokens: 262144), "1.6.1 Flint facts match the keg's report")
+}
+
+// 31f. planLaunch 1.6.1 per-family gating: a Flint model drops its unusable
+// flags even when the profile sets them, and the per-family max-context
+// ceiling refuses an over-ceiling value (exactly at the ceiling is allowed).
+// A 1.5.0 plan over the identical config is unaffected (no facts, no ceiling).
+do {
+    var fs = FakeFS()
+    planKit(fs: &fs, path: "/brew/1.6.1/libexec", version: "1.6.1")
+    planKit(fs: &fs, path: "/brew/1.5.0/libexec", version: "1.5.0")
+    fs.dir("/models/FlintModel", ["config.json", "model.safetensors"])
+    fs.file("/models/FlintModel/config.json", #"{"model_type":"flint"}"#)
+    fs.dir("/models/QwenModel", ["config.json", "model.safetensors"])
+    fs.file("/models/QwenModel/config.json", #"{"model_type":"qwen3_5"}"#)
+    func plan(_ modelDir: String, _ opts: [String: Any], kit: String = "/brew/1.6.1/libexec") -> LaunchConfig {
+        let cfg = planCfgJSON(engineMode: "manual", manualPath: kit, port: 8123, key: "k",
+            name: "P", modelId: "owner/model", modelDir: modelDir, options: opts, modelSource: "lmstudio")
+        return planLaunch(cfg, home: "/home", isDir: { fs.isDir($0) },
+            isExecutable: { fs.isExecutable($0) }, kitVersion: { readKitVersion(fs: fs, kit: $0) },
+            fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
+    }
+    let flint = plan("/models/FlintModel",
+                     ["state_format": "bf16", "language_only": true, "max_context": "262144"])
+    check(flint.error == nil && flint.version == "1.6.1" &&
+          !flint.engineArgs.contains("--state-format") &&
+          !flint.engineArgs.contains("--language-only"),
+          "1.6.1 Flint drops the unusable --state-format and --language-only even when set")
+    check(flint.engineArgs.contains("--max-context") && flint.engineArgs.contains("262144"),
+          "1.6.1 Flint: --max-context exactly at the 262144 ceiling is allowed")
+    let flintOver = plan("/models/FlintModel",
+                         ["state_format": "bf16", "language_only": true, "max_context": "262145"])
+    check(flintOver.error?.contains("exceeds the Flint family") == true && flintOver.engineArgs.isEmpty,
+          "1.6.1 Flint: --max-context 262145 (over the 262144 ceiling) refuses the plan")
+    let qwen = plan("/models/QwenModel", ["verify_rows": "all", "state_format": "bf16", "max_context": "1010000"])
+    check(qwen.error == nil && !qwen.engineArgs.contains("--verify-rows") &&
+          qwen.engineArgs.contains("--state-format"),
+          "1.6.1 Qwen3.8-27B drops --verify-rows but keeps --state-format (not unusable for the family)")
+    check(qwen.engineArgs.contains("--max-context") && qwen.engineArgs.contains("1010000"),
+          "1.6.1 Qwen3.8-27B: --max-context at the 1010000 YaRN ceiling is allowed")
+    let qwenOver = plan("/models/QwenModel", ["max_context": "1010001"])
+    check(qwenOver.error?.contains("exceeds the Qwen3.8-27B family") == true && qwenOver.engineArgs.isEmpty,
+          "1.6.1 Qwen3.8-27B: --max-context 1010001 (over the ceiling) refuses the plan")
+    // 1.5.0 over the identical Flint config: no facts -> no gating, no ceiling.
+    let legacy150 = planCfgJSON(engineMode: "manual", manualPath: "/brew/1.5.0/libexec", port: 8123,
+                                key: "k", name: "P", modelId: "owner/model", modelDir: "/models/FlintModel",
+                                options: ["state_format": "bf16", "language_only": true, "max_context": "300000"],
+                                modelSource: "lmstudio")
+    let legacyPlan = planLaunch(legacy150, home: "/home", isDir: { fs.isDir($0) },
+        isExecutable: { fs.isExecutable($0) }, kitVersion: { readKitVersion(fs: fs, kit: $0) },
+        fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
+    check(legacyPlan.error == nil && legacyPlan.version == "1.5.0" &&
+          legacyPlan.engineArgs.contains("--state-format") &&
+          legacyPlan.engineArgs.contains("--language-only") &&
+          legacyPlan.engineArgs.contains("--max-context") && legacyPlan.engineArgs.contains("300000"),
+          "1.5.0 over the same Flint config is unaffected: no per-family gating or ceiling")
+}
+
 
 // 32. THE D9(b) HEADLINE ANCHOR (amended per open item 5): with the seeded
 // default config, the 1.3.0 module argv is byte-identical to the golden baseline
@@ -1631,17 +1726,17 @@ do {
 }
 
 // 41. Fallback in the builder: a 1.3.9 kit (no authored contract) runs the latest
-// authored mapping (1.5.0) with fallback = true — the launch proceeds (D3); S7
+// authored mapping (1.6.1) with fallback = true — the launch proceeds (D3); S7
 // surfaces the cap.
 do {
     let (contract, fallback) = contractFor("1.3.9", registry: launchRegistry)
-    check(fallback == true && contract.version == "1.5.0", "fallback: a 1.3.9 kit maps to the 1.5.0 contract")
+    check(fallback == true && contract.version == "1.6.1", "fallback: a 1.3.9 kit maps to the 1.6.1 contract")
     let res = buildArgv(contract, profileValues: ["state_format": .string("bf16")],
                         model: ProfileModel(source: "hfid", id: "m/r"),
                         globals: GlobalCfg(port: 8123, apiKey: "k"))
     check(res.args == ["-u", "install/launcher.py", "serve", "--model", "m/r",
                        "--host", "127.0.0.1", "--port", "8123", "--state-format", "bf16"],
-          "fallback: the 1.5.0 mapping drives the argv (launch proceeds)")
+          "fallback: the 1.6.1 mapping drives the argv (launch proceeds; the --activations default is omitted)")
     check(res.env == ["SPLASH_API_KEY": "k"], "fallback: env built from the globals as usual")
 }
 

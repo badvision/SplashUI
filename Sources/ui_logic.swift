@@ -542,6 +542,24 @@ public struct OptionDef: Equatable {
     }
 }
 
+/// One model family's per-family facts, hand-authored from the kit's
+/// install/families.py `option_report` (D17: validation data, never argv).
+/// `unusable` = the launcher flags the family cannot use; the plan drops them
+/// from the argv even when the profile sets them. `contextTokens` /
+/// `maxContextTokens` = the family's native window and its max --max-context
+/// (the per-family ceiling, which replaces the flat 1010000 when the family
+/// is known).
+public struct FamilyOptionFacts: Equatable {
+    public let unusable: [String]
+    public let contextTokens: Int
+    public let maxContextTokens: Int
+    public init(unusable: [String], contextTokens: Int, maxContextTokens: Int) {
+        self.unusable = unusable
+        self.contextTokens = contextTokens
+        self.maxContextTokens = maxContextTokens
+    }
+}
+
 /// One hand-authored entry of the versioned launch registry (D3): everything the
 /// app knows about driving a kit whose release.json says `version`.
 public struct VersionContract: Equatable {
@@ -556,15 +574,20 @@ public struct VersionContract: Equatable {
     /// config.json -> family rules (the app's plan-time knowledge of the
     /// engine's config->family registry; 1.3.0: none — packages bake the draft).
     public let familyRules: [FamilyRule]
+    /// Per-family facts from the kit's install/families.py option_report
+    /// (1.6.1: all five families; older contracts: nil — no per-family gating).
+    public let familyOptionFacts: [String: FamilyOptionFacts]?
     public init(version: String, flavor: LaunchFlavor, options: [OptionDef],
                 familyRegistry: [String: String] = [:], suggestedModels: [String] = [],
-                familyRules: [FamilyRule] = []) {
+                familyRules: [FamilyRule] = [],
+                familyOptionFacts: [String: FamilyOptionFacts]? = nil) {
         self.version = version
         self.flavor = flavor
         self.options = options
         self.familyRegistry = familyRegistry
         self.familyRules = familyRules
         self.suggestedModels = suggestedModels
+        self.familyOptionFacts = familyOptionFacts
     }
     public func option(_ key: String) -> OptionDef? { options.first { $0.key == key } }
     public subscript(key: String) -> OptionDef? { option(key) }
@@ -825,6 +848,43 @@ public let contract150 = VersionContract(
     familyRegistry: contract141.familyRegistry,
     familyRules: contract141.familyRules)
 
+/// 1.6.1: the shared table adds exactly one launcher flag, --activations
+/// (group requests, choices auto|bf16, default auto — the server's
+/// engine_argv/EngineArgument mechanism and needs: capability facts are
+/// server-side pass-through to the C++ engine, never part of the launcher CLI
+/// the app builds argv for). families.py adds per-family option_report facts
+/// (hand-authored below from the keg's report; D17: validation data).
+public let contract161 = VersionContract(
+    version: "1.6.1", flavor: .launcher,
+    options: (sharedOptions140 + [
+        OptionDef(flag: "--activations", key: "activations", kind: .value, group: "requests",
+                  defValue: "auto", choices: ["auto", "bf16"]),
+    ]) + launcherModelOptions150,
+    familyRegistry: contract150.familyRegistry,
+    familyRules: contract150.familyRules,
+    familyOptionFacts: [
+        // The real 1.6.1 keg's install/families.py option_report (byte-for-byte).
+        "Qwen3.8-27B": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--expert-memory", "--sparse-kv-memory", "--verify-rows"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Qwen3.6-35B-A3B": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--sparse-kv-memory", "--disable-ane"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Qwen3.5-122B-A10B": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--sparse-kv-memory", "--disable-ane"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Qwen3.8-Flash-Next": FamilyOptionFacts(
+            unusable: ["--disable-ane"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Flint": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--sparse-kv-memory", "--state-format",
+                       "--default-reasoning-effort", "--thinking-token-budget",
+                       "--thinking-end-text", "--max-image-pixels", "--disable-ane",
+                       "--language-only"],
+            contextTokens: 262144, maxContextTokens: 262144),
+    ])
+
+
 /// The default registry: every authored version.
 public let launchRegistry = LaunchRegistry(contracts: [
     "1.3.0": contract130,
@@ -833,6 +893,7 @@ public let launchRegistry = LaunchRegistry(contracts: [
     "1.4.0": contract140,
     "1.4.1": contract141,
     "1.5.0": contract150,
+    "1.6.1": contract161,
 ])
 
 /// D16: the contract for a kit's release.json version. An exact hit when the
@@ -1306,7 +1367,8 @@ public func buildArgv(_ contract: VersionContract,
                       profileValues: [String: JSONValue],
                       model: ProfileModel,
                       globals: GlobalCfg,
-                      localModelDir: String? = nil) -> (args: [String], env: [String: String], issues: [ArgvIssue]) {
+                      localModelDir: String? = nil,
+                      family: String? = nil) -> (args: [String], env: [String: String], issues: [ArgvIssue]) {
     // D6: the service-level network options (host, port, api-key, allowed-host,
     // allowed-origin, web-ui) are globals, never per-profile options — there is
     // no per-profile occurrence in the schema (normalizeConfig strips any a
@@ -1353,6 +1415,26 @@ public func buildArgv(_ contract: VersionContract,
                 "--tokenizer", dir + "/tokenizer",
                 "--binary", "./engine/splash"]
     }
+    // 1.6.1 per-family facts (the kit's install/families.py option_report):
+    // when the model's family is known, its `unusable` launcher flags are
+    // excluded from the argv even if the profile sets them, and --max-context
+    // is bounded by the family's own ceiling instead of the flat 1010000.
+    // nil (older contracts, or an undetermined family) = today's behavior.
+    let facts = family.flatMap { contract.familyOptionFacts?[$0] }
+    func gated(_ opt: OptionDef) -> Bool { facts?.unusable.contains(opt.flag) == true }
+    // The --max-context text as a token count: "auto" -> nil (the engine
+    // decides); a plain/ K / M count -> its value; anything else -> nil.
+    func maxContextTokens(_ text: String) -> Int? {
+        let t = text.trimmingCharacters(in: .whitespaces).uppercased()
+        if t.isEmpty || t == "AUTO" { return nil }
+        if let suffix = t.last, "KM".contains(suffix) {
+            let mult = suffix == "K" ? 1024 : 1000000
+            guard let n = Int(t.dropLast()) else { return nil }
+            return n * mult
+        }
+        return Int(t)
+    }
+
 
     for opt in contract.options where !opt.builtFromModel {
         if opt.kind == .append {
@@ -1382,6 +1464,21 @@ public func buildArgv(_ contract: VersionContract,
         // Omission: equal to the engine default — the engine reads it itself.
         // alwaysEmit bypasses (host/port are always passed, today's behavior).
         if !opt.alwaysEmit && text == opt.defValue { continue }
+        // Per-family gate: the family's engine cannot take this flag (the
+        // kit's families.py report). Drop it — the plan warns, the argv is clean.
+        if gated(opt) {
+            issues.append(ArgvIssue(severity: .warning,
+                message: "\(opt.flag) is not usable with the \(family ?? "this family") family — dropped"))
+            continue
+        }
+        // Per-family --max-context ceiling: over the family's max -> an error
+        // that refuses the plan; exactly at the ceiling is allowed.
+        if opt.key == "max_context", let facts,
+           let tokens = maxContextTokens(text), tokens > facts.maxContextTokens {
+            issues.append(ArgvIssue(severity: .error,
+                message: "--max-context \(text) exceeds the \(family ?? "this family") family's ceiling of \(facts.maxContextTokens) tokens"))
+            continue
+        }
         if let violation = requiresViolation(opt, contract: contract, values) {
             issues.append(ArgvIssue(severity: .warning, message: violation))
             continue
@@ -1648,9 +1745,13 @@ public func modelTickState(model: ProfileModel, version: String?, draftModel: St
     } else if let draftModel, !draftModel.isEmpty { drafter = "OVERRIDE — --draft-model " + draftModel }
     else if let family, let draft = contract.familyRegistry[family] { drafter = "DFlash2 — " + draft }
     else { drafter = verdict.reason ?? "UNKNOWN — engine decides at load" }
+    // 1.6.1 per-family facts: the family's unusable launcher flags (the UI
+    // hides those option controls; an older contract or unknown family -> []).
+    let unusable = family.flatMap { contract.familyOptionFacts?[$0]?.unusable } ?? []
     return ["id": model.id ?? NSNull(), "dir": model.dir ?? NSNull(), "source": model.source,
             "kind": kind.rawValue, "eligibility": verdict.verdict.rawValue,
-            "eligibility_reason": verdict.reason ?? NSNull(), "drafter": drafter]
+            "eligibility_reason": verdict.reason ?? NSNull(), "drafter": drafter,
+            "unusable_flags": unusable]
 }
 
 /// The launch result (C3): everything `ServerProc.launch` consumes, + the plan
@@ -1997,7 +2098,7 @@ public func planLaunch(_ data: Data,
                                      usingLocalDir: usingLocalDir, projectors: projectors)
     if contract.flavor == .launcher { options["offline"] = .bool(offlineLaunch) }
     var built = buildArgv(contract, profileValues: options, model: launchModel, globals: g,
-                          localModelDir: usingLocalDir ? dir : nil)
+                          localModelDir: usingLocalDir ? dir : nil, family: family)
     if contract.flavor == .launcher, offlineLaunch { built.env["HF_HUB_OFFLINE"] = "1" }
     if contract.flavor == .launcher, !usingLocalDir, let hubSnapshot, hubSnapshot.hasPrefix(flatRoot + "/") {
         built.env["HF_HUB_CACHE"] = flatRoot
@@ -2006,6 +2107,13 @@ public func planLaunch(_ data: Data,
        fileContents(dir + "/tokenizer_config.json") != nil,
        let index = built.args.firstIndex(of: "--tokenizer") {
         built.args[index + 1] = dir
+    }
+    // A hard error (the per-family --max-context ceiling) refuses the plan even
+    // when the rest of the argv built — the engine would reject the flag too.
+    if let fatal = built.issues.first(where: { $0.severity == .error }) {
+        return LaunchConfig(modelId: mid, modelDir: dir, version: kr.version, tried: kr.tried,
+                            mappingFallback: fallback, error: fatal.message,
+                            profileId: profile.id, profileName: profile.name)
     }
     if built.args.isEmpty {
         let msg = built.issues.first(where: { $0.severity == .error })?.message
@@ -2185,7 +2293,10 @@ public func profilePreview(_ profile: Profile,
                                      usingLocalDir: usingLocalDir, projectors: projectors)
     if contract.flavor == .launcher { options["offline"] = .bool(offlineEffective(profile, folders: folders)) }
     let built = buildArgv(contract, profileValues: options, model: launchModel, globals: globals,
-                          localModelDir: usingLocalDir ? dir : nil)
+                          localModelDir: usingLocalDir ? dir : nil, family: family)
+    if let fatal = built.issues.first(where: { $0.severity == .error }) {
+        return done(args: [], error: fatal.message, restart: false)
+    }
     if built.args.isEmpty {
         let msg = built.issues.first(where: { $0.severity == .error })?.message
             ?? "cannot build the launch argv"
