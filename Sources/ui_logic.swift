@@ -884,6 +884,70 @@ public let contract161 = VersionContract(
             contextTokens: 262144, maxContextTokens: 262144),
     ])
 
+// The 1.7.0 shared set (the real 1.7.0 keg's serve_options.py, diffed against
+// the 1.6.1 baseline): the same 30 flags with 3 new ones — --cached-states
+// beside --state-format (choices int8|exact, default int8; both need the
+// recurrent_state family fact, which per-family gating encodes, not a
+// requires list), --reasoning-effort before --default-reasoning-effort (the
+// engine's check_serve_arguments hard-errors when BOTH are set — buildArgv
+// enforces the exclusivity by dropping --default-reasoning-effort with a
+// warning), and --chat-template-file after --thinking-end-text (unset = the
+// model's own template). --host additionally accepts unix:PATH; the app never
+// binds a socket (it polls over HTTP), so the flag is unchanged and unix:PATH
+// is unsupported by the app (reviewed, not adopted). --verify-rows loses its
+// needs=experts (usable by all five families now) — its OptionDef is
+// unchanged. families.py is byte-identical to 1.6.1's.
+// sharedOptions140 already carries the 1.4.0 deltas (ple/expert/sparse-kv,
+// verify-rows) and contract161 adds --activations on top; the 1.7.0 deltas
+// are the 3 new flags appended beside their relatives' slot in the table.
+private let sharedOptions170 = (sharedOptions140 + [
+    OptionDef(flag: "--activations", key: "activations", kind: .value, group: "requests",
+              defValue: "auto", choices: ["auto", "bf16"]),
+]) + [
+    OptionDef(flag: "--cached-states", key: "cached_states", kind: .value, group: "memory",
+              defValue: "int8", choices: ["int8", "exact"]),
+    OptionDef(flag: "--reasoning-effort", key: "forced_reasoning_effort", kind: .value, group: "api",
+              choices: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+              envVar: "SPLASH_REASONING_EFFORT"),
+    OptionDef(flag: "--chat-template-file", key: "chat_template_file", kind: .value, group: "api"),
+]
+
+/// 1.7.0: the shared table adds exactly 3 flags over 1.6.1 --cached-states,
+/// --reasoning-effort and --chat-template-file (see sharedOptions170); the
+/// family registry and config rules are 1.6.1's (families.py is byte-identical).
+/// The per-family facts are the real 1.7.0 keg's install/families.py
+/// option_report (byte-for-byte, executed against the keg): --verify-rows
+/// left Qwen3.8-27B's unusable list (its needs=experts was removed, so it is
+/// usable by all five families now) and --cached-states (needs
+/// recurrent_state) joined Flint's list — Flint is the only family without
+/// recurrent state, as its --state-format entry already showed in 1.6.1.
+public let contract170 = VersionContract(
+    version: "1.7.0", flavor: .launcher,
+    options: sharedOptions170 + launcherModelOptions150,
+    familyRegistry: contract161.familyRegistry,
+    familyRules: contract161.familyRules,
+    familyOptionFacts: [
+        // The real 1.7.0 keg's install/families.py option_report (byte-for-byte).
+        "Qwen3.8-27B": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--expert-memory", "--sparse-kv-memory"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Qwen3.6-35B-A3B": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--sparse-kv-memory", "--disable-ane"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Qwen3.5-122B-A10B": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--sparse-kv-memory", "--disable-ane"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Qwen3.8-Flash-Next": FamilyOptionFacts(
+            unusable: ["--disable-ane"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Flint": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--sparse-kv-memory", "--state-format",
+                       "--cached-states", "--reasoning-effort", "--default-reasoning-effort",
+                       "--thinking-token-budget", "--thinking-end-text", "--max-image-pixels",
+                       "--disable-ane", "--language-only"],
+            contextTokens: 262144, maxContextTokens: 262144),
+    ])
+
 
 /// The default registry: every authored version.
 public let launchRegistry = LaunchRegistry(contracts: [
@@ -894,6 +958,7 @@ public let launchRegistry = LaunchRegistry(contracts: [
     "1.4.1": contract141,
     "1.5.0": contract150,
     "1.6.1": contract161,
+    "1.7.0": contract170,
 ])
 
 /// D16: the contract for a kit's release.json version. An exact hit when the
@@ -1469,6 +1534,19 @@ public func buildArgv(_ contract: VersionContract,
         if gated(opt) {
             issues.append(ArgvIssue(severity: .warning,
                 message: "\(opt.flag) is not usable with the \(family ?? "this family") family — dropped"))
+            continue
+        }
+        // 1.7.0 cross-check (the engine's check_serve_arguments hard-errors
+        // when both are set): --reasoning-effort forces EVERY request's
+        // effort; --default-reasoning-effort names only the effort of the
+        // requests that set none. The app never emits both: when the profile
+        // sets the forced one, the per-request default is dropped with a
+        // warning (warn, never block — same style as the gate/requires drops).
+        if opt.key == "reasoning_effort",
+           let forcedOpt = contract.option("forced_reasoning_effort"),
+           let forced = profileText(forcedOpt, values), !forced.isEmpty {
+            issues.append(ArgvIssue(severity: .warning,
+                message: "--default-reasoning-effort is dropped when --reasoning-effort is set (the engine hard-errors both; every request takes the forced effort)"))
             continue
         }
         // Per-family --max-context ceiling: over the family's max -> an error

@@ -159,6 +159,25 @@ The environment variables formerly documented here are retired. Each one maps to
     `EngineArgument`/`engine_argv` pass-through and its `SamplingDefaults`
     request defaults are server-side only: the app builds no argv for them and
     gives them no settings surface.
+  - **1.7.0**: adds three launcher flags over 1.6.1, each a per-profile option:
+    `--cached-states` (int8 | exact, default int8 — the recurrent state storage
+    of cached states, memory tab; unusable for Flint, which has no recurrent
+    state, per the keg's `option_report`), `--reasoning-effort` (none | minimal
+    | low | medium | high | xhigh | max, no default — it forces the effort of
+    **every** request, unlike `--default-reasoning-effort` which covers only
+    requests that set none) and `--chat-template-file` (a Jinja template path,
+    unset = the model's own; rendered for every request, read once at startup).
+    The engine's `check_serve_arguments` now hard-errors when **both**
+    `--reasoning-effort` and `--default-reasoning-effort` are passed, so the
+    app enforces the exclusivity: when a profile sets the forced effort, the
+    per-request default is dropped from the argv with a warning (warn, never
+    block — the same treatment as the per-family and `requires` drops).
+    `--verify-rows` loses its `needs=experts` gate and is now usable by all
+    five families (it is no longer in Qwen3.8-27B's unusable list). `families.py`
+    is otherwise byte-identical to 1.6.1's. Reviewed and **not** adopted:
+    `--host` additionally accepts `unix:PATH` (a UNIX socket bind) — the app
+    polls the engine over HTTP on 127.0.0.1:port for its telemetry, so it
+    continues to emit only the IP form and offers no socket option.
   AUTO selects the highest valid installed Homebrew Splash version (numeric
   ordering across Apple-silicon and Intel prefixes). Only models the launcher
   cannot prepare, such as a legacy Splash package, use the module-kit fallback.
@@ -202,6 +221,21 @@ input): unusable flags are dropped from the plan and hidden in settings, and
 `EngineArgument`/`engine_argv` machinery and `SamplingDefaults` are
 server-side pass-through to the C++ engine, with no app surface. `start.sh` is
 a separate legacy 1.3.0 full-reset script; it does not select the Homebrew keg.
+For 1.7.0, `install/families.py` is byte-identical to 1.6.1's and the shared
+table gains three flags: `--cached-states` (memory, int8 | exact, default int8),
+`--reasoning-effort` (api, the 7-effort set, no default — it forces every
+request's effort) and `--chat-template-file` (api, no default — unset means the
+model's own template). The 1.7.0 contract carries them as per-profile options
+rendered by the existing contract-driven settings surface, and its per-family
+`option_report` facts are hand-authored from the real keg: `--verify-rows` left
+Qwen3.8-27B's unusable list (its `needs=experts` was removed, so it is usable
+by all five families now) and `--cached-states` joined Flint's. Because the
+engine now hard-errors when both `--reasoning-effort` and
+`--default-reasoning-effort` are passed, the app emits at most one: a profile
+that sets the forced effort drops the per-request default with a warning.
+`--host` also learned `unix:PATH` in 1.7.0; the app reviewed it and did not
+adopt it — it polls the engine over HTTP on 127.0.0.1:port, so it keeps
+emitting only the IP bind and offers no socket option.
 Engine settings apply only after an explicitly confirmed restart.
 
 ## License

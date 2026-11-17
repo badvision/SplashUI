@@ -218,8 +218,10 @@ section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 
 #profileBasics { min-width: 0; }
 #profileBasics .profile-identity { flex-direction: column; align-items: stretch; gap: 4px; }
 #profileBasics .profile-identity .frow { flex: none; }
-#ptabApiPanel .option-row:has([data-option="reasoning_effort"]) .option-choices { flex: 0 1 260px; }
-.option-row:has([data-option="reasoning_effort"]) { align-items: center; }
+#ptabApiPanel .option-row:has([data-option="reasoning_effort"]),
+#ptabApiPanel .option-row:has([data-option="forced_reasoning_effort"]) .option-choices { flex: 0 1 260px; }
+.option-row:has([data-option="reasoning_effort"]),
+.option-row:has([data-option="forced_reasoning_effort"]) { align-items: center; }
 .s7 .option-choices .mini { color: var(--bg); }
 .s7 .option-choices .mini:first-child { border-radius: 14px 0 0 14px; }
 .s7 .option-choices .mini:last-child { border-radius: 0 14px 14px 0; }

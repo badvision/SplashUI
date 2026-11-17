@@ -760,6 +760,72 @@ try {
     assert.equal(act150.w.document.querySelector('[data-option-choice="activations"]'), null);
   });
 } finally { act150.close(); }
+// ---- 1.7.0: the three new options render contract-driven, in their tabs, with
+// contract defaults — zero hand-built controls; the contract table is the
+// single source (D3), so the panel just renders it.
+const DEF_170 = [
+  { key: 'cached_states', flag: '--cached-states', kind: 'value', group: 'memory', default: 'int8', choices: ['int8', 'exact'], requires: [] },
+  { key: 'forced_reasoning_effort', flag: '--reasoning-effort', kind: 'value', group: 'api', default: null, choices: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], requires: [] },
+  { key: 'chat_template_file', flag: '--chat-template-file', kind: 'value', group: 'api', default: null, requires: [] }
+];
+const defs170 = [...DEFAULT_DEFS, ...DEF_170];
+const v170 = panel({ optionDefs: defs170 });
+try {
+  const { w, $, tick, flushTimers } = v170;
+  w.showView('settings');
+  check('--cached-states renders in the memory tab as a segmented pill, int8 default selected, no reset pill', () => {
+    $('ptabMemory').click();
+    assert.ok($('ptabMemoryPanel').contains($('option-cached_states')), 'cached-states row is in the memory tab');
+    assert.equal($('option-cached_states').type, 'hidden');
+    assert.equal(w.document.querySelector('[data-option-choice="cached_states"][data-value="int8"]').classList.contains('on'), true, 'int8 is the selected default');
+    assert.equal(w.document.querySelector('[data-option-choice="cached_states"][data-value="exact"]').classList.contains('on'), false);
+    assert.equal(w.document.querySelectorAll('[data-option-choice="cached_states"]').length, 2);
+    assert.ok(w.document.querySelector('[data-option-reset="cached_states"]').hidden, 'unset -> no reset pill');
+  });
+  check('--cached-states: an explicit choice round-trips into the saved config and earns a reset pill', () => {
+    w.document.querySelector('[data-option-choice="cached_states"][data-value="exact"]').click();
+    flushTimers();
+    assert.equal(v170.doc().profiles[0].options.cached_states, 'exact');
+    assert.equal(w.document.querySelector('[data-option-reset="cached_states"]').hidden, false, 'set -> reset pill visible');
+  });
+  check('--reasoning-effort (forced) renders in the API tab beside --default-reasoning-effort, 7 choices, unset = nothing selected, no reset pill', () => {
+    $('ptabApi').click();
+    const forced = w.document.querySelector('[data-option-row="forced_reasoning_effort"]');
+    assert.ok($('ptabApiPanel').contains(forced), 'forced reasoning-effort row is in the api tab');
+    assert.ok(forced, 'forced row exists');
+    // The default-reasoning-effort row (existing) is present too, proving placement.
+    assert.ok(w.document.querySelector('[data-option-row="reasoning_effort"]'), '--default-reasoning-effort row still present');
+    assert.equal($('option-forced_reasoning_effort').type, 'hidden');
+    assert.equal(forced.querySelectorAll('[data-option-choice]').length, 7, 'the 7-effort set renders');
+    assert.equal(w.getComputedStyle(forced.querySelector('.option-choices')).flexWrap, 'wrap', 'the 7 choices wrap like the default effort');
+    // No choice is selected while the option is unset (null default, free-form -> none on).
+    assert.equal(forced.querySelector('[data-option-choice].on'), null, 'unset forced effort: no pill selected');
+    assert.ok(forced.querySelector('[data-option-reset]').hidden, 'unset -> no reset pill');
+  });
+  check('--reasoning-effort: a forced choice round-trips into the saved config and earns a reset pill', () => {
+    w.document.querySelector('[data-option-choice="forced_reasoning_effort"][data-value="high"]').click();
+    flushTimers();
+    assert.equal(v170.doc().profiles[0].options.forced_reasoning_effort, 'high');
+    assert.equal(w.document.querySelector('[data-option-choice="forced_reasoning_effort"][data-value="high"]').classList.contains('on'), true);
+    assert.equal(w.document.querySelector('[data-option-reset="forced_reasoning_effort"]').hidden, false);
+  });
+  check('--chat-template-file renders in the API tab as a free-form text field, empty default, no reset pill', () => {
+    $('ptabApi').click();
+    const input = $('option-chat_template_file');
+    assert.ok(input, 'chat-template-file input exists');
+    assert.ok($('ptabApiPanel').contains(input), 'chat-template-file is in the api tab');
+    assert.equal(input.type, 'text', 'a file path is a free-form text field');
+    assert.ok(input.closest('.option-row').querySelector('.option-choices') === null, 'no segmented pill for the free-form field');
+    assert.ok(w.document.querySelector('[data-option-reset="chat_template_file"]').hidden, 'empty -> no reset pill');
+  });
+  check('--chat-template-file: a typed path round-trips into the saved config and earns a reset pill', () => {
+    $('option-chat_template_file').value = '/templates/jinja.jinja';
+    $('option-chat_template_file').dispatchEvent(new w.Event('change'));
+    flushTimers();
+    assert.equal(v170.doc().profiles[0].options.chat_template_file, '/templates/jinja.jinja');
+    assert.equal(w.document.querySelector('[data-option-reset="chat_template_file"]').hidden, false);
+  });
+} finally { v170.close(); }
 
 
 // ---- S7: the model chooser ----
