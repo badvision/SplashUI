@@ -178,6 +178,25 @@ The environment variables formerly documented here are retired. Each one maps to
     `--host` additionally accepts `unix:PATH` (a UNIX socket bind) — the app
     polls the engine over HTTP on 127.0.0.1:port for its telemetry, so it
     continues to emit only the IP form and offers no socket option.
+  - **1.7.1**: adds three launcher flags over 1.7.0:
+    `--sampling-default NAME=VALUE` (repeatable; per-profile API option,
+    rendered as a comma-separated append field in the API tab — each entry is
+    validated with the engine's own request-field rules: the 7 sampling names,
+    `top_k` an integer >= -1, numbers inside their `request_fields.py` ranges
+    with `top_p`/`repetition_penalty` strictly positive), `--max-concurrent-requests`
+    (1–8, default 4; per-profile, requests group) and `--recalibrate-ane`
+    (per-profile boolean toggle in the Compute tab; re-runs the ANE long-
+    sequence calibration at startup instead of reusing the kept one). The
+    engine's `check_serve_arguments` hard-errors `--recalibrate-ane` together
+    with `--disable-ane`, so `buildArgv` enforces that exclusivity: a profile
+    that turns ANE off drops the flag with a warning (warn, never block — the
+    same treatment as the other cross-checks). `install/families.py` is
+    byte-identical to 1.7.0's, but its executed `option_report` adds
+    `--recalibrate-ane` to the unusable list of every family without
+    `dense_ffn` (all except Qwen3.8-27B), hand-authored into the 1.7.1
+    contract; the panel hides the control for the selected profile, and a
+    family-usable flag is dropped from the argv with a warning when set.
+    Reviewed and **not** adopted: none — all three new flags are adopted.
   AUTO selects the highest valid installed Homebrew Splash version (numeric
   ordering across Apple-silicon and Intel prefixes). Only models the launcher
   cannot prepare, such as a legacy Splash package, use the module-kit fallback.
@@ -237,6 +256,21 @@ that sets the forced effort drops the per-request default with a warning.
 adopt it — it polls the engine over HTTP on 127.0.0.1:port, so it keeps
 emitting only the IP bind and offers no socket option.
 Engine settings apply only after an explicitly confirmed restart.
+For 1.7.1, `install/families.py` is byte-identical to 1.7.0's, and the shared
+table gains exactly three flags over 1.7.0: `--sampling-default` (api,
+repeatable `NAME=VALUE`; the app's per-profile `sampling_defaults` field
+emits one flag per entry, each value pre-checked against the engine's
+request-field rules so a malformed entry blocks the save instead of failing
+the launch), `--max-concurrent-requests` (requests, 1–8, default 4 —
+per-profile) and `--recalibrate-ane` (requests; per-profile boolean,
+surfaced in the Compute tab next to ANE). Its executed `option_report` adds
+`--recalibrate-ane` to the unusable list of every family without the
+`dense_ffn` fact (all except Qwen3.8-27B), hand-authored into the 1.7.1
+contract: the plan drops a set-but-unusable flag with a warning and the
+panel hides the control for the selected profile. Because the engine now
+hard-errors `--recalibrate-ane` together with `--disable-ane`, the app
+emits at most one: a profile with ANE explicitly off drops the
+recalibration flag with a warning. No other option changed meaning.
 
 ## License
 

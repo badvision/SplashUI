@@ -827,6 +827,73 @@ try {
   });
 } finally { v170.close(); }
 
+// ---- 1.7.1: the three new options render contract-driven — zero hand-built
+// controls; the contract table is the single source (D3).
+const DEF_171 = [
+  { key: 'sampling_defaults', flag: '--sampling-default', kind: 'append', group: 'api', default: null, requires: [] },
+  { key: 'max_concurrent_requests', flag: '--max-concurrent-requests', kind: 'value', group: 'api', default: '4', choices: ['1', '2', '3', '4', '5', '6', '7', '8'], requires: [] },
+  { key: 'recalibrate_ane', flag: '--recalibrate-ane', kind: 'bool', group: 'compute', default: false, requires: [] }
+];
+const defs171 = [...DEFAULT_DEFS, ...DEF_171];
+const v171 = panel({ optionDefs: defs171 });
+try {
+  const { w, $, flushTimers } = v171;
+  w.showView('settings');
+  check('--sampling-default renders in the API tab as a comma-separated append field, empty default, no reset pill', () => {
+    $('ptabApi').click();
+    const input = $('option-sampling_defaults');
+    assert.ok(input, 'sampling-default input exists');
+    assert.ok($('ptabApiPanel').contains(input), 'sampling-default is in the api tab');
+    assert.equal(input.type, 'text', 'repeatable NAME=VALUE is a free-form comma list');
+    assert.ok(w.document.querySelector('[data-option-reset="sampling_defaults"]').hidden, 'unset -> no reset pill');
+  });
+  check('--sampling-default: a typed comma list round-trips as an array and earns a reset pill', () => {
+    $('option-sampling_defaults').value = 'temperature=0.5, top_p=0.9';
+    $('option-sampling_defaults').dispatchEvent(new w.Event('change'));
+    flushTimers();
+    assert.deepEqual(v171.doc().profiles[0].options.sampling_defaults, ['temperature=0.5', 'top_p=0.9']);
+    assert.equal(w.document.querySelector('[data-option-reset="sampling_defaults"]').hidden, false);
+  });
+  check('--max-concurrent-requests renders in the API tab as an 8-way segmented pill, default 4 selected, no reset pill', () => {
+    $('ptabApi').click();
+    const row = w.document.querySelector('[data-option-row="max_concurrent_requests"]');
+    assert.ok($('ptabApiPanel').contains(row), 'max-concurrent-requests row is in the api tab');
+    assert.equal($('option-max_concurrent_requests').type, 'hidden');
+    assert.equal(row.querySelectorAll('[data-option-choice]').length, 8, 'the 1-8 lanes render');
+    assert.equal(w.document.querySelector('[data-option-choice="max_concurrent_requests"][data-value="4"]').classList.contains('on'), true, '4 is the engine default');
+    assert.ok(w.document.querySelector('[data-option-reset="max_concurrent_requests"]').hidden, 'default == engine default -> no reset pill');
+  });
+  check('--max-concurrent-requests: an explicit lane round-trips into the saved config and earns a reset pill', () => {
+    w.document.querySelector('[data-option-choice="max_concurrent_requests"][data-value="6"]').click();
+    flushTimers();
+    assert.equal(v171.doc().profiles[0].options.max_concurrent_requests, '6');
+    assert.equal(w.document.querySelector('[data-option-choice="max_concurrent_requests"][data-value="6"]').classList.contains('on'), true);
+    assert.equal(w.document.querySelector('[data-option-reset="max_concurrent_requests"]').hidden, false);
+  });
+  check('--recalibrate-ane sits in the COMPUTE group beside ANE, OFF selected by default, no reset pill', () => {
+    const row = w.document.querySelector('[data-option-row="recalibrate_ane"]');
+    assert.ok(row, 'recalibrate-ane row exists');
+    assert.equal(row.parentElement.id, 'profileComputeOptions', 'the compute group (next to ANE), not a profile tab');
+    assert.ok(w.document.querySelector('#profileComputeOptions [data-option-row="ane"]'), 'the ANE row is its compute-group neighbor');
+    assert.equal(w.document.querySelector('[data-option-choice="recalibrate_ane"][data-value="false"]').classList.contains('on'), true, 'store_true default off');
+    assert.ok(w.document.querySelector('[data-option-reset="recalibrate_ane"]').hidden, 'unset -> no reset pill');
+  });
+  check('--recalibrate-ane: toggling ON round-trips as a boolean and earns a reset pill', () => {
+    w.document.querySelector('[data-option-choice="recalibrate_ane"][data-value="true"]').click();
+    flushTimers();
+    assert.equal(v171.doc().profiles[0].options.recalibrate_ane, true);
+    assert.equal(w.document.querySelector('[data-option-reset="recalibrate_ane"]').hidden, false);
+  });
+  check('1.7.1 option set is absent when the contract lacks it (versioned registry)', () => {
+    const old = panel();   // DEFAULT_DEFS = the 1.3.0-era contract: no 1.7.1 rows
+    old.w.showView('settings');
+    assert.equal(old.$('option-sampling_defaults'), null);
+    assert.equal(old.$('option-max_concurrent_requests'), null);
+    assert.equal(old.$('option-recalibrate_ane'), null);
+    old.close();
+  });
+} finally { v171.close(); }
+
 
 // ---- S7: the model chooser ----
 const chooser = panel();

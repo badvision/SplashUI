@@ -912,6 +912,37 @@ private let sharedOptions170 = (sharedOptions140 + [
     OptionDef(flag: "--chat-template-file", key: "chat_template_file", kind: .value, group: "api"),
 ]
 
+// The 1.7.1 shared set (the real 1.7.1 keg's serve_options.py, diffed against
+// the 1.7.0 keg): the same 37 flags with 3 new ones, all per-profile options
+// the app adopts —
+// - --sampling-default (api, repeatable NAME=VALUE, no default): the value a
+//   request gets when it sets none, for the 7 sampling fields (temperature,
+//   top_p, top_k, presence_penalty, frequency_penalty, repetition_penalty,
+//   min_p). The engine refuses out-of-range values at start (and per request)
+//   with the same rule; the app validates the same shapes at save time so a
+//   bad value never reaches a launch, and the engine's cross-check is the
+//   backstop for a hand-edited config.json.
+// - --max-concurrent-requests (requests, 1-8, default 4): the requests the
+//   engine runs at once (ExecutionLimits::defaultLanes); more answer more
+//   clients together, each a little slower, and take memory for their states
+//   and arenas.
+// - --recalibrate-ane (requests, store_true): re-run the Neural Engine's long-
+//   prompt calibration at this start instead of reusing the one this Mac kept.
+//   It is gated per family (needs=dense_ffn) exactly like --disable-ane, and
+//   the engine's check_serve_arguments hard-errors it together with
+//   --disable-ane; buildArgv enforces that exclusivity (warn, never block).
+// families.py is byte-identical to 1.7.0's, and its option_report is the
+// 1.7.0 report plus --recalibrate-ane in the unusable list of every family
+// whose dense_ffn fact is missing (all except Qwen3.8-27B, executed against
+// the 1.7.1 keg).
+private let sharedOptions171 = sharedOptions170 + [
+    OptionDef(flag: "--sampling-default", key: "sampling_defaults", kind: .append, group: "api"),
+    OptionDef(flag: "--max-concurrent-requests", key: "max_concurrent_requests", kind: .value,
+              group: "requests", defValue: "4", choices: ["1", "2", "3", "4", "5", "6", "7", "8"]),
+    OptionDef(flag: "--recalibrate-ane", key: "recalibrate_ane", kind: .bool, group: "requests",
+              defValue: "false"),
+]
+
 /// 1.7.0: the shared table adds exactly 3 flags over 1.6.1 --cached-states,
 /// --reasoning-effort and --chat-template-file (see sharedOptions170); the
 /// family registry and config rules are 1.6.1's (families.py is byte-identical).
@@ -947,6 +978,41 @@ public let contract170 = VersionContract(
                        "--disable-ane", "--language-only"],
             contextTokens: 262144, maxContextTokens: 262144),
     ])
+/// 1.7.1: the shared table adds exactly 3 flags over 1.7.0 --sampling-default
+/// (repeatable NAME=VALUE), --max-concurrent-requests (1-8, default 4) and
+/// --recalibrate-ane (store_true; see sharedOptions171). The family registry
+/// and config rules are 1.7.0's (families.py is byte-identical). The
+/// per-family facts are the real 1.7.1 keg's install/families.py
+/// option_report, executed against the keg: over the 1.7.0 lists,
+/// --recalibrate-ane joined the unusable list of every family WITHOUT the
+/// dense_ffn fact — Qwen3.6-35B-A3B, Qwen3.5-122B-A10B, Qwen3.8-Flash-Next
+/// and Flint — while Qwen3.8-27B (the only dense-FFN family) keeps using it.
+public let contract171 = VersionContract(
+    version: "1.7.1", flavor: .launcher,
+    options: sharedOptions171 + launcherModelOptions150,
+    familyRegistry: contract170.familyRegistry,
+    familyRules: contract170.familyRules,
+    familyOptionFacts: [
+        // The real 1.7.1 keg's install/families.py option_report (executed).
+        "Qwen3.8-27B": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--expert-memory", "--sparse-kv-memory"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Qwen3.6-35B-A3B": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--sparse-kv-memory", "--disable-ane", "--recalibrate-ane"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Qwen3.5-122B-A10B": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--sparse-kv-memory", "--disable-ane", "--recalibrate-ane"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Qwen3.8-Flash-Next": FamilyOptionFacts(
+            unusable: ["--disable-ane", "--recalibrate-ane"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Flint": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--sparse-kv-memory", "--state-format",
+                       "--cached-states", "--reasoning-effort", "--default-reasoning-effort",
+                       "--thinking-token-budget", "--thinking-end-text", "--max-image-pixels",
+                       "--disable-ane", "--recalibrate-ane", "--language-only"],
+            contextTokens: 262144, maxContextTokens: 262144),
+    ])
 
 
 /// The default registry: every authored version.
@@ -959,6 +1025,7 @@ public let launchRegistry = LaunchRegistry(contracts: [
     "1.5.0": contract150,
     "1.6.1": contract161,
     "1.7.0": contract170,
+    "1.7.1": contract171,
 ])
 
 /// D16: the contract for a kit's release.json version. An exact hit when the
@@ -1547,6 +1614,19 @@ public func buildArgv(_ contract: VersionContract,
            let forced = profileText(forcedOpt, values), !forced.isEmpty {
             issues.append(ArgvIssue(severity: .warning,
                 message: "--default-reasoning-effort is dropped when --reasoning-effort is set (the engine hard-errors both; every request takes the forced effort)"))
+            continue
+        }
+        // 1.7.1 cross-check (the engine's check_serve_arguments hard-errors
+        // --recalibrate-ane when --disable-ane is set): the profile's `ane`
+        // key is inverted (ANE on is the default; "false" emits
+        // --disable-ane). With ANE explicitly off there is nothing to
+        // recalibrate: the convenience flag is dropped with a warning
+        // (warn, never block — the explicit ANE choice wins).
+        if opt.key == "recalibrate_ane",
+           let aneOpt = contract.option("ane"),
+           let ane = profileText(aneOpt, values), ane == "false" {
+            issues.append(ArgvIssue(severity: .warning,
+                message: "--recalibrate-ane is dropped while ANE is disabled (the engine hard-errors both; recalibration only matters with ANE on)"))
             continue
         }
         // Per-family --max-context ceiling: over the family's max -> an error
@@ -3281,7 +3361,40 @@ public func startupActivation(_ profiles: [Profile], persistedActive: String?) -
     return profiles[0].id
 }
 
-// MARK: - Save validation / normalization / masking
+
+/// 1.7.1: one `--sampling-default` NAME=VALUE, checked with the engine's
+/// request-field rules (server/request_fields.py sampling_refusal, the same
+/// table a per-request value is held to): the 7 sampling field names, top_k an
+/// integer >= -1, and each number inside its range (top_p and
+/// repetition_penalty strictly positive, matching the float32 subnormal floor
+/// the engine enforces). `false` means the engine would refuse the value at
+/// start (or per request).
+public func samplingDefaultOK(_ text: String) -> Bool {
+    let parts = text.split(separator: "=", maxSplits: 1)
+    guard parts.count == 2, !parts[0].isEmpty else { return false }
+    let name = String(parts[0])
+    let value = parts[1].trimmingCharacters(in: .whitespaces)
+    if name == "top_k" {
+        guard let n = Int(value) else { return false }
+        return n >= -1
+    }
+    // (minInclusive, max) per field — server/request_fields.py SAMPLING_NUMBERS
+    // (top_p/repetition_penalty are "a positive number" = above the float32
+    // subnormal floor, i.e. strictly > 0).
+    let range: (Bool, Double, Double)?
+    switch name {
+    case "temperature": range = (true, 0, 2)
+    case "top_p": range = (false, 0, 1)
+    case "presence_penalty": range = (true, -2, 2)
+    case "frequency_penalty": range = (true, -2, 2)
+    case "repetition_penalty": range = (false, 0, .greatestFiniteMagnitude)
+    case "min_p": range = (true, 0, 1)
+    default: return false
+    }
+    guard let d = Double(value), d.isFinite else { return false }
+    let (loInclusive, lo, hi) = range!
+    return (loInclusive ? d >= lo : d > lo) && d <= hi
+}
 
 /// Strict (blocking) + soft rules for a candidate document.
 /// Blocking: empty profile name, out-of-range port, empty api key, duplicate names.
@@ -3307,7 +3420,21 @@ public func validateConfig(_ doc: ConfigDoc) -> ConfigSaveResult {
             let text = value.string ?? value.number.map { String($0) } ?? ""
             var valid = true
             if o.kind == .bool { valid = value.bool != nil }
-            else if o.kind == .append { valid = value.array?.allSatisfy { $0.string != nil } == true }
+            else if o.kind == .append && o.key != "sampling_defaults" { valid = value.array?.allSatisfy { $0.string != nil } == true }
+            else if o.key == "sampling_defaults" {
+                // 1.7.1: each NAME=VALUE is checked with the engine's
+                // request-field rules (request_fields.sampling_refusal): the
+                // same names, integer top_k >= -1, and the same ranges — so a
+                // value that would hard-error a `splash serve` start is caught
+                // at save time. The error names the offending entries.
+                let bad = (value.array ?? []).compactMap { ($0.string ?? "").isEmpty ? nil : $0.string }
+                    .filter { !samplingDefaultOK($0) }
+                valid = bad.isEmpty
+                if !valid {
+                    errors.append("profile \(p.id) option \(o.key): not a valid NAME=VALUE for \(o.flag): " + bad.joined(separator: ", "))
+                    continue
+                }
+            }
             else if let choices = o.choices { valid = choices.contains(text) }
             else if ["max_memory", "max_cache_disk", "max_cache_disk_writes", "max_request_size"].contains(o.key) {
                 valid = text.range(of: "^(auto|off|[0-9]+(?:\\.[0-9]+)?[kKmMgGtT]?[bB]?)$", options: .regularExpression) != nil
@@ -3380,7 +3507,7 @@ public func profileOptionDefinitions(version: String?) -> [[String: Any]] {
         if o.group == "network" { return nil }
         var group = o.group
         if group == "requests" { group = "api" }   // the API tab combines both
-        if ["ane", "allow_idle_sleep"].contains(o.key) { group = "compute" }
+        if ["ane", "allow_idle_sleep", "recalibrate_ane"].contains(o.key) { group = "compute" }
         if o.key == "decode_share" { group = "memory" }
         if ["draft_model", "revision", "language_only", "offline", "mmproj"].contains(o.key) { group = "model-axis" }
         return ["key": o.key, "flag": o.flag, "kind": o.kind.rawValue, "group": group,
