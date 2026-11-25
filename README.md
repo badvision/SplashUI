@@ -241,68 +241,23 @@ The environment variables formerly documented here are retired. Each one maps to
 
 ## Upgrading the engine
 
-Upgrade the Homebrew engine with `brew upgrade splash`; AUTO then selects its
-new keg. The app reads the keg’s `release.json` and uses an exact hand-authored
-launch contract. For 1.5.0, `server/serve_options.py` and `install/families.py`
-are byte-identical to 1.4.1; the new launcher flags are `--model-dir` and
-`--mmproj`. The former is derived from model selection, not a free-form engine
-path option. `--mmproj` is a profile MODEL option; the local-dir restrictions on
-`draft_model` and `revision` are enforced before starting. For 1.6.1, the
-launcher gains exactly one flag, `--activations` (auto | bf16, default auto;
-per-profile, omitted from the argv while unset), and `install/families.py` run
-as a script prints the `option_report` — per family, the unusable launcher
-flags plus the native `context_tokens` and the YaRN `max_context_tokens` —
-which the 1.6.1 contract carries hand-authored (validation data, never argv
-input): unusable flags are dropped from the plan and hidden in settings, and
-`--max-context` is checked against the family's ceiling. The new
-`EngineArgument`/`engine_argv` machinery and `SamplingDefaults` are
-server-side pass-through to the C++ engine, with no app surface. `start.sh` is
-a separate legacy 1.3.0 full-reset script; it does not select the Homebrew keg.
-For 1.7.0, `install/families.py` is byte-identical to 1.6.1's and the shared
-table gains three flags: `--cached-states` (memory, int8 | exact, default int8),
-`--reasoning-effort` (api, the 7-effort set, no default — it forces every
-request's effort) and `--chat-template-file` (api, no default — unset means the
-model's own template). The 1.7.0 contract carries them as per-profile options
-rendered by the existing contract-driven settings surface, and its per-family
-`option_report` facts are hand-authored from the real keg: `--verify-rows` left
-Qwen3.8-27B's unusable list (its `needs=experts` was removed, so it is usable
-by all five families now) and `--cached-states` joined Flint's. Because the
-engine now hard-errors when both `--reasoning-effort` and
-`--default-reasoning-effort` are passed, the app emits at most one: a profile
-that sets the forced effort drops the per-request default with a warning.
-`--host` also learned `unix:PATH` in 1.7.0; the app reviewed it and did not
-adopt it — it polls the engine over HTTP on 127.0.0.1:port, so it keeps
-emitting only the IP bind and offers no socket option.
-Engine settings apply only after an explicitly confirmed restart.
-For 1.7.1, `install/families.py` is byte-identical to 1.7.0's, and the shared
-table gains exactly three flags over 1.7.0: `--sampling-default` (api,
-repeatable `NAME=VALUE`; the app's per-profile `sampling_defaults` field
-emits one flag per entry, each value pre-checked against the engine's
-request-field rules so a malformed entry blocks the save instead of failing
-the launch), `--max-concurrent-requests` (requests, 1–8, default 4 —
-per-profile) and `--recalibrate-ane` (requests; per-profile boolean,
-surfaced in the Compute tab next to ANE). Its executed `option_report` adds
-`--recalibrate-ane` to the unusable list of every family without the
-`dense_ffn` fact (all except Qwen3.8-27B), hand-authored into the 1.7.1
-contract: the plan drops a set-but-unusable flag with a warning and the
-panel hides the control for the selected profile. Because the engine now
-hard-errors `--recalibrate-ane` together with `--disable-ane`, the app
-emits at most one: a profile with ANE explicitly off drops the
-recalibration flag with a warning. No other option changed meaning.
-For 1.7.2, the shared table is 1.7.1's: `server/serve_options.py`
-diffs by two `needs=` renames and help text only (no new flags, no
-`check_serve_arguments` change). `install/families.py` adds the
-Inkling-2-Mini family (draft `incoai/Inkling-2-Mini-DFlash2`; config.json
-`model_type` `inkling2_loop`, verified against the real
-`thinkingmachines/Inkling-2-Mini` config.json on the Hub) and the
-executed `option_report` — the five 1.7.1 per-family lists unchanged
-(the `needs=` rename hits neither Qwen nor Flint) plus Inkling-2-Mini,
-whose unusable flags are `--thinking-token-budget`,
-`--thinking-end-text`, `--max-image-pixels` and `--language-only` (in
-1.7.2 its tower is not served; its effort reaches the model without
-switching its reasoning, so the two effort options stay usable), with a
-native 1010000-token window. The 1.7.2 contract carries all of it
-hand-authored, as validation data, never argv input.
+Upgrade with `brew upgrade splash`; AUTO then selects the newest installed
+keg. The app reads the keg's `release.json` and applies the exact
+hand-authored launch contract for that version — what each contract adds is
+listed in the kit description above. A version without an authored contract
+runs on the latest authored one with a visible `FALLBACK MAPPING` indicator
+(the launch still proceeds).
+
+- Engine settings apply only after an explicitly confirmed restart; the app
+  prompts with the in-flight request count and never restarts on its own.
+- Reviewed and **not** adopted: `unix:PATH` for `--host` (new in 1.7.0) — the
+  app polls the engine over HTTP on 127.0.0.1:port, so it keeps emitting only
+  the IP bind and offers no socket option.
+- `start.sh` remains the separate legacy 1.3.0 full-reset script; it does not
+  select the Homebrew keg.
+- The per-version contract diffs (truth-file byte-identity, executed
+  `option_report` provenance, family-rule verification) live in the
+  `contractXXX` comments in `Sources/ui_logic.swift` and the release commits.
 
 ## License
 
