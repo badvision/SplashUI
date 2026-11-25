@@ -215,6 +215,18 @@ The environment variables formerly documented here are retired. Each one maps to
     changes for any family. The settings panel hides the gated controls
     for the selected profile as before, and a set-but-unusable flag is
     dropped from the argv with a warning.
+  - **1.7.3**: no new launcher flags — the shared table is 1.7.2's (the real
+    keg's `serve_options.py` differs by a help string only). The executed
+    `option_report` (hand-authored into the contract) is unchanged for the
+    five established families; **Inkling-2-Mini** gets its vision tower
+    (projectors serve beside the GGUF/MLX checkpoints, with a text-only
+    fallback for conversions without one), so `--max-image-pixels` and
+    `--language-only` leave its unusable list — the panel shows them for it
+    again, and a set flag emits as usual. The profile tabs also change: a
+    new **VISION** tab owns the image/vision options (the image cap, the
+    language-only switch, and the `--mmproj` projector path), and the chat
+    template + reasoning-effort pair move to the **MODEL** tab — the API tab
+    keeps the request, sampling, and served-name options.
   AUTO selects the highest valid installed Homebrew Splash version (numeric
   ordering across Apple-silicon and Intel prefixes). Only models the launcher
   cannot prepare, such as a legacy Splash package, use the module-kit fallback.

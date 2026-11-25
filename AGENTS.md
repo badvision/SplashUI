@@ -56,10 +56,15 @@ dependencies (swiftc + WebKit + Foundation only).
   Global and Profiles have 270px / 390px minimum boxes; spare height is shared 2:3.
   Their heights remain identical across tabs at any given window size. At 820×820,
   measured heights are 273.59px / 395.41px, footer top 755px; no reference overflow.
-  Profile tabs are GENERAL / MODEL / MEMORY / CACHE / API, each a single-column
-  panel. Cache options live in their own tab (no section headers inside the
-  memory/cache panels). Switching profiles keeps the active tab — the user's
-  place in settings is never reset.
+  Profile tabs are GENERAL / MODEL / VISION / MEMORY / CACHE / API, each a
+  single-column panel. The VISION tab owns the image/vision options (image
+  cap, language-only switch, `--mmproj` projector path); the MODEL tab also
+  carries the chat template + reasoning-effort pair (the API tab was
+  over-full, 2026-11-25). Display grouping is a remap in
+  `profileOptionDefinitions` — the contract's `group` fields stay the engine
+  truth from serve_options.py. Cache options live in their own tab (no
+  section headers inside the memory/cache panels). Switching profiles keeps
+  the active tab — the user's place in settings is never reset.
   Reset pills show only for explicitly provided non-null values.
   Both views use the same header DOM outside the view containers and the same footer.
   Global nav rows round all four corners. Profile selection opens into its green frame

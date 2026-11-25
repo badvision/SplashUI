@@ -1255,19 +1255,22 @@ do {
     let j = contractFor("1.7.2", registry: launchRegistry)
     check(!j.fallback && j.contract.version == "1.7.2" && j.contract.flavor == .launcher,
           "contractFor: 1.7.2 is an exact launcher contract")
+    let k = contractFor("1.7.3", registry: launchRegistry)
+    check(!k.fallback && k.contract.version == "1.7.3" && k.contract.flavor == .launcher,
+          "contractFor: 1.7.3 is an exact launcher contract")
 }
 
-// 28. contractFor: unseen versions -> the LATEST authored (1.7.2) + fallback =
+// 28. contractFor: unseen versions -> the LATEST authored (1.7.3) + fallback =
 // true (D3: launch proceeds; S7 shows the "FALLBACK MAPPING" cap).
 do {
-    let newer = contractFor("1.7.3", registry: launchRegistry)
-    check(newer.fallback == true && newer.contract.version == "1.7.2",
-          "contractFor: unseen 1.7.3 -> latest authored 1.7.2 + fallback")
+    let newer = contractFor("1.7.4", registry: launchRegistry)
+    check(newer.fallback == true && newer.contract.version == "1.7.3",
+          "contractFor: unseen 1.7.4 -> latest authored 1.7.3 + fallback")
     let older = contractFor("1.2.9", registry: launchRegistry)
-    check(older.fallback == true && older.contract.version == "1.7.2",
-          "contractFor: older 1.2.x -> latest authored 1.7.2 + fallback")
+    check(older.fallback == true && older.contract.version == "1.7.3",
+          "contractFor: older 1.2.x -> latest authored 1.7.3 + fallback")
     let unreadable = contractFor(nil, registry: launchRegistry)
-    check(unreadable.fallback == true && unreadable.contract.version == "1.7.2",
+    check(unreadable.fallback == true && unreadable.contract.version == "1.7.3",
           "contractFor: unreadable release.json (nil) -> the latest authored + fallback")
 }
 
@@ -1787,6 +1790,75 @@ do {
           "1.7.2 Inkling-2-Mini: --max-context past the family ceiling refuses the plan (actionable)")
 }
 
+// 31m. 1.7.3: the shared table is 1.7.2's (no new launcher flags; the real
+// keg's serve_options.py diffs by the --max-image-pixels help string only —
+// pinned by the byte-identical fixture in Tests/fixture173.swift); the family
+// registry and config rules are 1.7.2's; the per-family facts are the real
+// 1.7.3 keg's executed option_report — every family unchanged except
+// Inkling-2-Mini, whose vision tower now serves, so --max-image-pixels and
+// --language-only leave its unusable list.
+do {
+    let c = contract173
+    check(c.options.count == contract172.options.count,
+          "1.7.3 adds no options (the serve_options.py diff is a help string)")
+    check(c.familyRegistry == contract172.familyRegistry,
+          "1.7.3 family registry: 1.7.2's (the tower is a family fact, not a registry change)")
+    check(c.familyRules == contract172.familyRules,
+          "1.7.3 config rules: 1.7.2's (model_type inkling2_loop unchanged)")
+    let facts = c.familyOptionFacts
+    check(facts != nil && facts!.count == 6, "1.7.3 carries facts for all six families")
+    for name in ["Qwen3.8-27B", "Qwen3.6-35B-A3B", "Qwen3.5-122B-A10B", "Qwen3.8-Flash-Next", "Flint"] {
+        check(facts?[name] == contract172.familyOptionFacts?[name],
+              "1.7.3 \(name) facts are 1.7.2's (unchanged)")
+    }
+    // Byte-for-byte against the real 1.7.3 keg's option_report (executed).
+    check(facts?["Inkling-2-Mini"] == FamilyOptionFacts(
+        unusable: ["--ple-memory", "--sparse-kv-memory", "--state-format",
+                   "--cached-states", "--thinking-token-budget", "--thinking-end-text",
+                   "--disable-ane", "--recalibrate-ane"],
+        contextTokens: 1010000, maxContextTokens: 1010000),
+          "1.7.3 Inkling-2-Mini facts match the keg's report (the tower serves; the " +
+          "window is unchanged)")
+    check(facts?["Inkling-2-Mini"].map {
+        !($0.unusable.contains("--max-image-pixels") || $0.unusable.contains("--language-only"))
+    } == true,
+          "1.7.3 Inkling-2-Mini: the vision flags leave its unusable list (the 1.7.2 gate lifts)")
+}
+
+// 31n. planLaunch 1.7.3: the Inkling-2-Mini tower. A profile that sets
+// --max-image-pixels / --language-only now EMITS them (1.7.2 dropped both);
+// --thinking-token-budget is still dropped with a warning; the 1010000 ceiling
+// holds.
+do {
+    var fs = FakeFS()
+    planKit(fs: &fs, path: "/brew/1.7.3/libexec", version: "1.7.3")
+    fs.dir("/models/InklingModel", ["config.json", "model.safetensors"])
+    fs.file("/models/InklingModel/config.json", #"{"model_type":"inkling2_loop"}"#)
+    func plan(_ opts: [String: Any]) -> LaunchConfig {
+        let cfg = planCfgJSON(engineMode: "manual", manualPath: "/brew/1.7.3/libexec", port: 8123, key: "k",
+            name: "P", modelId: "owner/model", modelDir: "/models/InklingModel", options: opts,
+            modelSource: "lmstudio")
+        return planLaunch(cfg, home: "/home", isDir: { fs.isDir($0) },
+            isExecutable: { fs.isExecutable($0) }, kitVersion: { readKitVersion(fs: fs, kit: $0) },
+            fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
+    }
+    let p = plan(["thinking_token_budget": "1000", "max_image_pixels": "1000000",
+                  "language_only": true] as [String: Any])
+    check(p.error == nil && p.version == "1.7.3",
+          "1.7.3 Inkling-2-Mini plan is healthy (exact contract, no fallback)")
+    check(p.engineArgs.contains("--max-image-pixels")
+          && p.engineArgs.firstIndex(of: "--max-image-pixels").map { p.engineArgs[$0 + 1] == "1000000" } == true,
+          "1.7.3 Inkling-2-Mini EMITS --max-image-pixels (the tower serves; 1.7.2 dropped it)")
+    check(p.engineArgs.contains("--language-only"),
+          "1.7.3 Inkling-2-Mini EMITS --language-only (the vision switch is family-usable)")
+    check(!p.engineArgs.contains("--thinking-token-budget")
+          && p.issues.contains { $0.contains("--thinking-token-budget") },
+          "1.7.3 Inkling-2-Mini still drops --thinking-token-budget with a warning")
+    let over = plan(["max_context": "1020000"] as [String: Any])
+    check(over.error != nil && over.error!.contains("1010000"),
+          "1.7.3 Inkling-2-Mini: --max-context past the family ceiling refuses the plan")
+}
+
 
 // 32. THE D9(b) HEADLINE ANCHOR (amended per open item 5): with the seeded
 // default config, the 1.3.0 module argv is byte-identical to the golden baseline
@@ -2007,17 +2079,17 @@ do {
 }
 
 // 41. Fallback in the builder: a 1.3.9 kit (no authored contract) runs the latest
-// authored mapping (1.7.1) with fallback = true — the launch proceeds (D3); S7
+// authored mapping (1.7.3) with fallback = true — the launch proceeds (D3); S7
 // surfaces the cap.
 do {
     let (contract, fallback) = contractFor("1.3.9", registry: launchRegistry)
-    check(fallback == true && contract.version == "1.7.2", "fallback: a 1.3.9 kit maps to the 1.7.2 contract")
+    check(fallback == true && contract.version == "1.7.3", "fallback: a 1.3.9 kit maps to the 1.7.3 contract")
     let res = buildArgv(contract, profileValues: ["state_format": .string("bf16")],
                         model: ProfileModel(source: "hfid", id: "m/r"),
                         globals: GlobalCfg(port: 8123, apiKey: "k"))
     check(res.args == ["-u", "install/launcher.py", "serve", "--model", "m/r",
                        "--host", "127.0.0.1", "--port", "8123", "--state-format", "bf16"],
-          "fallback: the 1.7.2 mapping drives the argv (launch proceeds; the 1.7.x new options are unset -> omitted)")
+          "fallback: the 1.7.3 mapping drives the argv (launch proceeds; the 1.7.x new options are unset -> omitted)")
     check(res.env == ["SPLASH_API_KEY": "k"], "fallback: env built from the globals as usual")
 }
 
@@ -5745,6 +5817,14 @@ do {
     check(r172.options == r171.options,
           "s2b parse: the 1.7.2 table's parsed entries (flags, groups, env, secret, action, " +
           "choices, defaults) are 1.7.1's")
+    let r173 = parseServeOptions(fixtureServeOptions173)
+    check(r173.options.count == 37, "s2b parse: the real 1.7.3 table yields the 37 shared options")
+    check(r173.unrecognized.isEmpty, "s2b parse: no unrecognized blocks in the real 1.7.3 table")
+    check(r173.options.map(\.flag) == r172.options.map(\.flag),
+          "s2b parse: the 1.7.3 file order is 1.7.2's (no new flags; the diff is a help string)")
+    check(r173.options == r172.options,
+          "s2b parse: the 1.7.3 table's parsed entries are 1.7.2's (the diff is the " +
+          "--max-image-pixels help string, which the parser does not read)")
     // A mangled block (non-string first arg): the good blocks parse, the bad
     // one is reported, not fatal.
     let mangled = """
@@ -5827,6 +5907,12 @@ do {
     check(d172_172.version == "1.7.2", "s2b diff: the 1.7.2 report carries the kit version")
     let d172_171 = registryDiff(r172d, contract: contract171, version: "1.7.2")
     check(d172_171.inSync, "s2b diff: the 1.7.2 table (no new flags) matches the 1.7.1 contract (inSync)")
+    let r173d = parseServeOptions(fixtureServeOptions173)
+    let d173_173 = registryDiff(r173d, contract: contract173, version: "1.7.3")
+    check(d173_173.inSync, "s2b diff: the real 1.7.3 table matches the 1.7.3 contract (inSync)")
+    check(d173_173.version == "1.7.3", "s2b diff: the 1.7.3 report carries the kit version")
+    let d173_172 = registryDiff(r173d, contract: contract172, version: "1.7.3")
+    check(d173_172.inSync, "s2b diff: the 1.7.3 table (no new flags) matches the 1.7.2 contract (inSync)")
     let threeNew171 = ["--max-concurrent-requests", "--recalibrate-ane", "--sampling-default"]
     let d171_170 = registryDiff(r171b, contract: contract170, version: "1.7.1")
     check(!d171_170.inSync && d171_170.missingInContract == threeNew171
@@ -6423,6 +6509,21 @@ do {
     // A version WITHOUT the cache group -> the CACHE tab has no options (hidden).
     let noCache = profileOptionDefinitions(version: "9.9.9")   // unseen -> latest fallback
     _ = noCache
+    // The VISION tab and the MODEL moves (the API tab was over-full): the
+    // image cap, the vision-tower switch, and the projector path own the
+    // vision group; the chat template + reasoning-effort pair sit with the
+    // model; the rest of the API tab is unchanged.
+    let d172 = profileOptionDefinitions(version: "1.7.2")
+    for (key, group) in [("max_image_pixels", "vision"), ("language_only", "vision"),
+                         ("mmproj", "vision"), ("chat_template_file", "model"),
+                         ("reasoning_effort", "model"), ("forced_reasoning_effort", "model")] {
+        check(d172.contains { ($0["key"] as? String) == key && ($0["group"] as? String) == group },
+              "S7 optdefs: \(key) lands in the \(group) tab")
+    }
+    check(d172.contains { ($0["key"] as? String) == "draft_model" && ($0["group"] as? String) == "model-axis" },
+          "S7 optdefs: draft_model stays in the model axis under the pill")
+    check(d172.contains { ($0["key"] as? String) == "max_request_size" && ($0["group"] as? String) == "api" },
+          "S7 optdefs: the remaining requests options still land in the API tab")
 }
 
 // 98b. 1.7.1 save validation: each --sampling-default NAME=VALUE is checked

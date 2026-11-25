@@ -38,7 +38,9 @@ const DEFAULT_DEFS = [
   { key: 'allow_idle_sleep', flag: '--allow-idle-sleep', kind: 'bool', group: 'compute', default: false, requires: [] },
   { key: 'served_model_name', flag: '--served-model-name', kind: 'value', group: 'api', default: null, requires: [] },
   { key: 'max_request_size', flag: '--max-request-size', kind: 'value', group: 'api', default: '256m', requires: [] },
-  { key: 'reasoning_effort', flag: '--default-reasoning-effort', kind: 'value', group: 'api', default: null, choices: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], requires: [] },
+  { key: 'reasoning_effort', flag: '--default-reasoning-effort', kind: 'value', group: 'model', default: null, choices: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], requires: [] },
+  { key: 'max_image_pixels', flag: '--max-image-pixels', kind: 'value', group: 'vision', default: null, requires: [] },
+  { key: 'language_only', flag: '--language-only', kind: 'bool', group: 'vision', default: false, requires: [] },
   { key: 'draft_model', flag: '--draft-model', kind: 'value', group: 'model-axis', default: null, requires: [] },
   { key: 'revision', flag: '--revision', kind: 'value', group: 'model-axis', default: null, requires: [] }
 ];
@@ -224,9 +226,9 @@ try {
     for (const id of ['capAuto', 'capManual', 'manualPath', 'btnBrowseEngine', 'engPath', 'engTried', 'vCfg', 'engArch', 'engValid',
       'cfgMsg', 'folderList', 'folderPath', 'btnBrowseFolder', 'btnAddFolder',
       'cfgHost', 'cfgPort', 'cfgKey', 'btnKeyEye', 'cfgAllowedHost', 'cfgAllowedOrigin', 'webUiOn', 'webUiOff',
-      'profileList', 'btnProfileAdd', 'ptabGeneral', 'ptabModel', 'ptabMemory', 'ptabCache', 'ptabApi',
+      'profileList', 'btnProfileAdd', 'ptabGeneral', 'ptabModel', 'ptabVision', 'ptabMemory', 'ptabCache', 'ptabApi',
       'profileName', 'btnProfileActivate', 'btnProfileClone', 'btnProfileRemove', 'modelPill', 'modelPillName',
-      'profileDrafter', 'profileModelAxis', 'profileLaunchMeta', 'profilePreviewBox', 'profileRestartPrompt'])
+      'profileDrafter', 'profileModelAxis', 'profileModelOptions', 'profileLaunchMeta', 'profilePreviewBox', 'profileRestartPrompt'])
       assert.ok($('settingsView').contains($(id)), id);
   });
   check('chooser and first-run modals live at the top level, outside both views', () => {
@@ -494,8 +496,8 @@ try {
     assert.equal($('profileIdLabel'), null);
     assert.ok(rows()[1].classList.contains('on') && !rows()[0].classList.contains('on'));
   });
-  check('five tabs render; GENERAL contains per-profile compute settings', () => {
-    for (const id of ['ptabGeneral', 'ptabModel', 'ptabMemory', 'ptabCache', 'ptabApi']) assert.equal($(id).hidden, false, id);
+  check('six tabs render; GENERAL contains per-profile compute settings', () => {
+    for (const id of ['ptabGeneral', 'ptabModel', 'ptabVision', 'ptabMemory', 'ptabCache', 'ptabApi']) assert.equal($(id).hidden, false, id);
     assert.equal($('ptabCompute'), null);
     assert.ok($('ptabGeneral').classList.contains('on'));
     assert.ok(!$('ptabGeneralPanel').hidden && $('ptabMemoryPanel').hidden && $('ptabCachePanel').hidden);
@@ -507,6 +509,24 @@ try {
     assert.ok(!$('ptabMemoryPanel').contains($('option-persistent_cache')));
     assert.ok($('ptabCachePanel').contains($('option-persistent_cache')));
     assert.ok(!$('ptabCachePanel').querySelector('.section-heading'));
+  });
+  check('VISION tab owns the image/vision options; the effort pair and chat template sit with the model', () => {
+    assert.ok($('ptabVision').classList.contains('on') === false);
+    assert.ok($('ptabVisionPanel').hidden);
+    assert.ok($('ptabVisionPanel').contains($('option-max_image_pixels')));
+    assert.ok($('ptabVisionPanel').contains($('option-language_only')));
+    assert.ok(!$('ptabVisionPanel').contains($('option-draft_model')));
+    assert.equal($('option-mmproj'), null);   // absent until a 1.5.0+ contract carries it
+    $('ptabVision').click();
+    assert.ok(!$('ptabVisionPanel').hidden && $('ptabGeneralPanel').hidden);
+    assert.equal($('option-language_only').type, 'hidden');
+    assert.ok(w.document.querySelector('[data-option-choice="language_only"][data-value="false"]').classList.contains('on'));
+    assert.ok(w.document.querySelector('[data-option-reset="max_image_pixels"]').hidden);
+    $('ptabModel').click();
+    assert.ok($('ptabModelPanel').contains($('option-reasoning_effort')));
+    assert.ok(!$('ptabApiPanel').contains($('option-reasoning_effort')));
+    assert.ok(!$('ptabVisionPanel').contains($('option-reasoning_effort')));
+    $('ptabGeneral').click();
   });
   check('Model has its own tab and reset pills only appear for overrides', () => {
     assert.ok($('profileBasics').contains($('profileLaunchMeta')));
@@ -523,13 +543,13 @@ try {
     assert.ok(w.document.querySelector('[data-option-choice="ane"][data-value="true"]').classList.contains('on'));
     w.document.querySelector('[data-option-choice="ane"][data-value="false"]').click();
   });
-  check('1.5.0 projector flag appears in Model and persists its local path', () => {
+  check('1.5.0 projector flag appears in VISION and persists its local path', () => {
     const q = panel();
     try {
       const { w, $, tick, flushTimers } = q;
-      tick({ option_defs: [...DEFAULT_DEFS, { key: 'mmproj', flag: '--mmproj', kind: 'value', group: 'model-axis', default: null, requires: [] }] });
+      tick({ option_defs: [...DEFAULT_DEFS, { key: 'mmproj', flag: '--mmproj', kind: 'value', group: 'vision', default: null, requires: [] }] });
       w.showView('settings');
-      assert.ok($('ptabModelPanel').contains($('option-mmproj')));
+      assert.ok($('ptabVisionPanel').contains($('option-mmproj')));
       $('option-mmproj').value = '/models/vision/mmproj.gguf';
       $('option-mmproj').dispatchEvent(new w.Event('change'));
       flushTimers();
@@ -713,7 +733,7 @@ try {
   check('tabs whose groups have no options for the resolved version are hidden, not disabled', () => {
     assert.equal(gated.$('ptabMemory').hidden, true);
     assert.equal(gated.$('ptabCache').hidden, true);
-    for (const id of ['ptabGeneral', 'ptabModel', 'ptabApi']) assert.equal(gated.$(id).hidden, false, id);
+    for (const id of ['ptabGeneral', 'ptabModel', 'ptabVision', 'ptabApi']) assert.equal(gated.$(id).hidden, false, id);
   });
   gated.tick({ option_defs: DEFAULT_DEFS });
   check('tabs re-appear when a tick carries the fuller contract', () => {
@@ -765,8 +785,8 @@ try {
 // single source (D3), so the panel just renders it.
 const DEF_170 = [
   { key: 'cached_states', flag: '--cached-states', kind: 'value', group: 'memory', default: 'int8', choices: ['int8', 'exact'], requires: [] },
-  { key: 'forced_reasoning_effort', flag: '--reasoning-effort', kind: 'value', group: 'api', default: null, choices: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], requires: [] },
-  { key: 'chat_template_file', flag: '--chat-template-file', kind: 'value', group: 'api', default: null, requires: [] }
+  { key: 'forced_reasoning_effort', flag: '--reasoning-effort', kind: 'value', group: 'model', default: null, choices: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], requires: [] },
+  { key: 'chat_template_file', flag: '--chat-template-file', kind: 'value', group: 'model', default: null, requires: [] }
 ];
 const defs170 = [...DEFAULT_DEFS, ...DEF_170];
 const v170 = panel({ optionDefs: defs170 });
@@ -788,13 +808,16 @@ try {
     assert.equal(v170.doc().profiles[0].options.cached_states, 'exact');
     assert.equal(w.document.querySelector('[data-option-reset="cached_states"]').hidden, false, 'set -> reset pill visible');
   });
-  check('--reasoning-effort (forced) renders in the API tab beside --default-reasoning-effort, 7 choices, unset = nothing selected, no reset pill', () => {
-    $('ptabApi').click();
+  check('--reasoning-effort (forced) renders in the Model tab beside --default-reasoning-effort, 7 choices, unset = nothing selected, no reset pill', () => {
+    $('ptabModel').click();
     const forced = w.document.querySelector('[data-option-row="forced_reasoning_effort"]');
-    assert.ok($('ptabApiPanel').contains(forced), 'forced reasoning-effort row is in the api tab');
+    assert.ok($('ptabModelPanel').contains(forced), 'forced reasoning-effort row is in the model tab');
     assert.ok(forced, 'forced row exists');
     // The default-reasoning-effort row (existing) is present too, proving placement.
     assert.ok(w.document.querySelector('[data-option-row="reasoning_effort"]'), '--default-reasoning-effort row still present');
+    assert.ok($('ptabModelPanel').contains(w.document.querySelector('[data-option-row="reasoning_effort"]')),
+      '--default-reasoning-effort sits in the model tab beside the forced one');
+    assert.ok(!$('ptabApiPanel').contains(forced), 'the forced effort is no longer in the api tab');
     assert.equal($('option-forced_reasoning_effort').type, 'hidden');
     assert.equal(forced.querySelectorAll('[data-option-choice]').length, 7, 'the 7-effort set renders');
     assert.equal(w.getComputedStyle(forced.querySelector('.option-choices')).flexWrap, 'wrap', 'the 7 choices wrap like the default effort');
@@ -809,11 +832,12 @@ try {
     assert.equal(w.document.querySelector('[data-option-choice="forced_reasoning_effort"][data-value="high"]').classList.contains('on'), true);
     assert.equal(w.document.querySelector('[data-option-reset="forced_reasoning_effort"]').hidden, false);
   });
-  check('--chat-template-file renders in the API tab as a free-form text field, empty default, no reset pill', () => {
-    $('ptabApi').click();
+  check('--chat-template-file renders in the Model tab as a free-form text field, empty default, no reset pill', () => {
+    $('ptabModel').click();
     const input = $('option-chat_template_file');
     assert.ok(input, 'chat-template-file input exists');
-    assert.ok($('ptabApiPanel').contains(input), 'chat-template-file is in the api tab');
+    assert.ok($('ptabModelPanel').contains(input), 'chat-template-file is in the model tab');
+    assert.ok(!$('ptabApiPanel').contains(input), 'chat-template-file is no longer in the api tab');
     assert.equal(input.type, 'text', 'a file path is a free-form text field');
     assert.ok(input.closest('.option-row').querySelector('.option-choices') === null, 'no segmented pill for the free-form field');
     assert.ok(w.document.querySelector('[data-option-reset="chat_template_file"]').hidden, 'empty -> no reset pill');

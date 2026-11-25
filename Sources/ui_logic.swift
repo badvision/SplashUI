@@ -1039,8 +1039,7 @@ private let sharedOptions172 = sharedOptions171
 /// prompt tells the effort without switching the reasoning, so
 /// --thinking-token-budget, --thinking-end-text, --max-image-pixels and
 /// --language-only are unusable for it; its native window is 1010000, no YaRN
-/// past it. (1.7.3 later serves the tower; that kit runs on this contract
-/// with the visible FALLBACK indicator until it is authored.)
+/// past it. (1.7.3 later serves the tower — contract173 carries that fact.)
 public let contract172 = VersionContract(
     version: "1.7.2", flavor: .launcher,
     options: sharedOptions172 + launcherModelOptions150,
@@ -1076,6 +1075,51 @@ public let contract172 = VersionContract(
             contextTokens: 1010000, maxContextTokens: 1010000),
     ])
 
+// 1.7.3: no new launcher flags — the shared table is 1.7.2's. The real keg's
+// serve_options.py differs by the --max-image-pixels help string only (a
+// mention of the Inkling-2-Mini patch), which the s2b parser does not read;
+// the s2b fixture of the real 1.7.3 file pins the parsed table.
+private let sharedOptions173 = sharedOptions172
+
+/// 1.7.3: the shared table is 1.7.2's (no new launcher flags — see
+/// sharedOptions173); the family registry and config rules are 1.7.2's. The
+/// per-family facts are the real 1.7.3 keg's install/families.py option_report,
+/// executed: every family unchanged except Inkling-2-Mini, which now serves its
+/// vision tower (projectors beside the GGUF/MLX checkpoints, a text-only
+/// fallback for conversions without one), so --max-image-pixels and
+/// --language-only leave its unusable list; its window stays 1010000.
+public let contract173 = VersionContract(
+    version: "1.7.3", flavor: .launcher,
+    options: sharedOptions173 + launcherModelOptions150,
+    familyRegistry: contract172.familyRegistry,
+    familyRules: contract172.familyRules,
+    familyOptionFacts: [
+        // The real 1.7.3 keg's install/families.py option_report (executed).
+        "Qwen3.8-27B": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--expert-memory", "--sparse-kv-memory"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Qwen3.6-35B-A3B": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--sparse-kv-memory", "--disable-ane", "--recalibrate-ane"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Qwen3.5-122B-A10B": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--sparse-kv-memory", "--disable-ane", "--recalibrate-ane"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Qwen3.8-Flash-Next": FamilyOptionFacts(
+            unusable: ["--disable-ane", "--recalibrate-ane"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Flint": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--sparse-kv-memory", "--state-format",
+                       "--cached-states", "--reasoning-effort", "--default-reasoning-effort",
+                       "--thinking-token-budget", "--thinking-end-text", "--max-image-pixels",
+                       "--disable-ane", "--recalibrate-ane", "--language-only"],
+            contextTokens: 262144, maxContextTokens: 262144),
+        "Inkling-2-Mini": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--sparse-kv-memory", "--state-format",
+                       "--cached-states", "--thinking-token-budget", "--thinking-end-text",
+                       "--disable-ane", "--recalibrate-ane"],
+            contextTokens: 1010000, maxContextTokens: 1010000),
+    ])
+
 
 /// The default registry: every authored version.
 public let launchRegistry = LaunchRegistry(contracts: [
@@ -1089,6 +1133,7 @@ public let launchRegistry = LaunchRegistry(contracts: [
     "1.7.0": contract170,
     "1.7.1": contract171,
     "1.7.2": contract172,
+    "1.7.3": contract173,
 ])
 
 /// D16: the contract for a kit's release.json version. An exact hit when the
@@ -3569,10 +3614,15 @@ public func profileOptionDefinitions(version: String?) -> [[String: Any]] {
         // panel), never per-profile — they do not appear in a profile at all.
         if o.group == "network" { return nil }
         var group = o.group
-        if group == "requests" { group = "api" }   // the API tab combines both
+        if group == "requests" { group = "api" }   // the API tab combines both groups
         if ["ane", "allow_idle_sleep", "recalibrate_ane"].contains(o.key) { group = "compute" }
         if o.key == "decode_share" { group = "memory" }
-        if ["draft_model", "revision", "language_only", "offline", "mmproj"].contains(o.key) { group = "model-axis" }
+        if ["draft_model", "revision", "offline"].contains(o.key) { group = "model-axis" }
+        // The image cap, the vision-tower switch, and the projector path get
+        // their own VISION tab (the API tab was over-full).
+        if ["max_image_pixels", "language_only", "mmproj"].contains(o.key) { group = "vision" }
+        // The chat template and the reasoning-effort pair belong with the model.
+        if ["chat_template_file", "reasoning_effort", "forced_reasoning_effort"].contains(o.key) { group = "model" }
         return ["key": o.key, "flag": o.flag, "kind": o.kind.rawValue, "group": group,
                 "default": o.defValue ?? NSNull(), "choices": o.choices ?? [], "requires": o.requires]
     }

@@ -44,25 +44,51 @@
     check('status opens with telemetry only', !$('statusView').hidden && $('settingsView').hidden &&
       !$('statusView').querySelector('section.settings-global, section.settings-profiles') &&
       $('statusView').querySelectorAll('section').length === 5, $('statusView').hidden);
-    const geometry = { width: innerWidth, height: innerHeight };
-    $('btnSettings').click();
-    // The app animates the window width for the view (820 for settings); height is untouched.
-    await until(() => $('statusView').hidden && !$('settingsView').hidden, 'settings view shown');
-    await until(() => innerWidth === 820, 'window widened for settings');
-    check('hamburger opens settings and widens the window', $('statusView').hidden && !$('settingsView').hidden &&
-      innerWidth === 820 && innerHeight === geometry.height && $('settingsView').scrollTop === 0,
-      { width: innerWidth, height: innerHeight, baseline: geometry });
-    check('settings scrolls internally with shared footer reachable', getComputedStyle($('settingsView')).overflowY === 'auto' &&
-      $('btnRestart').getBoundingClientRect().bottom <= innerHeight && $('btnRestart').getBoundingClientRect().top >= 0,
-      { overflow: getComputedStyle($('settingsView')).overflowY, footerBottom: $('btnRestart').getBoundingClientRect().bottom });
-    check('shared header: settings title, STATUS cap, model and engine state', $('hName').textContent === 'Splash settings' &&
-      $('header').contains($('btnSettings')) && !$('header').closest('main') && $('statusPill').textContent.length > 0,
-      { title: $('hName').textContent, engState: $('statusPill').textContent });
-    $('btnSettings').click();
-    await until(() => !$('statusView').hidden && $('settingsView').hidden, 'status view shown');
-    await until(() => innerWidth === 520, 'window restored to the status width');
-    check('back cap returns to status and restores the status width', !$('statusView').hidden && $('settingsView').hidden &&
-      innerWidth === 520 && innerHeight === geometry.height, { width: innerWidth, height: innerHeight });
+    // D19: the window height tracks LIVE status content, so a request in flight
+    // during this round-trip moves the height between snapshots. Take the size
+    // baseline only in a quiescent window; if traffic lands mid-check, re-baseline
+    // (bounded retries — a machine that cannot be quiet fails the gate, honestly).
+    const quiescent = async () => {
+      await until(() => S.cfg.in_flight === 0, 'engine quiescent for the size check');
+      await sleep(1500);   // a request starting right after the sample must land first
+      if (S.cfg.in_flight !== 0) throw new Error('engine traffic resumed before the size baseline');
+    };
+    const toStatus = async () => {
+      if (!$('settingsView').hidden) {
+        $('btnSettings').click();
+        await until(() => !$('statusView').hidden && $('settingsView').hidden, 'status view shown');
+        await until(() => innerWidth === 520, 'window restored to the status width');
+      }
+    };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await toStatus();
+      await quiescent();
+      const baseline = { width: innerWidth, height: innerHeight };
+      // The app animates the window width for the view (820 for settings); height is untouched.
+      $('btnSettings').click();
+      await until(() => $('statusView').hidden && !$('settingsView').hidden, 'settings view shown');
+      await until(() => innerWidth === 820, 'window widened for settings');
+      const widened = { width: innerWidth, height: innerHeight, baseline };
+      if (innerHeight !== baseline.height) continue;   // traffic moved the live height; re-baseline
+      check('hamburger opens settings and widens the window', $('statusView').hidden && !$('settingsView').hidden &&
+        innerWidth === 820 && innerHeight === baseline.height && $('settingsView').scrollTop === 0, widened);
+      check('settings scrolls internally with shared footer reachable', getComputedStyle($('settingsView')).overflowY === 'auto' &&
+        $('btnRestart').getBoundingClientRect().bottom <= innerHeight && $('btnRestart').getBoundingClientRect().top >= 0,
+        { overflow: getComputedStyle($('settingsView')).overflowY, footerBottom: $('btnRestart').getBoundingClientRect().bottom });
+      check('shared header: settings title, STATUS cap, model and engine state', $('hName').textContent === 'Splash settings' &&
+        $('header').contains($('btnSettings')) && !$('header').closest('main') && $('statusPill').textContent.length > 0,
+        { title: $('hName').textContent, engState: $('statusPill').textContent });
+      await toStatus();
+      const restored = { width: innerWidth, height: innerHeight };
+      if (innerHeight !== baseline.height) continue;
+      check('back cap returns to status and restores the status width', !$('statusView').hidden && $('settingsView').hidden &&
+        innerWidth === 520 && innerHeight === baseline.height, restored);
+      break;
+    }
+    if (!checks.some(item => item.assertion === 'hamburger opens settings and widens the window' && item.pass)) {
+      check('hamburger opens settings and widens the window', false,
+        { retried: 'engine traffic moved the live height on every attempt' });
+    }
     $('btnSettings').click();
     check('engine adopted not relaunched', S.server.pid === expected.enginePID && S.server.launched_by_app === false,
       { pid: S.server.pid, launched_by_app: S.server.launched_by_app });
@@ -89,7 +115,7 @@
       profileRows().length === S.cfg.profiles.length, profileRows().length);
     check('active profile marked with the selection dot', S.cfg.active_profile !== null &&
       profileRows().some(row => row.querySelector('.profdot.on') !== null), $('profileList').textContent);
-    check('five profile tabs present', document.querySelectorAll('#settingsView [data-ptab]').length === 5,
+    check('six profile tabs present', document.querySelectorAll('#settingsView [data-ptab]').length === 6,
       document.querySelectorAll('#settingsView [data-ptab]').length);
 
     // S7 whole-document contract check — one pass over the app's full config doc:

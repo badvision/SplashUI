@@ -215,11 +215,12 @@ section::after { content: ""; position: absolute; left: 52px; right: 0; bottom: 
 .profile-identity .capbtns { flex-shrink: 0; }
 #profileComputeOptions { margin-top: 4px; }
 #profileModelAxis { margin-top: 4px; }
+#profileModelOptions { margin-top: 4px; }
 #profileBasics { min-width: 0; }
 #profileBasics .profile-identity { flex-direction: column; align-items: stretch; gap: 4px; }
 #profileBasics .profile-identity .frow { flex: none; }
-#ptabApiPanel .option-row:has([data-option="reasoning_effort"]),
-#ptabApiPanel .option-row:has([data-option="forced_reasoning_effort"]) .option-choices { flex: 0 1 260px; }
+#profileModelOptions .option-row:has([data-option="reasoning_effort"]),
+#profileModelOptions .option-row:has([data-option="forced_reasoning_effort"]) .option-choices { flex: 0 1 260px; }
 .option-row:has([data-option="reasoning_effort"]),
 .option-row:has([data-option="forced_reasoning_effort"]) { align-items: center; }
 .s7 .option-choices .mini { color: var(--bg); }
@@ -511,6 +512,7 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
     <div class="s7-col s7-tabs" id="profileTabCol">
       <button class="ptab on" data-ptab="general" id="ptabGeneral">General</button>
       <button class="ptab" data-ptab="model" id="ptabModel">Model</button>
+      <button class="ptab" data-ptab="vision" id="ptabVision">Vision</button>
       <button class="ptab" data-ptab="memory" id="ptabMemory">Memory</button>
       <button class="ptab" data-ptab="cache" id="ptabCache">Cache</button>
       <button class="ptab" data-ptab="api" id="ptabApi">Api</button>
@@ -547,7 +549,9 @@ button { font-family: var(--display); text-transform: uppercase; letter-spacing:
           </button>
           <div class="profile-chip" id="profileDrafter"></div>
           <div id="profileModelAxis" class="option-list"></div>
+          <div id="profileModelOptions" class="option-list"></div>
       </div>
+      <div id="ptabVisionPanel" data-ptab-panel="vision" hidden></div>
       <div id="ptabMemoryPanel" data-ptab-panel="memory" hidden></div>
       <div id="ptabCachePanel" data-ptab-panel="cache" hidden></div>
       <div id="ptabApiPanel" data-ptab-panel="api" hidden></div>
@@ -866,8 +870,9 @@ const CF = { doc: null, draft: null, baseline: "", validateTimer: null, firstRun
   keyRevealed: false, keyMask: "· · · · · · · ·",
   chooserOpen: false, chooserSel: null, chooserSrc: "all", chooserSearch: "" };
 
-// Dynamic option tabs; GENERAL and MODEL have structural content.
-const PTABS = ["memory", "cache", "api"];
+// Dynamic option tabs; GENERAL and MODEL carry structural content (MODEL also
+// paints the model-group options below the pill).
+const PTABS = ["vision", "memory", "cache", "api"];
 
 // Option definitions come from the tick's contract (or the last validate response).
 function cfOptionDefs() { return CF.optionDefs || (S && S.cfg && S.cfg.option_defs) || []; }
@@ -1317,6 +1322,8 @@ function cfRenderOptions(p) {
   const gate = cfGatedFlags();
   const compute = defs.filter(o => o.group === "compute" && !gate.has(o.flag));
   cfPaintOptionRows("profileComputeOptions", compute, p, defs);
+  const model = defs.filter(o => o.group === "model" && !gate.has(o.flag));
+  cfPaintOptionRows("profileModelOptions", model, p, defs);
   for (const t of PTABS) {
     const panel = $("ptab" + t[0].toUpperCase() + t.slice(1) + "Panel");
     if (!panel) continue;
