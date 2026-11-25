@@ -197,6 +197,24 @@ The environment variables formerly documented here are retired. Each one maps to
     contract; the panel hides the control for the selected profile, and a
     family-usable flag is dropped from the argv with a warning when set.
     Reviewed and **not** adopted: none — all three new flags are adopted.
+  - **1.7.2**: no new launcher flags — the shared table is 1.7.1's (the real
+    keg's `serve_options.py` differs by two `needs=` renames and help text
+    only: `--thinking-token-budget` / `--thinking-end-text` now gate on the
+    `prompt_switches_reasoning` family fact — the effort *turning* the
+    model's reasoning on and off — instead of `reasoning_switch`). The
+    family table gains a sixth family, **Inkling-2-Mini** (`incoai/
+    Inkling-2-Mini-DFlash2` draft; config.json `model_type`
+    `inkling2_loop`, verified against the real
+    `thinkingmachines/Inkling-2-Mini` config.json): in 1.7.2 its vision
+    tower is not served, it has no recurrent state, and its prompt tells
+    the model the effort without switching the reasoning, so the executed
+    `option_report` (hand-authored into the contract) makes
+    `--thinking-token-budget`, `--thinking-end-text`, `--max-image-pixels`
+    and `--language-only` unusable for it — while `--reasoning-effort` /
+    `--default-reasoning-effort` stay usable, the one behavior the rename
+    changes for any family. The settings panel hides the gated controls
+    for the selected profile as before, and a set-but-unusable flag is
+    dropped from the argv with a warning.
   AUTO selects the highest valid installed Homebrew Splash version (numeric
   ordering across Apple-silicon and Intel prefixes). Only models the launcher
   cannot prepare, such as a legacy Splash package, use the module-kit fallback.
@@ -271,6 +289,20 @@ panel hides the control for the selected profile. Because the engine now
 hard-errors `--recalibrate-ane` together with `--disable-ane`, the app
 emits at most one: a profile with ANE explicitly off drops the
 recalibration flag with a warning. No other option changed meaning.
+For 1.7.2, the shared table is 1.7.1's: `server/serve_options.py`
+diffs by two `needs=` renames and help text only (no new flags, no
+`check_serve_arguments` change). `install/families.py` adds the
+Inkling-2-Mini family (draft `incoai/Inkling-2-Mini-DFlash2`; config.json
+`model_type` `inkling2_loop`, verified against the real
+`thinkingmachines/Inkling-2-Mini` config.json on the Hub) and the
+executed `option_report` — the five 1.7.1 per-family lists unchanged
+(the `needs=` rename hits neither Qwen nor Flint) plus Inkling-2-Mini,
+whose unusable flags are `--thinking-token-budget`,
+`--thinking-end-text`, `--max-image-pixels` and `--language-only` (in
+1.7.2 its tower is not served; its effort reaches the model without
+switching its reasoning, so the two effort options stay usable), with a
+native 1010000-token window. The 1.7.2 contract carries all of it
+hand-authored, as validation data, never argv input.
 
 ## License
 

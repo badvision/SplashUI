@@ -1252,19 +1252,22 @@ do {
     let i = contractFor("1.7.1", registry: launchRegistry)
     check(!i.fallback && i.contract.version == "1.7.1" && i.contract.flavor == .launcher,
           "contractFor: 1.7.1 is an exact launcher contract")
+    let j = contractFor("1.7.2", registry: launchRegistry)
+    check(!j.fallback && j.contract.version == "1.7.2" && j.contract.flavor == .launcher,
+          "contractFor: 1.7.2 is an exact launcher contract")
 }
 
-// 28. contractFor: unseen versions -> the LATEST authored (1.7.1) + fallback =
+// 28. contractFor: unseen versions -> the LATEST authored (1.7.2) + fallback =
 // true (D3: launch proceeds; S7 shows the "FALLBACK MAPPING" cap).
 do {
-    let newer = contractFor("1.7.2", registry: launchRegistry)
-    check(newer.fallback == true && newer.contract.version == "1.7.1",
-          "contractFor: unseen 1.7.2 -> latest authored 1.7.1 + fallback")
+    let newer = contractFor("1.7.3", registry: launchRegistry)
+    check(newer.fallback == true && newer.contract.version == "1.7.2",
+          "contractFor: unseen 1.7.3 -> latest authored 1.7.2 + fallback")
     let older = contractFor("1.2.9", registry: launchRegistry)
-    check(older.fallback == true && older.contract.version == "1.7.1",
-          "contractFor: older 1.2.x -> latest authored 1.7.1 + fallback")
+    check(older.fallback == true && older.contract.version == "1.7.2",
+          "contractFor: older 1.2.x -> latest authored 1.7.2 + fallback")
     let unreadable = contractFor(nil, registry: launchRegistry)
-    check(unreadable.fallback == true && unreadable.contract.version == "1.7.1",
+    check(unreadable.fallback == true && unreadable.contract.version == "1.7.2",
           "contractFor: unreadable release.json (nil) -> the latest authored + fallback")
 }
 
@@ -1702,6 +1705,88 @@ do {
           "1.7.1 recalibrate alone (ANE on by default) emits cleanly (nothing to drop)")
 }
 
+// 31k. The 1.7.2 contract: the shared table is 1.7.1's (the real 1.7.2 keg's
+// serve_options.py diffs by two needs= renames and help text only — no new
+// flags, no cross-check change); the family registry and config rules gain
+// the new Inkling-2-Mini family (config.json model_type "inkling2_loop",
+// verified against the real thinkingmachines/Inkling-2-Mini config.json on
+// the Hub); the per-family facts are the real 1.7.2 keg's install/families.py
+// option_report, executed: the five 1.7.1 lists unchanged, plus
+// Inkling-2-Mini.
+do {
+    let c = contract172
+    check(Set(c.options.map { $0.key }) == Set(contract171.options.map { $0.key }),
+          "1.7.2 adds no options (the serve_options.py diff is needs= renames and help text)")
+    check(c.familyRegistry == contract171.familyRegistry
+            .merging(["Inkling-2-Mini": "incoai/Inkling-2-Mini-DFlash2"]) { $1 },
+          "1.7.2 family registry: 1.7.1's plus the Inkling-2-Mini DFlash2 draft")
+    check(c.familyRules.count == contract171.familyRules.count + 1
+          && c.familyRules.contains(FamilyRule(configKey: "model_type",
+                                               value: "inkling2_loop", family: "Inkling-2-Mini")),
+          "1.7.2 config rules: 1.7.1's plus model_type inkling2_loop -> Inkling-2-Mini")
+    check(deriveFamily(config: #"{"model_type":"inkling2_loop"}"#, contract: c)
+          == "Inkling-2-Mini", "1.7.2 deriveFamily: the real Inkling-2-Mini config.json names its family")
+    let facts = c.familyOptionFacts
+    check(facts != nil && facts!.count == 6, "1.7.2 carries facts for all six families")
+    // The five 1.7.1 lists are unchanged: the needs= rename hits neither Qwen
+    // (satisfies both facts) nor Flint (satisfies neither).
+    for (name, f) in contract171.familyOptionFacts! {
+        check(facts?[name] == f, "1.7.2 \(name) facts are 1.7.1's (unchanged)")
+    }
+    // Byte-for-byte against the real 1.7.2 keg's option_report (executed).
+    check(facts?["Inkling-2-Mini"] == FamilyOptionFacts(
+        unusable: ["--ple-memory", "--sparse-kv-memory", "--state-format",
+                   "--cached-states", "--thinking-token-budget", "--thinking-end-text",
+                   "--max-image-pixels", "--disable-ane", "--recalibrate-ane", "--language-only"],
+        contextTokens: 1010000, maxContextTokens: 1010000),
+          "1.7.2 Inkling-2-Mini facts match the keg's report (no recurrent state; the effort " +
+          "reaches the model without switching its reasoning; 1.7.2 serves no tower)")
+}
+
+// 31l. planLaunch 1.7.2: the Inkling-2-Mini family gate. A profile that sets
+// the family-unusable --thinking-token-budget / --max-image-pixels /
+// --language-only gets them dropped with warnings; --reasoning-effort REMAINS
+// (the 1.7.2 needs= rename: the effort reaches Inkling's model even though it
+// cannot switch the reasoning) — the one behavior the rename changes for any
+// family. The family's native 1010000 window also sets its --max-context
+// ceiling (a value past the 262144 ceiling of the other families passes for
+// it; past 1010000 refuses the plan).
+do {
+    var fs = FakeFS()
+    planKit(fs: &fs, path: "/brew/1.7.2/libexec", version: "1.7.2")
+    fs.dir("/models/InklingModel", ["config.json", "model.safetensors"])
+    fs.file("/models/InklingModel/config.json", #"{"model_type":"inkling2_loop"}"#)
+    func plan(_ opts: [String: Any]) -> LaunchConfig {
+        let cfg = planCfgJSON(engineMode: "manual", manualPath: "/brew/1.7.2/libexec", port: 8123, key: "k",
+            name: "P", modelId: "owner/model", modelDir: "/models/InklingModel", options: opts,
+            modelSource: "lmstudio")
+        return planLaunch(cfg, home: "/home", isDir: { fs.isDir($0) },
+            isExecutable: { fs.isExecutable($0) }, kitVersion: { readKitVersion(fs: fs, kit: $0) },
+            fileContents: { fs.fileContents($0) }, listDir: { fs.listDir($0) })
+    }
+    let p = plan(["thinking_token_budget": "1000", "max_image_pixels": "1000000",
+                  "language_only": true, "forced_reasoning_effort": "high"] as [String: Any])
+    check(p.error == nil && p.version == "1.7.2",
+          "1.7.2 Inkling-2-Mini plan is healthy (family known by its config rule, no fallback)")
+    for dropped in ["--thinking-token-budget", "--max-image-pixels", "--language-only"] {
+        check(!p.engineArgs.contains(dropped), "1.7.2 Inkling-2-Mini drops the unusable \(dropped) even when set")
+        check(p.issues.contains { $0.contains(dropped) }, "1.7.2 Inkling-2-Mini: the \(dropped) drop is a warning surfaced to S7")
+    }
+    check(p.engineArgs.contains("--reasoning-effort")
+          && p.engineArgs.firstIndex(of: "--reasoning-effort").map { p.engineArgs[$0 + 1] == "high" } == true,
+          "1.7.2 Inkling-2-Mini EMITS --reasoning-effort high (the needs= rename: the effort reaches the model)")
+    check(!p.engineArgs.contains("--default-reasoning-effort"),
+          "1.7.2 forced effort set -> the per-request default is not emitted (the 1.7.0 exclusivity)")
+    let yarn = plan(["max_context": "500000"] as [String: Any])
+    check(yarn.error == nil && yarn.engineArgs.contains("--max-context")
+          && yarn.engineArgs.firstIndex(of: "--max-context").map { yarn.engineArgs[$0 + 1] == "500000" } == true,
+          "1.7.2 Inkling-2-Mini: --max-context 500000 (past the other families' 262144 ceiling, " +
+          "inside its 1010000) is emitted")
+    let over = plan(["max_context": "1020000"] as [String: Any])
+    check(over.error != nil && over.error!.contains("1010000"),
+          "1.7.2 Inkling-2-Mini: --max-context past the family ceiling refuses the plan (actionable)")
+}
+
 
 // 32. THE D9(b) HEADLINE ANCHOR (amended per open item 5): with the seeded
 // default config, the 1.3.0 module argv is byte-identical to the golden baseline
@@ -1926,13 +2011,13 @@ do {
 // surfaces the cap.
 do {
     let (contract, fallback) = contractFor("1.3.9", registry: launchRegistry)
-    check(fallback == true && contract.version == "1.7.1", "fallback: a 1.3.9 kit maps to the 1.7.1 contract")
+    check(fallback == true && contract.version == "1.7.2", "fallback: a 1.3.9 kit maps to the 1.7.2 contract")
     let res = buildArgv(contract, profileValues: ["state_format": .string("bf16")],
                         model: ProfileModel(source: "hfid", id: "m/r"),
                         globals: GlobalCfg(port: 8123, apiKey: "k"))
     check(res.args == ["-u", "install/launcher.py", "serve", "--model", "m/r",
                        "--host", "127.0.0.1", "--port", "8123", "--state-format", "bf16"],
-          "fallback: the 1.7.1 mapping drives the argv (launch proceeds; the 1.7.1 new options are unset -> omitted)")
+          "fallback: the 1.7.2 mapping drives the argv (launch proceeds; the 1.7.x new options are unset -> omitted)")
     check(res.env == ["SPLASH_API_KEY": "k"], "fallback: env built from the globals as usual")
 }
 
@@ -5008,6 +5093,502 @@ SERVE_OPTIONS = (
 )
 """#
 
+// The REAL 1.7.2 keg's server/serve_options.py SERVE_OPTIONS table (the
+// GitHub release bottle's, extracted to /tmp without touching the installed
+// keg) — the same 37 flags in the same order as 1.7.1's: the real 1.7.2 file
+// diffs from 1.7.1's by exactly the two needs= renames (the thinking pair
+// now gates on prompt_switches_reasoning) and the --activations Q8_0 help
+// note, none of which the s2b parser reads (flags, groups, env, secret,
+// action, choices, defaults).
+let fixtureServeOptions172 = #"""
+
+SERVE_OPTIONS = (
+    ServeOption(
+        "--host",
+        "network",
+        dict(
+            type=parse_host,
+            default="127.0.0.1",
+            metavar="ADDRESS",
+            help="HTTP bind address (default: 127.0.0.1; 0.0.0.0 for all IPv4 "
+            "interfaces; unix:PATH for a UNIX socket); clients use an IP "
+            "address, localhost or a name given with --allowed-host",
+        ),
+    ),
+    ServeOption(
+        "--allowed-host",
+        "network",
+        dict(
+            action="append",
+            default=[],
+            metavar="HOST",
+            help="additional HTTP Host name to accept, e.g. mymac.local; does not "
+            "change the bind address (repeatable)",
+        ),
+    ),
+    ServeOption(
+        "--allowed-origin",
+        "network",
+        dict(
+            action="append",
+            default=[],
+            type=parse_allowed_origin,
+            metavar="ORIGIN",
+            help="origin whose pages may call the API from a browser or webview, "
+            "e.g. tauri://localhost; '*' for any (repeatable)",
+        ),
+        text=_origin_text,
+    ),
+    ServeOption(
+        "--api-key",
+        "network",
+        dict(
+            type=parse_api_key,
+            metavar="KEY",
+            help="require this key as a bearer token or x-api-key on every route "
+            "but the chat page, /health and /ready (default: SPLASH_API_KEY)",
+        ),
+        environment="SPLASH_API_KEY",
+        secret=True,
+    ),
+    ServeOption(
+        "--no-webui",
+        "network",
+        dict(action="store_true", default=False, help="disable the chat page"),
+    ),
+    ServeOption(
+        "--max-memory",
+        "memory",
+        dict(
+            type=parse_max_memory,
+            default=None,
+            metavar="SIZE",
+            help="Metal memory budget in place of the automatic one, e.g. 28G, up "
+            "to the GPU's recommended working set less a margin (default: auto, "
+            "which also leaves a tenth of the Mac's memory unwired)",
+        ),
+        engine=EngineArgument(1, text=_auto_text, required=True),
+    ),
+    ServeOption(
+        "--max-context",
+        "memory",
+        dict(
+            type=parse_max_context,
+            default=None,
+            metavar="TOKENS",
+            help="context token limit, e.g. 100K or 1M (K = 1024 tokens, M = "
+            "1000000 tokens), up to the model's limit, at most 1010000; past its "
+            "native window a model with YaRN turns it on, which is static and "
+            "changes answers at every length, so pass more than the native "
+            "window only when a request needs it (default: auto, the native "
+            "window when memory holds it)",
+        ),
+        engine=EngineArgument(0, text=_auto_text, required=True),
+    ),
+    ServeOption(
+        "--ple-memory",
+        "memory",
+        dict(
+            type=parse_ple_memory,
+            default=None,
+            metavar="SIZE",
+            help="RAM row cache of the PLE n-gram table of a Qwen3.8-Flash-Next "
+            "GGUF, e.g. 2G, which streams the rest from the SSD; off loads the "
+            "whole table, tens of GB (default: auto, a cache of at most the "
+            "rows of a 128K-token prompt, less where memory is short)",
+        ),
+        engine=EngineArgument("--ple-memory"),
+        needs="ple_table",
+    ),
+    ServeOption(
+        "--expert-memory",
+        "memory",
+        dict(
+            type=parse_expert_memory,
+            default=None,
+            metavar="SIZE",
+            help="RAM for the routed experts of a MoE model, e.g. 16G: they "
+            "stream through a store of exactly this size, which neither grows "
+            "nor gives memory back, and read the other experts from the SSD "
+            "when a token routes them; a size that holds every expert, or "
+            "off, loads them all (default: auto, which loads them all where "
+            "memory holds them, and otherwise gives them what the context "
+            "leaves, giving back down to their floor while requests need it; "
+            "see streamed experts)",
+        ),
+        engine=EngineArgument("--expert-memory"),
+        needs="experts",
+    ),
+    ServeOption(
+        "--sparse-kv-memory",
+        "memory",
+        dict(
+            type=parse_sparse_kv_memory,
+            default=None,
+            metavar="SIZE",
+            help="RAM cache of the KV blocks a block-sparse model such as "
+            "Qwen3.8-Flash-Next reads of requests whose KV is on the SSD, e.g. "
+            "1200M; never below its floor (default: auto, its floor)",
+        ),
+        engine=EngineArgument("--sparse-kv-memory"),
+        needs="sparse_kv",
+    ),
+    ServeOption(
+        "--kv-format",
+        "memory",
+        dict(
+            choices=("int8", "bf16"),
+            default="int8",
+            help="target KV cache storage (default: int8); bf16 uses more memory",
+        ),
+        engine=EngineArgument("--kv-format"),
+    ),
+    ServeOption(
+        "--state-format",
+        "memory",
+        dict(
+            choices=("fp32", "bf16"),
+            default="fp32",
+            help="recurrent state storage of running requests (default: fp32); "
+            "bf16 halves each one's state, and cached states store int8 codes "
+            "in either format unless --cached-states exact",
+        ),
+        engine=EngineArgument("--state-format"),
+        needs="recurrent_state",
+    ),
+    ServeOption(
+        "--cached-states",
+        "memory",
+        dict(
+            choices=("int8", "exact"),
+            default="int8",
+            help="recurrent state storage of cached states (default: int8): int8 "
+            "codes take about a quarter of an fp32 state, and a restored state "
+            "can differ at near ties; exact keeps --state-format's, so a "
+            "restore is exact",
+        ),
+        engine=EngineArgument("--cached-states"),
+        needs="recurrent_state",
+    ),
+    ServeOption(
+        "--idle-release",
+        "memory",
+        dict(
+            type=parse_idle_release,
+            default=None,
+            metavar="DURATION",
+            help="time without a request before the engine unwires its memory and "
+            "frees the weights: seconds, or with an s, m or h suffix, e.g. 30m "
+            "(default: 10m); off keeps both, though POST /v1/memory/release "
+            "still frees the weights",
+        ),
+        text=idle_release_text,
+        engine=EngineArgument("--idle-release", text=idle_release_text),
+    ),
+    ServeOption(
+        "--max-cache-disk",
+        "cache",
+        dict(
+            type=parse_max_cache_disk,
+            default=None,
+            metavar="SIZE",
+            help="SSD quota for cached KV pages and states: auto follows the "
+            "volume, a quarter of its free space beyond a floor of 10G (5%% of "
+            "a volume under 200G), at most 32G; a size such as 16G is held as "
+            "given while the volume keeps that floor; 0 disables (default: auto)",
+        ),
+        engine=EngineArgument(2),
+    ),
+    ServeOption(
+        "--max-cache-disk-writes",
+        "cache",
+        dict(
+            type=parse_max_cache_disk_writes,
+            default=0,
+            metavar="SIZE",
+            help="the most the SSD cache writes a day, e.g. 200G; the state a "
+            "conversation resumes from and KV pages pass it (default: 0, no "
+            "limit)",
+        ),
+        engine=EngineArgument("--max-cache-disk-writes"),
+    ),
+    ServeOption(
+        "--persistent-cache",
+        "cache",
+        dict(
+            action="store_true",
+            default=False,
+            help="keep the SSD cache across restarts",
+        ),
+        engine=EngineArgument("--persistent-cache", text=_spelled("on")),
+    ),
+    ServeOption(
+        "--cache-dir",
+        "cache",
+        dict(
+            type=parse_cache_dir,
+            default=None,
+            metavar="DIRECTORY",
+            help="where --persistent-cache keeps its files; needs "
+            "--persistent-cache (default: ~/Library/Caches/Splash/prefix-cache)",
+        ),
+        engine=EngineArgument("--cache-dir"),
+    ),
+    ServeOption(
+        "--served-model-name",
+        "api",
+        dict(
+            action="append",
+            default=[],
+            type=parse_served_model_name,
+            metavar="NAME",
+            help="additional API model name (repeatable); responses report the "
+            "loaded model ID unless --announce-served-name",
+        ),
+    ),
+    ServeOption(
+        "--announce-served-name",
+        "api",
+        dict(
+            action="store_true",
+            default=False,
+            help="report the first --served-model-name in API responses and list "
+            "it first in /v1/models; /status keeps the loaded model ID (needs "
+            "--served-model-name)",
+        ),
+    ),
+    ServeOption(
+        "--sampling-default",
+        "api",
+        dict(
+            action="append",
+            default=[],
+            type=parse_sampling_default,
+            metavar="NAME=VALUE",
+            help="the value of a sampling parameter for requests that set "
+            "none (repeatable): "
+            + ", ".join(SAMPLING_FIELDS)
+            + " (default: the served family's published sampling for "
+            "temperature, top_p and top_k, else the value that leaves the "
+            "logits unchanged)",
+        ),
+        text=lambda item: f"{item[0]}={item[1]}",
+    ),
+    ServeOption(
+        "--reasoning-effort",
+        "api",
+        dict(
+            type=parse_reasoning_effort,
+            metavar="EFFORT",
+            help="effort of every Chat, Responses and Messages request, whatever "
+            "the request asks: "
+            + ", ".join(REASONING_EFFORTS[:-1])
+            + f" or {REASONING_EFFORTS[-1]}; none turns thinking off (default: "
+            "SPLASH_REASONING_EFFORT, else each request's own)",
+        ),
+        environment="SPLASH_REASONING_EFFORT",
+        needs="reasoning_switch",
+    ),
+    ServeOption(
+        "--default-reasoning-effort",
+        "api",
+        dict(
+            type=parse_reasoning_effort,
+            metavar="EFFORT",
+            help="effort of Chat and Responses requests that set none: "
+            + ", ".join(REASONING_EFFORTS[:-1])
+            + f" or {REASONING_EFFORTS[-1]} (default: "
+            "SPLASH_DEFAULT_REASONING_EFFORT, else the model template's)",
+        ),
+        environment="SPLASH_DEFAULT_REASONING_EFFORT",
+        needs="reasoning_switch",
+    ),
+    ServeOption(
+        "--thinking-token-budget",
+        "api",
+        dict(
+            type=parse_thinking_token_budget,
+            metavar="N",
+            help="thinking tokens of a thinking request that sets no "
+            "thinking_token_budget, after which its thinking closes (default: "
+            "SPLASH_THINKING_TOKEN_BUDGET, else no cap)",
+        ),
+        environment="SPLASH_THINKING_TOKEN_BUDGET",
+        needs="prompt_switches_reasoning",
+    ),
+    ServeOption(
+        "--thinking-end-text",
+        "api",
+        dict(
+            metavar="TEXT",
+            help="text that ends thinking where a thinking budget runs out, such "
+            "as a sentence that turns to the answer, then </think> as its last "
+            f"token; at most {MAX_THINKING_END_TOKENS} tokens (default: "
+            "SPLASH_THINKING_END_TEXT, else the close the chat template writes "
+            "after a reasoning)",
+        ),
+        environment="SPLASH_THINKING_END_TEXT",
+        needs="prompt_switches_reasoning",
+    ),
+    ServeOption(
+        "--chat-template-file",
+        "api",
+        dict(
+            type=parse_chat_template_file,
+            default=None,
+            metavar="FILE",
+            help="a Jinja chat template to render every request with, in place "
+            "of the model's own; read once at startup (default: the model's)",
+        ),
+    ),
+    ServeOption(
+        "--max-request-size",
+        "requests",
+        dict(
+            type=parse_request_size,
+            default=DEFAULT_MAX_REQUEST_BYTES,
+            metavar="SIZE",
+            help="maximum HTTP request body size, e.g. 128M (default: 128M); "
+            "shared input budget is max(512M, twice this limit)",
+        ),
+    ),
+    ServeOption(
+        "--max-image-pixels",
+        "requests",
+        dict(
+            type=parse_max_image_pixels,
+            default=images.MAX_PIXELS,
+            metavar="PIXELS",
+            help=f"maximum resized pixels per image, {images.MIN_PIXELS}–"
+            f"{images.MAX_PIXELS} (default: {images.MAX_PIXELS}); bounds the "
+            "vision scratch one image needs",
+        ),
+        engine=EngineArgument(
+            "--max-image-patches", text=lambda pixels: str(images.max_patches(pixels))
+        ),
+        needs="vision",
+    ),
+    ServeOption(
+        "--request-timeout",
+        "requests",
+        dict(
+            type=parse_request_timeout,
+            default=None,
+            metavar="DURATION",
+            help="time before a queued or in-flight request expires with 504: "
+            "seconds, or with an s, m or h suffix, e.g. 30m (default: none)",
+        ),
+    ),
+    ServeOption(
+        "--queue-size",
+        "requests",
+        dict(
+            type=parse_queue_size,
+            default=DEFAULT_QUEUE_SIZE,
+            metavar="REQUESTS",
+            help="requests admitted at once, running or waiting; more get 503 "
+            f"(default: {DEFAULT_QUEUE_SIZE})",
+        ),
+    ),
+    ServeOption(
+        "--max-concurrent-requests",
+        "requests",
+        dict(
+            type=parse_concurrent_requests,
+            default=DEFAULT_CONCURRENT_REQUESTS,
+            metavar="REQUESTS",
+            help="requests the engine runs at once, 1 to "
+            f"{MAX_CONCURRENT_REQUESTS}; more let more clients be answered "
+            "together, each a little slower, and take memory for their "
+            "states and arenas: where that streams more of the weights or "
+            "leaves less context than four would, the start logs both, and "
+            "/status reports four's context (default: "
+            f"{DEFAULT_CONCURRENT_REQUESTS})",
+        ),
+        engine=EngineArgument("--max-concurrent-requests"),
+    ),
+    ServeOption(
+        "--decode-share",
+        "requests",
+        dict(
+            type=parse_decode_share,
+            default=None,
+            metavar="SHARE",
+            help="decode time owed per unit of prefill time while other requests "
+            "decode (default: 0.5; 0 alternates one command each)",
+        ),
+        engine=EngineArgument("--decode-share"),
+    ),
+    ServeOption(
+        "--disable-ane",
+        "requests",
+        dict(
+            action="store_true",
+            default=False,
+            help="prefill on the GPU alone (default: a dense model's long "
+            "prompts also use the Neural Engine when that is faster)",
+        ),
+        engine=EngineArgument("--ane", text=_spelled("off")),
+        needs="dense_ffn",
+    ),
+    ServeOption(
+        "--recalibrate-ane",
+        "requests",
+        dict(
+            action="store_true",
+            default=False,
+            help="calibrate the Neural Engine's share of long prompts again at "
+            "this start instead of taking the one this Mac kept",
+        ),
+        engine=EngineArgument("--ane-calibration", text=_spelled("again")),
+        needs="dense_ffn",
+    ),
+    ServeOption(
+        "--activations",
+        "requests",
+        dict(
+            choices=("auto", "bf16"),
+            default="auto",
+            help="auto rounds activations to 8 bits where the GPU multiplies "
+            "them twice as fast (M5 and later) and leaves the others bf16: "
+            "long prompts through MLX 4- and 5-bit weights (about a quarter "
+            "less time to the first token) and Q8_0 ones, rotated PQ2_0 decode "
+            "and attention over the INT8 KV cache; bf16 keeps every activation "
+            "bf16, for evaluations and bf16 parity (default: auto)",
+        ),
+        engine=EngineArgument("--activations"),
+    ),
+    ServeOption(
+        "--verify-rows",
+        "requests",
+        dict(
+            choices=("auto", "all"),
+            default="auto",
+            help="rows each decode cycle verifies: all verifies every row of "
+            "a draft's block a lane, so greedy and seeded outputs repeat "
+            "(default: auto, where each cycle takes the step of the most "
+            "expected accepted tokens per cost, by the costs the Mac measured "
+            "at a start and the cost of a long history and the acceptance "
+            "learned from earlier cycles, or, on a model whose experts "
+            "stream, the rows worth their time by its cycles' cost line, "
+            "which is faster but lets those outputs differ from run to run)",
+        ),
+        engine=EngineArgument("--verify-rows"),
+    ),
+    ServeOption(
+        "--allow-idle-sleep",
+        "requests",
+        dict(
+            action="store_true",
+            default=False,
+            help="let the Mac sleep automatically while requests run (default: it "
+            "stays awake until they finish; the display may still sleep)",
+        ),
+        engine=EngineArgument("--idle-sleep", text=_spelled("allow")),
+    ),
+)
+"""#
+
 
 
 // 75. S2b: parseServeOptions — the read-only view of the kit's shared table.
@@ -5154,7 +5735,16 @@ do {
                                                             action: "store_true", defaultText: "false"),
           "s2b parse 1.7.1: --recalibrate-ane (requests, store_true, default false)")
     check(entry171("--host")?.env == nil && entry171("--host")?.defaultText == "127.0.0.1",
-          "s2b parse 1.7.1: --host unchanged")
+          "s2b parse: 1.7.1 --host unchanged")
+    let r172 = parseServeOptions(fixtureServeOptions172)
+    check(r172.options.count == 37, "s2b parse: the real 1.7.2 table yields the 37 shared options")
+    check(r172.unrecognized.isEmpty, "s2b parse: no unrecognized blocks in the real 1.7.2 table")
+    check(r172.options.map(\.flag) == r171.options.map(\.flag),
+          "s2b parse: the 1.7.2 file order is 1.7.1's (no new flags; the diff is the two " +
+          "needs= renames and the --activations help note, which the parser does not read)")
+    check(r172.options == r171.options,
+          "s2b parse: the 1.7.2 table's parsed entries (flags, groups, env, secret, action, " +
+          "choices, defaults) are 1.7.1's")
     // A mangled block (non-string first arg): the good blocks parse, the bad
     // one is reported, not fatal.
     let mangled = """
@@ -5231,6 +5821,12 @@ do {
     let d171_171 = registryDiff(r171b, contract: contract171, version: "1.7.1")
     check(d171_171.inSync, "s2b diff: the real 1.7.1 table matches the 1.7.1 contract (inSync)")
     check(d171_171.version == "1.7.1", "s2b diff: the 1.7.1 report carries the kit version")
+    let r172d = parseServeOptions(fixtureServeOptions172)
+    let d172_172 = registryDiff(r172d, contract: contract172, version: "1.7.2")
+    check(d172_172.inSync, "s2b diff: the real 1.7.2 table matches the 1.7.2 contract (inSync)")
+    check(d172_172.version == "1.7.2", "s2b diff: the 1.7.2 report carries the kit version")
+    let d172_171 = registryDiff(r172d, contract: contract171, version: "1.7.2")
+    check(d172_171.inSync, "s2b diff: the 1.7.2 table (no new flags) matches the 1.7.1 contract (inSync)")
     let threeNew171 = ["--max-concurrent-requests", "--recalibrate-ane", "--sampling-default"]
     let d171_170 = registryDiff(r171b, contract: contract170, version: "1.7.1")
     check(!d171_170.inSync && d171_170.missingInContract == threeNew171

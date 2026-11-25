@@ -1014,6 +1014,68 @@ public let contract171 = VersionContract(
             contextTokens: 262144, maxContextTokens: 262144),
     ])
 
+// The 1.7.2 shared set: the real 1.7.2 keg's serve_options.py, diffed against
+// the 1.7.1 keg — the same 40 flags in the same order, NO new flags, and no
+// cross-check change (check_serve_arguments is unchanged). The file's deltas
+// are two needs= renames and help text only: --thinking-token-budget and
+// --thinking-end-text now need the prompt_switches_reasoning family fact (the
+// request's effort TURNING the model's reasoning on and off) instead of
+// reasoning_switch (reaching the model). Qwen's format satisfies both facts
+// and Flint's satisfies neither, so the five 1.7.1 families' unusable lists
+// are unchanged; the rename matters only for the new family, whose format
+// tells the model the effort but still opens its own reasoning. --activations'
+// help gains the Q8_0 round note (no OptionDef change: auto|bf16).
+private let sharedOptions172 = sharedOptions171
+
+/// 1.7.2: the shared table is 1.7.1's (no new launcher flags — see
+/// sharedOptions172); the family registry and config rules gain the new
+/// Inkling-2-Mini family (install/families.py: ModelFamily "Inkling-2-Mini",
+/// the incoai/Inkling-2-Mini-DFlash2 draft, the INKLING2 chat format;
+/// config.json model_type "inkling2_loop", verified against the real
+/// thinkingmachines/Inkling-2-Mini config.json on the Hub). The per-family
+/// facts are the real 1.7.2 keg's install/families.py option_report,
+/// executed: the five 1.7.1 lists unchanged, plus Inkling-2-Mini — in 1.7.2
+/// its vision tower is not served yet, it has no recurrent state, and its
+/// prompt tells the effort without switching the reasoning, so
+/// --thinking-token-budget, --thinking-end-text, --max-image-pixels and
+/// --language-only are unusable for it; its native window is 1010000, no YaRN
+/// past it. (1.7.3 later serves the tower; that kit runs on this contract
+/// with the visible FALLBACK indicator until it is authored.)
+public let contract172 = VersionContract(
+    version: "1.7.2", flavor: .launcher,
+    options: sharedOptions172 + launcherModelOptions150,
+    familyRegistry: contract171.familyRegistry
+        .merging(["Inkling-2-Mini": "incoai/Inkling-2-Mini-DFlash2"], uniquingKeysWith: { $1 }),
+    familyRules: contract171.familyRules + [
+        FamilyRule(configKey: "model_type", value: "inkling2_loop", family: "Inkling-2-Mini"),
+    ],
+    familyOptionFacts: [
+        // The real 1.7.2 keg's install/families.py option_report (executed).
+        "Qwen3.8-27B": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--expert-memory", "--sparse-kv-memory"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Qwen3.6-35B-A3B": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--sparse-kv-memory", "--disable-ane", "--recalibrate-ane"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Qwen3.5-122B-A10B": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--sparse-kv-memory", "--disable-ane", "--recalibrate-ane"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Qwen3.8-Flash-Next": FamilyOptionFacts(
+            unusable: ["--disable-ane", "--recalibrate-ane"],
+            contextTokens: 262144, maxContextTokens: 1010000),
+        "Flint": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--sparse-kv-memory", "--state-format",
+                       "--cached-states", "--reasoning-effort", "--default-reasoning-effort",
+                       "--thinking-token-budget", "--thinking-end-text", "--max-image-pixels",
+                       "--disable-ane", "--recalibrate-ane", "--language-only"],
+            contextTokens: 262144, maxContextTokens: 262144),
+        "Inkling-2-Mini": FamilyOptionFacts(
+            unusable: ["--ple-memory", "--sparse-kv-memory", "--state-format",
+                       "--cached-states", "--thinking-token-budget", "--thinking-end-text",
+                       "--max-image-pixels", "--disable-ane", "--recalibrate-ane", "--language-only"],
+            contextTokens: 1010000, maxContextTokens: 1010000),
+    ])
+
 
 /// The default registry: every authored version.
 public let launchRegistry = LaunchRegistry(contracts: [
@@ -1026,6 +1088,7 @@ public let launchRegistry = LaunchRegistry(contracts: [
     "1.6.1": contract161,
     "1.7.0": contract170,
     "1.7.1": contract171,
+    "1.7.2": contract172,
 ])
 
 /// D16: the contract for a kit's release.json version. An exact hit when the
